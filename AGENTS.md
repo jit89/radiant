@@ -90,23 +90,14 @@ pass on the DAG. No dispatch.
 
 ### Phase 4 — Implement + review
 
-Run the `run-goal` skill on one ready goal. DeepSeek implements in
-Codex; Claude reviews (reviewer prompt, not the attacker) until
-`DONE`, `BLOCKED`, or `MAX_FIX_ROUNDS`. **The two launcher prompts are
-the rulebooks — do not restate or fork them.**
-
-The Architect always re-runs the proof and checks the oracle is
-untouched. Claude's `DONE` is advice until then.
+From the target repo: `scripts/run-goal.sh <id>`. The **script** is
+the hop (assess, proof, Opus, FIX loop). Grok only runs it and, on
+a nonzero exit, reads `STOP_FILE:`. Do not restate the hop here.
 
 ### Phase 5 — Orchestrate
 
-Run the `run-goals` skill. It refreshes `GOALS.md`, then loops
-`run-goal` on the frontier (file order) until the frontier is empty,
-a goal bounces, or quota stops the walk. **`scripts/goals.py` is the
-DAG reader — do not hand-parse the YAML.**
-
-Sequential only. `conflicts_with` is recorded, not scheduled on.
-Recovery stays inside `run-goal`.
+From the target repo: `scripts/run-goals.sh`. Sequential. Keys on
+`run-goal.sh`'s exit code. `scripts/goals.py` is the DAG reader.
 
 ### Phase A — Architecture health
 
@@ -132,33 +123,25 @@ Read the `CLAUDE_REVIEW_RESULT:` line. Capture `SESSION_ID:` from round
 Foreground timeout: **10 minutes** (600000 ms) per round. The default
 agent tool timeout is too short.
 
-## Dispatching the implementer and the goal reviewer
+## Dispatching Phase 4 / 5
 
-Run from the **target repo**. Full procedure is `run-goal`.
+Run from the **target repo**:
 
 ```bash
-~/grok-coding-workflow/scripts/deepseek-code.sh /tmp/handoff-<id>.md
-~/grok-coding-workflow/scripts/deepseek-code.sh --resume "$THREAD_ID" /tmp/handoff-<id>-fix.md
-
-~/grok-coding-workflow/scripts/claude-goal-review.sh /tmp/review-<id>.md
-~/grok-coding-workflow/scripts/claude-goal-review.sh --resume "$SESSION_ID" /tmp/review-<id>.md
+~/grok-coding-workflow/scripts/run-goal.sh <id>
+~/grok-coding-workflow/scripts/run-goals.sh
 ```
 
-Implementer timeout: **20 minutes** (1200000 ms). Reviewer: **10
-minutes**. Isolated Codex home: does **not** rewrite `~/.codex/config.toml`.
-The implementer launcher writes the target gitdir into
-`sandbox_workspace_write.writable_roots` and uses `--approve-for-me`
-on first exec **and** `--resume`, so `git commit` is not blocked by
-the workspace-write `.git` carve-out.
+Do not drive `deepseek-code.sh` / `claude-goal-review.sh` from this
+session on the happy path. Isolated Codex home and the implementer
+key load stay inside those launchers. Never ask the user to paste a
+key.
 
-`DEEPSEEK_API_KEY` comes from the environment, the target `.env`, or
-`~/grok-coding-workflow/.env`. Never ask the user to paste it into chat.
+## When the orchestrator wakes (quota / bounce / dirty tree)
 
-## When the implementer fails (quota / mid-task death)
-
-`DEEPSEEK_RESULT:` is `ok` | `rate_limited` (exit 75) | `error`.
-The recovery protocol lives in `skills/run-goal/SKILL.md` §6 — assess,
-salvage, wait, RESUME handoff, no model swap. Do not restate it here.
+Nonzero exit. Last line is `STOP_FILE:`. Read that file and tell the
+user. Recovery is in `scripts/run-goal.sh` (fail closed, no model
+swap). Do not restate it here.
 
 ## Journal
 
@@ -178,8 +161,8 @@ dispatch, every arbitration (taken / rejected + why), and the sign-off.
 |-------|------|
 | `crucible` | Phases 1–2 — recon, interrogate, harden |
 | `to-goals` | Phase 3 — cut signed-off `PLAN.md` into `GOALS.md` |
-| `run-goal` | Phase 4 — one ready goal, DeepSeek then Claude review |
-| `run-goals` | Phase 5 — walk the DAG, one `run-goal` at a time |
+| `run-goal` | Phase 4 — exec `scripts/run-goal.sh`; wake on nonzero |
+| `run-goals` | Phase 5 — exec `scripts/run-goals.sh`; wake on nonzero |
 | `wayfinder` | Phase 0 — borrowed from `~/agentic-coding-workflow` / `~/.agents/skills` |
 | `prototype` | During recon — borrowed |
 | `research` | During recon or a bounce — borrowed |

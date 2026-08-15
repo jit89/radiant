@@ -77,11 +77,15 @@ Append the journal (`docs/journal/<slug>.md`):
 
 Ids, edges the user changed, where the oracles live.
 
+**Commit** `GOALS.md`, every file oracle, and `docs/journal/<slug>.md`
+before telling the user they can run. The host orchestrator refuses
+an uncommitted DAG.
+
 Present the cut. Ask: *"/run-goal for one ready goal, or `/run-goals`
 to walk the DAG."* Do not dispatch until they say so.
 
-Done when `GOALS.md` and every oracle exist, the journal is appended,
-and the user has seen the stop.
+Done when `GOALS.md` and every oracle exist, those files plus the
+journal are committed, and the user has seen the stop.
 
 ## Hard rules
 

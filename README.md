@@ -96,22 +96,21 @@ In the **target** repo:
 /run-goals         # walk the DAG (sequential)
 ```
 
-`/run-goal` will:
+`/run-goal` and `/run-goals` exec the host scripts. Grok is not in
+the implement/review hop:
 
 ```bash
-~/grok-coding-workflow/scripts/deepseek-code.sh /tmp/handoff-<id>.md
-# Architect runs the proof, then:
-~/grok-coding-workflow/scripts/claude-goal-review.sh /tmp/review-<id>.md
+~/grok-coding-workflow/scripts/run-goal.sh <id>
+~/grok-coding-workflow/scripts/run-goals.sh
 ```
 
-Timeouts: **20 min** implementer, **10 min** each Claude round.
+Timeouts live in the script (implementer 20 min, reviewer 10 min).
+A nonzero exit is a wake — read `STOP_FILE:`.
 
 ## Quota / half-finished work
 
-See `skills/run-goal/SKILL.md` §6 (canonical). Short version:
-`DEEPSEEK_RESULT: rate_limited` (exit 75) after up to 3 attempts;
-Architect assesses git, salvages or restores, waits, writes a RESUME
-handoff. Day-quota death → stop. No model swap.
+Canonical: `scripts/run-goal.sh` (prints `STOP_FILE:`). Short version:
+exit 75 / `rate_limited` → stop, no hammer, no model swap.
 
 ## Tunables
 
