@@ -32,3 +32,7 @@ Cap leftovers T1–T6 folded into PLAN.md as Architect takes. User breaks the ti
 ## 2026-08-15T08:45:00Z — ARCHITECT sign-off
 
 User treated the folded plan as signed. House git had **no commits**; baseline snapshot taken so the Grok-in-the-hop skills remain revertible after the host loop lands.
+
+## 2026-08-15T09:50:47Z — ARCHITECT fix
+
+Dogfood /run-goals woke immediately: run-goals.sh journal_line walk g1-hash, then run-goal.sh fresh-start clean-tree gate failed on docs/journal/consistent-hash.md. Same class as the refresh-must-commit rule. Walker now commit_journal after every walk line (and walk-end uses the helper).

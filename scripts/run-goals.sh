@@ -41,6 +41,21 @@ commit_goals() {
   }
 }
 
+# Journal appends are Orchestrator records. Commit them before run-goal.sh:
+# its fresh-start gate treats an uncommitted journal as unexpected dirt.
+commit_journal() {
+  local msg="${1:-chore: orchestrator journal}"
+  [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 0
+  git add -- "$JOURNAL"
+  if git diff --cached --quiet; then
+    return 0
+  fi
+  git commit -m "$msg" || {
+    echo "failed to commit journal" >&2
+    exit 1
+  }
+}
+
 echo "=== graph ==="
 "$GOALS_PY" GOALS.md graph
 
@@ -52,14 +67,12 @@ while :; do
     echo "=== walk-end ==="
     "$GOALS_PY" GOALS.md graph
     journal_line "## $(utc) — ORCHESTRATOR walk-end"
-    if [[ -n "$JOURNAL" && -f "$JOURNAL" ]]; then
-      git add -- "$JOURNAL"
-      git diff --cached --quiet || git commit -m "chore: orchestrator walk-end"
-    fi
+    commit_journal "chore: orchestrator walk-end"
     exit 0
   fi
 
   journal_line "## $(utc) — ORCHESTRATOR walk ${id}"
+  commit_journal "chore: orchestrator walk ${id}"
   echo "=== walk ${id} ==="
   out="$(mktemp "${TMPDIR:-/tmp}/run-goals-XXXXXX.out")"
   set +e

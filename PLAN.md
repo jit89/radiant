@@ -55,7 +55,7 @@ Take Grok out of the implement → review hop. After `/run-goal` or `/run-goals`
 
 ### Walk (`run-goals.sh`)
 
-17. `validate` + `refresh` + **narrow Orchestrator commit of `GOALS.md` immediately after every `refresh` that dirties it** (status flips `blocked → ready`; in-place `status:` edit, no fence re-render). Then `graph` + `frontier`. Loop: refresh+commit, first frontier id, `run-goal.sh`. Nonzero exit → stop. Empty frontier → `walk-end`, exit 0.
+17. `validate` + `refresh` + **narrow Orchestrator commit of `GOALS.md` immediately after every `refresh` that dirties it** (status flips `blocked → ready`; in-place `status:` edit, no fence re-render). Then `graph` + `frontier`. Loop: refresh+commit, first frontier id, journal a walk line **and commit the journal**, then `run-goal.sh`. (The child's fresh-start gate fails closed on an uncommitted journal — same class of bug as an uncommitted refresh.) Nonzero exit → stop. Empty frontier → `walk-end` + journal commit, exit 0.
 18. Thin skills. `/to-goals` ends with "commit GOALS.md, file oracles, **and** `docs/journal/<slug>.md` before `/run-goal`." Existing DAGs without a top-level `journal:` key must have it added by hand before the first walk.
 
 ## Key decisions & tradeoffs
@@ -63,6 +63,7 @@ Take Grok out of the implement → review hop. After `/run-goal` or `/run-goals`
 - **Host loop, not DeepSeek↔Opus.** [docs/adr/0001-host-loop.md](docs/adr/0001-host-loop.md).
 - **Host assess before Opus.** Clean-tree gate on **fresh** starts only; resume may be dirty (quota death leaves an in-flight cycle). (Round 3.)
 - **`refresh` commits `GOALS.md` before the next gate.** Otherwise goal 2 always dies on the clean/unmodified check. (Round 3.)
+- **Walker commits the journal walk line before `run-goal.sh`.** Otherwise every fresh `/run-goals` dies on the child's clean-tree gate. (Dogfood, 2026-08-15.)
 - **Review diff excludes `GOALS.md` and the journal.** Those are Orchestrator records, not the implementer change. FIX text is not journaled — only a count + hash. (Round 3; keeps the "never talk in the clear" invariant.)
 - **`status:` carve-out is per current `id` only.** (Round 3.)
 - **Journaled `BASE_SHA` must be an ancestor of HEAD.** (Round 3.)
