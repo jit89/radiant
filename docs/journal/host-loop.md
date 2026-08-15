@@ -44,3 +44,7 @@ Dogfood g1-hash: DeepSeek ok, host proof 6/6, Opus wrote last line `VERDICT: DON
 ## 2026-08-15T11:02:13Z — ARCHITECT
 
 Walker visibility: goals.py progress ([==>.] 2/4 + per-id status, ANSI unless GOALS_COLOR=0) printed after every refresh. goals.py todos JSON for /run-goals to seed/refresh todo_write. TUI badge stays stale mid-walk; stdout bar is the live view. run-goals.sh defaults GOALS_COLOR=1 because the TUI exports NO_COLOR=1.
+
+## 2026-08-15T11:04:50Z — ARCHITECT
+
+Added scripts/mock-walk.sh + fixtures/GOALS.mock.md. Fake 4-goal walk (no DeepSeek/Opus). install.sh --check runs --quick. Live demo: [-...] 0/4 → [====] 4/4.

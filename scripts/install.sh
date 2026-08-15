@@ -66,6 +66,13 @@ do_check() {
   else
     echo "goals.py: FAIL"; rc=1
   fi
+  if GOALS_COLOR=0 "$ROOT/scripts/mock-walk.sh" --quick >/tmp/grok-mock-walk-check.out \
+    && grep -q '\[====\] 4/4' /tmp/grok-mock-walk-check.out \
+    && grep -q 'walk-end' /tmp/grok-mock-walk-check.out; then
+    echo "mock-walk: OK"
+  else
+    echo "mock-walk: FAIL"; rc=1
+  fi
   local missing=()
   local s
   for s in "${BORROWED[@]}"; do
