@@ -48,3 +48,7 @@ Walker visibility: goals.py progress ([==>.] 2/4 + per-id status, ANSI unless GO
 ## 2026-08-15T11:04:50Z — ARCHITECT
 
 Added scripts/mock-walk.sh + fixtures/GOALS.mock.md. Fake 4-goal walk (no DeepSeek/Opus). install.sh --check runs --quick. Live demo: [-...] 0/4 → [====] 4/4.
+
+## 2026-08-15T12:30:00Z — ARCHITECT
+
+Host event index: JSONL in `~/.cache/grok-coding-workflow/logs/` (not git). `walk_id` reused until walk-end so a bounce restart is the same job; remint if the journal no longer mentions the id. Journal commit stays fail-closed; JSONL append is best-effort. One `ORCHESTRATOR wake <id> r<n> reason=` line (no findings, no stop dump). Query via `scripts/logs.sh` verbs — no generated SQL.

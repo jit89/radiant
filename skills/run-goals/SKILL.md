@@ -32,6 +32,6 @@ The walker reprints `goals.py progress` (`[==> ] 2/4` plus per-id status) after 
 Re-run `goals.py todos` and `todo_write` merge so the badge matches HEAD.
 
 - **0** — frontier empty. Report the graph (and the last progress block). Stop.
-- **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. Do not start the next goal yourself. Do not swap implementer.
+- **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. `scripts/logs.sh errors --last 20` (or `since walk`) for the machine index; do not invent SQL. Do not start the next goal yourself. Do not swap implementer.
 
 `scripts/run-goals.sh` calls `scripts/run-goal.sh` as a subprocess and keys on exit code only.

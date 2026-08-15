@@ -131,7 +131,7 @@ run_claude() {
   rc=$?
   set -e
 
-  if is_transport_rate_limit "$rc" "${raw}.err"; then
+  if is_transport_rate_limit "$rc" "${raw}.err" "$raw"; then
     echo "CLAUDE_REVIEW_RESULT: rate_limited (exit ${rc})"
     echo "SESSION_ID: ${SESSION_ID}"
     echo "VERDICT: MISSING"

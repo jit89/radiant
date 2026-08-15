@@ -28,6 +28,7 @@ prompt, not the plan-attacker prompt.
 - `skills/run-goal/` — one ready goal: DeepSeek then Claude review.
 - `skills/run-goals/` — walk the DAG, one `run-goal` at a time.
 - `scripts/goals.py` — read/update the `GOALS.md` YAML fence.
+- `scripts/logs.sh` / `scripts/events.py` — machine event index (JSONL in cache).
 - `scripts/claude-review.sh` — plan attacker. Resume with `--resume`.
 - `scripts/claude-goal-review.sh` — code reviewer. Different prompt.
 - `scripts/deepseek-code.sh` — implementer. Isolated `CODEX_HOME`.

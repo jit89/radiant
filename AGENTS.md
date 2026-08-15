@@ -155,6 +155,13 @@ committed to the target repo.
 Newest at the bottom. Never rewrite history. The Architect logs every
 dispatch, every arbitration (taken / rejected + why), and the sign-off.
 
+The host also writes one `ORCHESTRATOR wake <id> r<n> reason=<reason>`
+line (no stop-file dump, no Opus findings) and a JSONL index in
+`~/.cache/grok-coding-workflow/logs/`. After a wake, query with
+`scripts/logs.sh errors` / `warnings` / `last` / `goal <id>` /
+`since 5m|walk`. Do not invent SQL. The markdown journal is still
+source of truth for resume and for DeepSeek.
+
 ## Skill quick-reference
 
 | Skill | When |

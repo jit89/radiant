@@ -20,7 +20,7 @@ Foreground timeout: **at least 40 minutes** per call (implementer 20 + reviewer 
 ## After the script exits
 
 - **0** — that goal is `done`. Tell the user. Stop (or the user asked `/run-goals` — that is the other skill).
-- **nonzero** — a **wake**. Read the path on the last `STOP_FILE:` line. Tell the user the `reason` and the unstick commands. Do not invent a retry loop. Do not paste keys. Do not swap implementer.
+- **nonzero** — a **wake**. Read the path on the last `STOP_FILE:` line. Tell the user the `reason` and the unstick commands. `scripts/logs.sh errors --last 20` for the machine index; do not invent SQL. Do not invent a retry loop. Do not paste keys. Do not swap implementer.
 
 The script already ran the proof, checked the oracle, and routed Opus. Do not re-implement those steps in chat.
 

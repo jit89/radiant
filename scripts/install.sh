@@ -38,6 +38,8 @@ do_install() {
     "$ROOT/scripts/run-goal.sh" \
     "$ROOT/scripts/run-goals.sh" \
     "$ROOT/scripts/goals.py" \
+    "$ROOT/scripts/events.py" \
+    "$ROOT/scripts/logs.sh" \
     "$ROOT/scripts/install.sh" \
     "$ROOT/scripts/lib/claude-result.py"
   echo "launchers: claude-review.sh claude-goal-review.sh deepseek-code.sh goals.py"
@@ -73,6 +75,90 @@ do_check() {
   else
     echo "mock-walk: FAIL"; rc=1
   fi
+  rltmp="$(mktemp -t grok-rl-XXXXXX.json)"
+  printf '%s\n' '{"is_error":true,"api_error_status":429,"result":"You hit your session limit","terminal_reason":"api_error"}' >"$rltmp"
+  # shellcheck disable=SC1091
+  source "$ROOT/scripts/lib/dotenv.sh"
+  if is_transport_rate_limit 1 /dev/null "$rltmp"; then
+    echo "rate-limit envelope: OK"
+  else
+    echo "rate-limit envelope: FAIL"; rc=1
+  fi
+  rm -f "$rltmp"
+  if python3 "$ROOT/scripts/events.py" --self-test; then
+    echo "events.py: OK"
+  else
+    echo "events.py: FAIL"; rc=1
+  fi
+  # events_append must not clobber EVENTS_MINTED (walk-start commit skipped).
+  mintedtmp="$(mktemp -d "${TMPDIR:-/tmp}/grok-minted-check-XXXXXX")"
+  if (
+    export EVENTS_CACHE="$mintedtmp/cache" HERE="$ROOT/scripts"
+    # shellcheck disable=SC1091
+    source "$ROOT/scripts/lib/events.sh"
+    JOURNAL="$mintedtmp/j.md"
+    printf '# Journal: t\n' >"$JOURNAL"
+    utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+    journal_line() { printf '\n%s\n' "$1" >>"$JOURNAL"; }
+    events_ensure_walk
+    [[ "$EVENTS_MINTED" -eq 1 && -n "$WALK_ID" ]]
+    events_append --event walk --severity info --summary "probe"
+    [[ "$EVENTS_MINTED" -eq 1 ]]
+  ); then
+    echo "events minted-flag: OK"
+  else
+    echo "events minted-flag: FAIL"; rc=1
+  fi
+  rm -rf "$mintedtmp"
+  evtmp="$(mktemp -d "${TMPDIR:-/tmp}/grok-logs-check-XXXXXX")"
+  if (
+    export EVENTS_CACHE="$evtmp/cache"
+    cd "$evtmp"
+    mkdir -p docs/journal
+    cp "$ROOT/GOALS.example.md" GOALS.md
+    printf '# Journal: example\n' > docs/journal/example.md
+    info="$(python3 "$ROOT/scripts/events.py" ensure-walk docs/journal/example.md)"
+    wid="${info##*$'\t'}"
+    printf '\n## 2026-08-15T00:00:00Z — ORCHESTRATOR walk-start walk_id=%s\n' "$wid" \
+      >> docs/journal/example.md
+    python3 "$ROOT/scripts/events.py" append docs/journal/example.md \
+      --event wake --severity error --summary "wake g1-store r0 reason=gate" \
+      --goal g1-store --round 0 --reason gate
+    "$ROOT/scripts/logs.sh" errors | grep -q 'wake g1-store'
+  ); then
+    echo "logs.sh: OK"
+  else
+    echo "logs.sh: FAIL"; rc=1
+  fi
+  rm -rf "$evtmp"
+  waketmp="$(mktemp -d "${TMPDIR:-/tmp}/grok-wake-check-XXXXXX")"
+  if (
+    export EVENTS_CACHE="$waketmp/cache"
+    export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
+    export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
+    cd "$waketmp"
+    git init -q
+    mkdir -p docs/journal
+    cp "$ROOT/GOALS.example.md" GOALS.md
+    printf '# Journal: example\n' > docs/journal/example.md
+    git add -- GOALS.md docs/journal/example.md
+    git -c user.email=mock@localhost -c user.name=mock \
+      commit -q -m "chore: wake-check DAG"
+    echo dirt > dirt.txt
+    set +e
+    "$ROOT/scripts/run-goal.sh" g1-store >/tmp/grok-wake-check.out 2>/tmp/grok-wake-check.err
+    wrc=$?
+    set -e
+    [[ "$wrc" -ne 0 ]]
+    grep -q 'ORCHESTRATOR wake g1-store r0 reason=gate' docs/journal/example.md
+    grep -q 'ORCHESTRATOR walk-start walk_id=' docs/journal/example.md
+    "$ROOT/scripts/logs.sh" errors | grep -q 'reason=gate'
+  ); then
+    echo "run-goal wake: OK"
+  else
+    echo "run-goal wake: FAIL"; rc=1
+  fi
+  rm -rf "$waketmp"
   local missing=()
   local s
   for s in "${BORROWED[@]}"; do

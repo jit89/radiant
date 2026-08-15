@@ -16,6 +16,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 HOUSE="$(cd "$HERE/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/dotenv.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/events.sh"
 
 GOALS_PY="$HERE/goals.py"
 DEEPSEEK="$HERE/deepseek-code.sh"
@@ -69,6 +71,7 @@ on_exit() {
   trap - EXIT INT TERM
   if [[ "$ec" -ne 0 && "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
     write_stop "trap" "exit $ec" || true
+    record_wake "trap" || true
     STOP_WRITTEN=1
   fi
   if [[ -n "$STOP_FILE" && -f "$STOP_FILE" ]]; then
@@ -115,8 +118,33 @@ EOF
   STOP_WRITTEN=1
 }
 
+# One journal line + JSONL row. Commit the journal (no recurse into wake).
+record_wake() {
+  local reason="$1"
+  local sev=error
+  case "$reason" in
+    rate_limited|reviewer-rate-limited) sev=warning ;;
+  esac
+  if [[ -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] && tracked_in_head "$JOURNAL"; then
+    journal_line "## $(utc) — ORCHESTRATOR wake ${GOAL_ID:-?} r${ROUND} reason=${reason}"
+  fi
+  events_append --event wake --severity "$sev" \
+    --goal "${GOAL_ID:-}" --round "${ROUND}" --reason "$reason" \
+    --verdict "${LAST_VERDICT:-}" --base-sha "${BASE_SHA:-}" \
+    --summary "wake ${GOAL_ID:-?} r${ROUND} reason=${reason}"
+  if [[ -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] && tracked_in_head "$JOURNAL"; then
+    git add -- "$JOURNAL" || true
+    if ! git diff --cached --quiet -- "$JOURNAL" 2>/dev/null; then
+      git commit -m "chore(${GOAL_ID:-?}): orchestrator wake ${reason}" -- "$JOURNAL" || \
+        echo "failed to commit wake journal line" >&2
+    fi
+  fi
+  return 0
+}
+
 wake() {
   write_stop "$1" "${2:-}"
+  record_wake "$1"
   exit 1
 }
 
@@ -266,6 +294,17 @@ if ! tracked_in_head GOALS.md || ! tracked_in_head "$JOURNAL"; then
   die_gate "commit GOALS.md, oracles, and the journal first"
 fi
 
+# Cache walk_id until walk-end. Mint → one journal line, fail-closed commit.
+# Before the dirty-tree gate so a later wake still has a walk_id.
+events_ensure_walk
+events_journal_walk_start
+if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
+  git add -- "$JOURNAL"
+  if ! git diff --cached --quiet -- "$JOURNAL"; then
+    git commit -m "chore: orchestrator walk-start" -- "$JOURNAL" || wake "commit-failed" "walk-start"
+  fi
+fi
+
 # refresh blocked→ready if this id's blockers are done
 STATUS="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
 if [[ "$STATUS" == "blocked" ]]; then
@@ -372,6 +411,10 @@ while :; do
   fi
 
   journal_line "## $(utc) — ORCHESTRATOR dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA} THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
+  events_append --event dispatch --severity info --goal "$GOAL_ID" --round "$ROUND" \
+    --base-sha "$BASE_SHA" \
+    --summary "dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA}" \
+    --payload "$(printf '{"thread_id":"%s","session_id":"%s"}' "${THREAD_ID:--}" "${SESSION_ID:--}")"
 
   DS_OUT="$RUN_DIR/deepseek-r${ROUND}.out"
   set +e
@@ -517,6 +560,14 @@ EOF
   LAST_VERDICT="$(kv "$RV_OUT" VERDICT)"
 
   journal_line "## $(utc) — ORCHESTRATOR review ${GOAL_ID} r${ROUND} VERDICT=${LAST_VERDICT}"
+  review_sev=info
+  case "$LAST_VERDICT" in
+    FIX) review_sev=warning ;;
+    BLOCKED|MISSING) review_sev=error ;;
+  esac
+  events_append --event review --severity "$review_sev" --goal "$GOAL_ID" --round "$ROUND" \
+    --verdict "$LAST_VERDICT" --base-sha "$BASE_SHA" \
+    --summary "review ${GOAL_ID} r${ROUND} VERDICT=${LAST_VERDICT}"
 
   case "$LAST_VERDICT" in
     DONE)
@@ -525,6 +576,9 @@ EOF
       fi
       "$GOALS_PY" GOALS.md set "$GOAL_ID" done
       journal_line "## $(utc) — ORCHESTRATOR done ${GOAL_ID} r${ROUND}"
+      events_append --event done --severity info --goal "$GOAL_ID" --round "$ROUND" \
+        --verdict DONE --base-sha "$BASE_SHA" \
+        --summary "done ${GOAL_ID} r${ROUND}"
       orch_commit "chore(${GOAL_ID}): orchestrator done"
       echo "GOAL $GOAL_ID DONE"
       succeed
@@ -542,6 +596,10 @@ EOF
       fi
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
       journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}"
+      events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
+        --verdict FIX --base-sha "$BASE_SHA" \
+        --summary "fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}" \
+        --payload "$(printf '{"fix_count":%s,"fix_hash":"%s"}' "$FIX_COUNT_N" "$FIX_HASH")"
       FIXH="$RUN_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
       {
         echo "# Fix handoff: $GOAL_ID (round $ROUND)"
@@ -563,6 +621,9 @@ EOF
     BLOCKED)
       "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
       journal_line "## $(utc) — ORCHESTRATOR bounced ${GOAL_ID} r${ROUND}"
+      events_append --event bounced --severity error --goal "$GOAL_ID" --round "$ROUND" \
+        --verdict BLOCKED --base-sha "$BASE_SHA" \
+        --summary "bounced ${GOAL_ID} r${ROUND}"
       orch_commit "chore(${GOAL_ID}): orchestrator bounced"
       wake "blocked" "reviewer BLOCKED. $VERDICT_FILE"
       ;;

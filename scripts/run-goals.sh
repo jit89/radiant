@@ -11,6 +11,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GOALS_PY="$HERE/goals.py"
 RUN_GOAL="$HERE/run-goal.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/events.sh"
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "not a git repo" >&2
@@ -59,6 +61,12 @@ commit_journal() {
 # TUI sessions export NO_COLOR=1; default the walk bar to ANSI anyway.
 export GOALS_COLOR="${GOALS_COLOR:-1}"
 
+events_ensure_walk
+events_journal_walk_start
+if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
+  commit_journal "chore: orchestrator walk-start"
+fi
+
 print_status() {
   echo "=== graph ==="
   "$GOALS_PY" GOALS.md graph
@@ -74,11 +82,14 @@ while :; do
   if [[ -z "$id" || "$id" == "(empty)" ]]; then
     echo "=== walk-end ==="
     journal_line "## $(utc) — ORCHESTRATOR walk-end"
+    events_append --event walk_end --severity info --summary "walk-end"
     commit_journal "chore: orchestrator walk-end"
+    events_end_walk
     exit 0
   fi
 
   journal_line "## $(utc) — ORCHESTRATOR walk ${id}"
+  events_append --event walk --severity info --goal "$id" --summary "walk ${id}"
   commit_journal "chore: orchestrator walk ${id}"
   echo "=== walk ${id} ==="
   out="$(mktemp "${TMPDIR:-/tmp}/run-goals-XXXXXX.out")"
