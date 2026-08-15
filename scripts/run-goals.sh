@@ -58,9 +58,6 @@ commit_journal() {
   }
 }
 
-# TUI sessions export NO_COLOR=1; default the walk bar to ANSI anyway.
-export GOALS_COLOR="${GOALS_COLOR:-1}"
-
 events_ensure_walk
 events_journal_walk_start
 if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
@@ -70,8 +67,6 @@ fi
 print_status() {
   echo "=== graph ==="
   "$GOALS_PY" GOALS.md graph
-  echo "=== progress ==="
-  "$GOALS_PY" GOALS.md progress
 }
 
 while :; do

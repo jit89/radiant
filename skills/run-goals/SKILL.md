@@ -25,13 +25,13 @@ The slash command **is** the confirm. Do not ask "start the walk?".
 
 Foreground timeout: long enough for every remaining goal (N × ~40 minutes, more if fix rounds).
 
-The walker reprints `goals.py progress` (`[==> ] 2/4` plus per-id status) after every refresh. That stream is the live view. Do not re-enter between goals to repaint todos.
+Do not re-enter between goals to repaint todos. The badge stays stale until the walk exits.
 
 ## After the script exits
 
 Re-run `goals.py todos` and `todo_write` merge so the badge matches HEAD.
 
-- **0** — frontier empty. Report the graph (and the last progress block). Stop.
+- **0** — frontier empty. Report the graph. Stop.
 - **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. `scripts/logs.sh errors --last 20` (or `since walk`) for the machine index; do not invent SQL. Do not start the next goal yourself. Do not swap implementer.
 
 `scripts/run-goals.sh` calls `scripts/run-goal.sh` as a subprocess and keys on exit code only.

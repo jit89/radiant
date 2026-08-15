@@ -52,3 +52,7 @@ Added scripts/mock-walk.sh + fixtures/GOALS.mock.md. Fake 4-goal walk (no DeepSe
 ## 2026-08-15T12:30:00Z — ARCHITECT
 
 Host event index: JSONL in `~/.cache/grok-coding-workflow/logs/` (not git). `walk_id` reused until walk-end so a bounce restart is the same job; remint if the journal no longer mentions the id. Journal commit stays fail-closed; JSONL append is best-effort. One `ORCHESTRATOR wake <id> r<n> reason=` line (no findings, no stop dump). Query via `scripts/logs.sh` verbs — no generated SQL.
+
+## 2026-08-15T13:10:00Z — ARCHITECT
+
+Dropped `goals.py progress` / the `[==> ]` walk bar. Dogfood `/run-goals` ran as a background TUI task — stdout is a log file, not chrome. Even foreground, the bar only reprints between goals. Non-essential. `goals.py todos` stays (one-shot badge, still stale mid-walk).

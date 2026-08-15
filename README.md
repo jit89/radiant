@@ -108,9 +108,8 @@ the implement/review hop:
 Timeouts live in the script (implementer 20 min, reviewer 10 min).
 A nonzero exit is a wake — read `STOP_FILE:`.
 
-`run-goals.sh` reprints `goals.py progress` after every refresh
-(`[==> ] 2/4` plus per-id status; `GOALS_COLOR=0` for plain). `/run-goals`
-seeds the TUI todo badge from `goals.py todos` and refreshes it on exit.
+`/run-goals` seeds the TUI todo badge from `goals.py todos` and
+refreshes it on exit. The badge stays stale mid-walk.
 
 ## Quota / half-finished work
 

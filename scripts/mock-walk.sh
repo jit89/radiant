@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # mock-walk.sh — fake a 4-goal run-goals walk. No DeepSeek, no Opus.
-# Exercises refresh → progress bar → status flips. Usage:
+# Exercises refresh → status flips. Usage:
 #   mock-walk.sh            # temp repo, 1s per goal
 #   mock-walk.sh --quick    # no sleep (install.sh --check)
 #   mock-walk.sh --dir DIR  # reuse / print this repo
@@ -53,15 +53,12 @@ git -c user.email=mock@localhost -c user.name=mock \
   git -c user.email=mock@localhost -c user.name=mock \
     commit -q -m "chore: mock DAG"
 
-export GOALS_COLOR="${GOALS_COLOR:-1}"
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
 export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
 
 print_status() {
   echo "=== graph ==="
   "$GOALS_PY" GOALS.md graph
-  echo "=== progress ==="
-  "$GOALS_PY" GOALS.md progress
 }
 
 echo "MOCK_DIR: $DIR"

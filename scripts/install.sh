@@ -61,15 +61,13 @@ do_check() {
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \
-      | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d)==3' \
-    && GOALS_COLOR=0 "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" progress \
-      | grep -q '\[- -\] 0/3'; then
+      | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d)==3'; then
     echo "goals.py: OK"
   else
     echo "goals.py: FAIL"; rc=1
   fi
-  if GOALS_COLOR=0 "$ROOT/scripts/mock-walk.sh" --quick >/tmp/grok-mock-walk-check.out \
-    && grep -q '\[====\] 4/4' /tmp/grok-mock-walk-check.out \
+  if "$ROOT/scripts/mock-walk.sh" --quick >/tmp/grok-mock-walk-check.out \
+    && grep -q 'GOAL g4-delta DONE' /tmp/grok-mock-walk-check.out \
     && grep -q 'walk-end' /tmp/grok-mock-walk-check.out; then
     echo "mock-walk: OK"
   else
