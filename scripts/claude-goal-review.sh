@@ -77,12 +77,13 @@ load_key_from_files ANTHROPIC_API_KEY .env "$HOUSE/.env" || true
 new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 
 verdict_of() {
+  # Last non-empty line only. A quoted VERDICT: DONE in the body must not win.
   local last
-  last="$(grep -oE 'VERDICT:[[:space:]]*(DONE|FIX|BLOCKED)' "$1" | tail -n1 || true)"
+  last="$(grep -Ev '^[[:space:]]*$' "$1" | tail -n1 || true)"
   case "$last" in
-    *DONE*) echo DONE ;;
-    *FIX*) echo FIX ;;
-    *BLOCKED*) echo BLOCKED ;;
+    VERDICT:[[:space:]]*DONE|VERDICT:DONE) echo DONE ;;
+    VERDICT:[[:space:]]*FIX|VERDICT:FIX) echo FIX ;;
+    VERDICT:[[:space:]]*BLOCKED|VERDICT:BLOCKED) echo BLOCKED ;;
     *) echo MISSING ;;
   esac
 }

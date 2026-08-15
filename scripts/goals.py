@@ -12,6 +12,9 @@ Usage (from the target repo):
   goals.py [GOALS.md] refresh
   goals.py [GOALS.md] set <id> <status>
   goals.py [GOALS.md] show <id>
+  goals.py [GOALS.md] body <id>
+  goals.py [GOALS.md] meta
+  goals.py [GOALS.md] status-only-id <id> <other.md>
 """
 
 from __future__ import annotations
@@ -137,8 +140,85 @@ def by_id(data: dict) -> dict[str, dict]:
     return {g["id"]: g for g in data["goals"]}
 
 
+def goal_body(text: str, gid: str) -> str:
+    """Return the ## <id> markdown section (verbatim, including heading)."""
+    pat = re.compile(rf"^## {re.escape(gid)}\b.*$", re.M)
+    m = pat.search(text)
+    if not m:
+        raise SystemExit(f"no markdown section for {gid}")
+    nxt = re.compile(r"^## g\d+-", re.M)
+    m2 = nxt.search(text, m.end())
+    end = m2.start() if m2 else len(text)
+    return text[m.start() : end].rstrip() + "\n"
+
+
+def rewrite_goal_status(blob: str, gid: str, new_status: str) -> str:
+    """Replace the status: line for gid. Does not re-render the fence."""
+    lines = blob.splitlines(keepends=True)
+    starts = [i for i, line in enumerate(lines) if line.startswith("  - ")]
+    if not starts:
+        raise SystemExit("no goals in fence")
+    bounds = starts + [len(lines)]
+    first_key = re.compile(r"^  - (status):\s*(.*)$")
+    nested = re.compile(r"^    (status):\s*(.*)$")
+    for a, b in zip(bounds, bounds[1:]):
+        block = "".join(lines[a:b])
+        parsed = parse_yaml_subset("goals:\n" + block)
+        if not parsed["goals"] or parsed["goals"][0].get("id") != gid:
+            continue
+        found = False
+        new_block: list[str] = []
+        for line in lines[a:b]:
+            nl = "\n" if line.endswith("\n") else ""
+            raw = line.rstrip("\n")
+            if first_key.match(raw):
+                new_block.append(f"  - status: {new_status}{nl}")
+                found = True
+            elif nested.match(raw):
+                new_block.append(f"    status: {new_status}{nl}")
+                found = True
+            else:
+                new_block.append(line)
+        if not found:
+            raise SystemExit(f"{gid}: no status: line to rewrite")
+        return "".join(lines[:a] + new_block + lines[b:])
+    raise SystemExit(f"unknown goal {gid}")
+
+
+def assert_status(path: Path, gid: str, expected: str) -> None:
+    _, data, _, _ = load(path)
+    got = by_id(data).get(gid, {}).get("status")
+    if got != expected:
+        raise SystemExit(f"{gid}: status write failed (wanted {expected!r}, got {got!r})")
+
+
+def fences_status_only(a: dict, b: dict, gid: str) -> list[str]:
+    """Empty if fences match except possibly gid's status."""
+    errs: list[str] = []
+    keys = (set(a) | set(b)) - {"goals"}
+    for k in sorted(keys):
+        if a.get(k) != b.get(k):
+            errs.append(f"top-level {k} differs")
+    ga, gb = by_id(a), by_id(b)
+    if set(ga) != set(gb):
+        errs.append("goal id set differs")
+        return errs
+    for i in ga:
+        da, db = dict(ga[i]), dict(gb[i])
+        if i == gid:
+            da.pop("status", None)
+            db.pop("status", None)
+        if da != db:
+            errs.append(f"{i}: fence fields differ beyond allowed status")
+    return errs
+
+
 def validate(data: dict) -> list[str]:
     errors: list[str] = []
+    if not data.get("plan"):
+        errors.append("missing top-level plan:")
+    if not data.get("journal"):
+        errors.append("missing top-level journal:")
     if not data.get("goals"):
         errors.append("zero goals — empty fence is not a valid DAG")
     ids = [g.get("id") for g in data["goals"]]
@@ -256,8 +336,16 @@ def cmd_frontier(path, data, **_):
 
 
 def cmd_refresh(path, data, text, start, end, **_):
+    before = {g["id"]: g.get("status") for g in data["goals"]}
     notes = refresh(data)
-    write_fence(path, text, start, end, data)
+    blob = text[start:end]
+    for g in data["goals"]:
+        if g.get("status") != before.get(g["id"]):
+            blob = rewrite_goal_status(blob, g["id"], g["status"])
+    path.write_text(text[:start] + blob + text[end:])
+    for g in data["goals"]:
+        if g.get("status") != before.get(g["id"]):
+            assert_status(path, g["id"], g["status"])
     if notes:
         for n in notes:
             print(n)
@@ -276,8 +364,9 @@ def cmd_set(path, data, text, start, end, extra, **_):
     if not g:
         raise SystemExit(f"unknown goal {gid}")
     old = g.get("status")
-    g["status"] = status
-    write_fence(path, text, start, end, data)
+    blob = rewrite_goal_status(text[start:end], gid, status)
+    path.write_text(text[:start] + blob + text[end:])
+    assert_status(path, gid, status)
     print(f"{gid}: {old} → {status}")
     return 0
 
@@ -292,12 +381,63 @@ def cmd_show(path, data, extra, **_):
     return 0
 
 
+def cmd_body(path, text, extra, **_):
+    if len(extra) != 1:
+        raise SystemExit("body <id>")
+    sys.stdout.write(goal_body(text, extra[0]))
+    return 0
+
+
+def cmd_meta(data, **_):
+    print(
+        json.dumps(
+            {
+                "plan": data.get("plan"),
+                "log": data.get("log"),
+                "journal": data.get("journal"),
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def cmd_status_only_id(path, data, extra, **_):
+    if len(extra) != 2:
+        raise SystemExit("status-only-id <id> <other.md>")
+    gid, other = extra
+    if gid not in by_id(data):
+        raise SystemExit(f"unknown goal {gid}")
+    op = Path(other)
+    if not op.is_file():
+        raise SystemExit(f"not found: {op}")
+    _, other_data, _, _ = load(op)
+    errs = fences_status_only(data, other_data, gid)
+    if errs:
+        print("DRIFT")
+        for e in errs:
+            print(e)
+        return 1
+    print("OK")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="goals.py")
     p.add_argument("path", nargs="?", default="GOALS.md")
     p.add_argument(
         "cmd",
-        choices=("validate", "graph", "frontier", "refresh", "set", "show"),
+        choices=(
+            "validate",
+            "graph",
+            "frontier",
+            "refresh",
+            "set",
+            "show",
+            "body",
+            "meta",
+            "status-only-id",
+        ),
     )
     p.add_argument("extra", nargs="*")
     args = p.parse_args(argv)
@@ -312,6 +452,9 @@ def main(argv: list[str]) -> int:
         "refresh": cmd_refresh,
         "set": cmd_set,
         "show": cmd_show,
+        "body": cmd_body,
+        "meta": cmd_meta,
+        "status-only-id": cmd_status_only_id,
     }[args.cmd]
     return fn(path=path, data=data, text=text, start=start, end=end, extra=args.extra)
 

@@ -35,6 +35,7 @@ do_install() {
     "$ROOT/scripts/claude-review.sh" \
     "$ROOT/scripts/claude-goal-review.sh" \
     "$ROOT/scripts/deepseek-code.sh" \
+    "$ROOT/scripts/run-goal.sh" \
     "$ROOT/scripts/goals.py" \
     "$ROOT/scripts/install.sh" \
     "$ROOT/scripts/lib/claude-result.py"
