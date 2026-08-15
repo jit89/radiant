@@ -15,15 +15,46 @@ Usage (from the target repo):
   goals.py [GOALS.md] body <id>
   goals.py [GOALS.md] meta
   goals.py [GOALS.md] status-only-id <id> <other.md>
+  goals.py [GOALS.md] todos
+  goals.py [GOALS.md] progress
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
+
+# todo_write statuses. House statuses map onto these.
+TODO_OF = {
+    "done": "completed",
+    "bounced": "cancelled",
+    "in_progress": "in_progress",
+    "ready": "pending",
+    "blocked": "pending",
+}
+
+# One cell per goal, file order. Fill is done/total; the glyphs carry status.
+BAR_GLYPH = {
+    "done": "=",
+    "in_progress": ">",
+    "ready": "-",
+    "blocked": ".",
+    "bounced": "x",
+}
+
+ANSI = {
+    "reset": "\033[0m",
+    "done": "\033[32m",
+    "in_progress": "\033[33m",
+    "ready": "\033[37m",
+    "blocked": "\033[2m",
+    "bounced": "\033[31m",
+    "bar": "\033[1m",
+}
 
 STATUSES = ("ready", "blocked", "in_progress", "done", "bounced")
 ID_RE = re.compile(r"^g\d+-[a-z0-9-]+$")
@@ -325,6 +356,71 @@ def cmd_graph(path, data, **_):
     return 0
 
 
+def want_color() -> bool:
+    # GOALS_COLOR wins: the Grok TUI session exports NO_COLOR=1, which
+    # would otherwise strip the walker's bar. 0 = plain, 1 = ANSI.
+    flag = os.environ.get("GOALS_COLOR")
+    if flag == "0":
+        return False
+    if flag == "1":
+        return True
+    if os.environ.get("NO_COLOR"):
+        return False
+    return True
+
+
+def progress_lines(data: dict, color: bool | None = None) -> list[str]:
+    """`[==>.] 2/4` plus one status line per goal. Not a formal proof."""
+    if color is None:
+        color = want_color()
+    goals = data.get("goals") or []
+    n = len(goals)
+    done = sum(1 for g in goals if g.get("status") == "done")
+    cells = []
+    rows = []
+    for g in goals:
+        st = g.get("status") or "?"
+        glyph = BAR_GLYPH.get(st, "?")
+        if color and st in ANSI:
+            cells.append(f"{ANSI[st]}{glyph}{ANSI['reset']}")
+            label = f"{ANSI[st]}{st:<11}{ANSI['reset']}"
+        else:
+            cells.append(glyph)
+            label = f"{st:<11}"
+        title = g.get("title") or ""
+        rows.append(f"  {label} {g['id']}" + (f"  {title}" if title else ""))
+    bar = "".join(cells)
+    if color:
+        head = f"{ANSI['bar']}[{bar}] {done}/{n}{ANSI['reset']}"
+    else:
+        head = f"[{bar}] {done}/{n}"
+    return [head, *rows]
+
+
+def cmd_progress(data, **_):
+    for line in progress_lines(data):
+        print(line)
+    return 0
+
+
+def cmd_todos(data, **_):
+    """JSON for Grok todo_write. Seed before the walk; refresh on exit."""
+    out = []
+    for g in data.get("goals") or []:
+        st = g.get("status") or "ready"
+        title = g.get("title") or g["id"]
+        out.append(
+            {
+                "id": g["id"],
+                "content": f"{g['id']} — {title}",
+                "status": TODO_OF.get(st, "pending"),
+                "goal_status": st,
+            }
+        )
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def cmd_frontier(path, data, **_):
     ids = frontier(data)
     if not ids:
@@ -437,6 +533,8 @@ def main(argv: list[str]) -> int:
             "body",
             "meta",
             "status-only-id",
+            "todos",
+            "progress",
         ),
     )
     p.add_argument("extra", nargs="*")
@@ -455,6 +553,8 @@ def main(argv: list[str]) -> int:
         "body": cmd_body,
         "meta": cmd_meta,
         "status-only-id": cmd_status_only_id,
+        "todos": cmd_todos,
+        "progress": cmd_progress,
     }[args.cmd]
     return fn(path=path, data=data, text=text, start=start, end=end, extra=args.extra)
 

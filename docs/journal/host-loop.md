@@ -40,3 +40,7 @@ Dogfood /run-goals woke immediately: run-goals.sh journal_line walk g1-hash, the
 ## 2026-08-15T09:59:19Z — ARCHITECT fix
 
 Dogfood g1-hash: DeepSeek ok, host proof 6/6, Opus wrote last line `VERDICT: DONE — goal is met…` (the prompt's own example). verdict_of used a bash glob that required the line to end with DONE → MISSING. Tokenize after VERDICT:; keep last-line-only so body quotes still lose.
+
+## 2026-08-15T11:02:13Z — ARCHITECT
+
+Walker visibility: goals.py progress ([==>.] 2/4 + per-id status, ANSI unless GOALS_COLOR=0) printed after every refresh. goals.py todos JSON for /run-goals to seed/refresh todo_write. TUI badge stays stale mid-walk; stdout bar is the live view. run-goals.sh defaults GOALS_COLOR=1 because the TUI exports NO_COLOR=1.

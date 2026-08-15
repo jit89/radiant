@@ -56,16 +56,23 @@ commit_journal() {
   }
 }
 
-echo "=== graph ==="
-"$GOALS_PY" GOALS.md graph
+# TUI sessions export NO_COLOR=1; default the walk bar to ANSI anyway.
+export GOALS_COLOR="${GOALS_COLOR:-1}"
+
+print_status() {
+  echo "=== graph ==="
+  "$GOALS_PY" GOALS.md graph
+  echo "=== progress ==="
+  "$GOALS_PY" GOALS.md progress
+}
 
 while :; do
   "$GOALS_PY" GOALS.md refresh
   commit_goals
+  print_status
   id="$("$GOALS_PY" GOALS.md frontier | head -n1)"
   if [[ -z "$id" || "$id" == "(empty)" ]]; then
     echo "=== walk-end ==="
-    "$GOALS_PY" GOALS.md graph
     journal_line "## $(utc) — ORCHESTRATOR walk-end"
     commit_journal "chore: orchestrator walk-end"
     exit 0
