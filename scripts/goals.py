@@ -42,7 +42,7 @@ BAR_GLYPH = {
     "done": "=",
     "in_progress": ">",
     "ready": "-",
-    "blocked": ".",
+    "blocked": " ",
     "bounced": "x",
 }
 
@@ -370,7 +370,7 @@ def want_color() -> bool:
 
 
 def progress_lines(data: dict, color: bool | None = None) -> list[str]:
-    """`[==>.] 2/4` plus one status line per goal. Not a formal proof."""
+    """`[==> ] 2/4` plus one status line per goal. Not a formal proof."""
     if color is None:
         color = want_color()
     goals = data.get("goals") or []

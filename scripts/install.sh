@@ -61,7 +61,7 @@ do_check() {
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \
       | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d)==3' \
     && GOALS_COLOR=0 "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" progress \
-      | grep -q '\[-\.-\] 0/3'; then
+      | grep -q '\[- -\] 0/3'; then
     echo "goals.py: OK"
   else
     echo "goals.py: FAIL"; rc=1

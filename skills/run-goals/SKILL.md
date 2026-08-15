@@ -25,7 +25,7 @@ The slash command **is** the confirm. Do not ask "start the walk?".
 
 Foreground timeout: long enough for every remaining goal (N × ~40 minutes, more if fix rounds).
 
-The walker reprints `goals.py progress` (`[==>.] 2/4` plus per-id status) after every refresh. That stream is the live view. Do not re-enter between goals to repaint todos.
+The walker reprints `goals.py progress` (`[==> ] 2/4` plus per-id status) after every refresh. That stream is the live view. Do not re-enter between goals to repaint todos.
 
 ## After the script exits
 
