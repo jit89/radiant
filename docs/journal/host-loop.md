@@ -36,3 +36,7 @@ User treated the folded plan as signed. House git had **no commits**; baseline s
 ## 2026-08-15T09:50:47Z — ARCHITECT fix
 
 Dogfood /run-goals woke immediately: run-goals.sh journal_line walk g1-hash, then run-goal.sh fresh-start clean-tree gate failed on docs/journal/consistent-hash.md. Same class as the refresh-must-commit rule. Walker now commit_journal after every walk line (and walk-end uses the helper).
+
+## 2026-08-15T09:59:19Z — ARCHITECT fix
+
+Dogfood g1-hash: DeepSeek ok, host proof 6/6, Opus wrote last line `VERDICT: DONE — goal is met…` (the prompt's own example). verdict_of used a bash glob that required the line to end with DONE → MISSING. Tokenize after VERDICT:; keep last-line-only so body quotes still lose.

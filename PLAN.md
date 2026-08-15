@@ -44,7 +44,7 @@ Take Grok out of the implement → review hop. After `/run-goal` or `/run-goals`
     6. Empty `git diff "$BASE_SHA"..HEAD -- . ':!GOALS.md' ':!<journal>'` → wake. (Orchestrator commits of those two files are not "the change.")
 11. Write the patch with the **same pathspec** (`:!(GOALS.md)` and `:!(journal)`). Brief includes the numbered-finding format reminder.
 12. Dispatch the goal reviewer. Same Claude session per goal.
-13. Verdict: if `CLAUDE_REVIEW_RESULT` ≠ `ok` → `MISSING`. Else last non-empty line of `$OUT`. Tighten `verdict_of`.
+13. Verdict: if `CLAUDE_REVIEW_RESULT` ≠ `ok` → `MISSING`. Else last non-empty line of `$OUT`. `verdict_of` takes the token after `VERDICT:` (DONE / FIX / BLOCKED); a trailing ` — comment` is still that verdict. Body quotes do not win.
 14. Route:
     - **DONE** only after an **executed** green proof. `PROOF: none` → `done-refused` wake; stop file includes `goals.py set <id> done` and the review path.
     - **FIX** → numbered findings. Zero findings → wake, not bounced. Oracle-path edit → BLOCKED route. Else fix handoff; journal **count + short hash of the findings blob**, not finding text. Persist each round's `VERDICT_FILE` and fix handoff under `~/.cache/grok-coding-workflow/run-goal-<id>/` (outside the target repo). Mention that directory **only in the stop file**, never in the journal. Same `BASE_SHA` on the next dispatch line. `MAX_FIX_ROUNDS` then wake. Else loop.

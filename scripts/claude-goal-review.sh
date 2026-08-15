@@ -78,12 +78,18 @@ new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 
 verdict_of() {
   # Last non-empty line only. A quoted VERDICT: DONE in the body must not win.
-  local last
-  last="$(grep -Ev '^[[:space:]]*$' "$1" | tail -n1 || true)"
-  case "$last" in
-    VERDICT:[[:space:]]*DONE|VERDICT:DONE) echo DONE ;;
-    VERDICT:[[:space:]]*FIX|VERDICT:FIX) echo FIX ;;
-    VERDICT:[[:space:]]*BLOCKED|VERDICT:BLOCKED) echo BLOCKED ;;
+  # The prompt's example is `VERDICT: DONE — goal is met…`; accept a suffix
+  # after the token (bash case globs are not regex, so VERDICT:*DONE required
+  # the line to *end* with DONE and treated the documented example as MISSING).
+  local last token
+  last="$(grep -Ev '^[[:space:]]*$' "$1" | tail -n1 | tr -d '\r' || true)"
+  token="${last#VERDICT:}"
+  token="${token#"${token%%[![:space:]]*}"}"
+  token="${token%%[[:space:]—-]*}"
+  case "$token" in
+    DONE) echo DONE ;;
+    FIX) echo FIX ;;
+    BLOCKED) echo BLOCKED ;;
     *) echo MISSING ;;
   esac
 }
