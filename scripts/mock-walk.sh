@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$DIR" ]]; then
-  DIR="$(mktemp -d "${TMPDIR:-/tmp}/grok-mock-walk-XXXXXX")"
+  DIR="$(mktemp -d "${TMPDIR:-/tmp}/cw-mock-walk-XXXXXX")"
 fi
 mkdir -p "$DIR/docs/journal"
 cd "$DIR"

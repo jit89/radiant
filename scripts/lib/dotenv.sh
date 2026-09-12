@@ -36,10 +36,11 @@ load_key_from_files() {
   return 1
 }
 
-# Transport rate-limit: process failed AND (stderr says so OR the Claude
+# Transport rate-limit: process failed AND (stderr says so OR the agent's
 # JSON envelope is an API 429 / session-limit). Never grep model verdict
-# prose — only stderr and envelope fields (api_error_status, is_error,
-# terminal_reason, and result when is_error is true).
+# prose — only stderr and envelope error fields. Understands both the
+# Claude envelope (api_error_status / is_error / terminal_reason / result)
+# and the Grok envelope (error / stopReason).
 is_transport_rate_limit() {
   local rc="$1" err="$2" json="${3:-}"
   [[ "$rc" -ne 0 ]] || return 1
@@ -49,24 +50,43 @@ is_transport_rate_limit() {
     return 0
   fi
   [[ -n "$json" && -f "$json" ]] || return 1
-  python3 - "$json" <<'PY'
+  python3 - "$json" <<'RLPY'
 import json, sys
+
+NEEDLES = ("429", "rate limit", "rate-limit", "ratelimit", "session limit",
+           "overloaded", "too many requests", "insufficient quota")
+
+
+def hit(text) -> bool:
+    low = str(text).lower()
+    return any(n in low for n in NEEDLES)
+
+
 try:
     obj = json.loads(open(sys.argv[1], encoding="utf-8").read())
 except (OSError, json.JSONDecodeError):
     sys.exit(1)
 if not isinstance(obj, dict):
     sys.exit(1)
-status = obj.get("api_error_status")
-if status == 429 or status == "429":
+
+# Claude: explicit HTTP status on the envelope.
+if obj.get("api_error_status") in (429, "429"):
     sys.exit(0)
+
+# Claude: flagged error, message carries the reason.
 if obj.get("is_error") or obj.get("terminal_reason") == "api_error":
-    text = str(obj.get("result") or "")
-    low = text.lower()
-    for n in ("429", "rate limit", "rate-limit", "session limit", "overloaded",
-              "too many requests", "insufficient quota"):
-        if n in low:
-            sys.exit(0)
+    if hit(obj.get("result") or ""):
+        sys.exit(0)
+
+# Grok: an `error` member, or a stopReason that is not a normal finish.
+err = obj.get("error")
+if err and hit(json.dumps(err)):
+    sys.exit(0)
+stop = str(obj.get("stopReason") or obj.get("stop_reason") or "")
+if stop and stop not in ("end_turn", "stop", "max_tokens", "tool_use"):
+    if hit(stop) or hit(obj.get("text") or "") or hit(obj.get("message") or ""):
+        sys.exit(0)
+
 sys.exit(1)
-PY
+RLPY
 }

@@ -3,7 +3,7 @@ _Locked via crucible — by Grok + jit_
 
 ## Goal
 
-Take Grok out of the implement → review hop. After `/run-goal` or `/run-goals` starts, a **host Orchestrator** dispatches DeepSeek, independently assesses the tree, starts Opus only if that assess passes, and routes `DONE` / `FIX` / `BLOCKED` without a Grok turn. Grok (and the user) are woken only on a stop. DeepSeek and Opus never talk in the clear. This is a change to `~/grok-coding-workflow` itself; house implementation is **in-session** (do not dispatch DeepSeek at the house).
+Take Grok out of the implement → review hop. After `/run-goal` or `/run-goals` starts, a **host Orchestrator** dispatches DeepSeek, independently assesses the tree, starts Opus only if that assess passes, and routes `DONE` / `FIX` / `BLOCKED` without a Grok turn. Grok (and the user) are woken only on a stop. DeepSeek and Opus never talk in the clear. This is a change to `~/claude-coding-workflow` itself; house implementation is **in-session** (do not dispatch DeepSeek at the house).
 
 ## Approach
 
@@ -47,7 +47,7 @@ Take Grok out of the implement → review hop. After `/run-goal` or `/run-goals`
 13. Verdict: if `CLAUDE_REVIEW_RESULT` ≠ `ok` → `MISSING`. Else last non-empty line of `$OUT`. `verdict_of` takes the token after `VERDICT:` (DONE / FIX / BLOCKED); a trailing ` — comment` is still that verdict. Body quotes do not win.
 14. Route:
     - **DONE** only after an **executed** green proof. `PROOF: none` → `done-refused` wake; stop file includes `goals.py set <id> done` and the review path.
-    - **FIX** → numbered findings. Zero findings → wake, not bounced. Oracle-path edit → BLOCKED route. Else fix handoff; journal **count + short hash of the findings blob**, not finding text. Persist each round's `VERDICT_FILE` and fix handoff under `~/.cache/grok-coding-workflow/run-goal-<id>/` (outside the target repo). Mention that directory **only in the stop file**, never in the journal. Same `BASE_SHA` on the next dispatch line. `MAX_FIX_ROUNDS` then wake. Else loop.
+    - **FIX** → numbered findings. Zero findings → wake, not bounced. Oracle-path edit → BLOCKED route. Else fix handoff; journal **count + short hash of the findings blob**, not finding text. Persist each round's `VERDICT_FILE` and fix handoff under `~/.cache/claude-coding-workflow/run-goal-<id>/` (outside the target repo). Mention that directory **only in the stop file**, never in the journal. Same `BASE_SHA` on the next dispatch line. `MAX_FIX_ROUNDS` then wake. Else loop.
     - **BLOCKED** → `bounced`, Orchestrator commit, wake.
     - **MISSING** / `error` / `rate_limited` → wake, leave `in_progress`, unstick commands for **status and tree**.
 15. Stop file in `RUN_DIR` only. Print `STOP_FILE:`.

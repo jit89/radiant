@@ -1,5 +1,6 @@
 ---
 name: to-goals
+allowed-tools: Bash, Read, Glob, Grep, Write, Edit, AskUserQuestion
 description: Cut a signed-off PLAN.md into a dependent/independent goal DAG in GOALS.md, with Architect-authored acceptance oracles. Use when the user says /to-goals, "decompose the plan", "cut into goals", "break this into goals", or after a crucible plan is signed off. Not for planning (use /crucible), not for implementing, not for reviewing already-written code.
 ---
 

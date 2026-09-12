@@ -1,11 +1,11 @@
-# grok-coding-workflow
+# claude-coding-workflow
 
-House workflow for Grok-driven planning and (later) multi-model implementation.
+House workflow for Claude-driven planning and multi-model implementation.
 
 ## Terms
 
 **Architect**
-The main Grok session. Plans, interrogates, arbitrates, decomposes, authors oracles. Does not write target-product feature code. Wakes on a Phase 4/5 stop. Does not sit in the implement/review hop.
+The main Claude Code session. Plans, interrogates, arbitrates, decomposes, authors oracles. Does not write target-product feature code. Wakes on a Phase 4/5 stop. Does not sit in the implement/review hop. May not attack its own plan.
 Not: "Orchestrator"
 
 **Orchestrator**
@@ -17,14 +17,14 @@ The Orchestrator's independent check after DeepSeek exits: git state, proof comm
 Not: "the implementer's test log", "return handoff"
 
 **Attacker**
-Headless Claude Opus 5. Read-only critic of a locked plan. Advises; does not command.
+Headless Grok. Read-only critic of a locked plan, and a different model from the Architect on purpose. Advises; does not command.
 Not: "reviewer" (that word is reserved for the goal reviewer)
 
 **Implementer**
 DeepSeek V4 Flash in the Codex CLI harness. Executes one goal under TDD.
 
 **Goal reviewer**
-Headless Claude Opus 5 judging an implementer diff until the goal is done.
+Headless Claude Opus 5 judging an implementer diff until the goal is done. A separate session with no access to the Architect's conversation; it needs `--add-dir` for the run dir or it cannot read the diff and proof it is judging.
 Not: "Attacker" (that role only attacks PLAN.md)
 
 **Goal**
@@ -50,3 +50,10 @@ The single batch of things recon resolved without asking. Confirmed or corrected
 
 **Decision map**
 The visible tree of still-open choices, split into load-bearing and cosmetic.
+
+**Finding**
+One defect the goal reviewer wants fixed, emitted as a `FIX: <path>:<line> — <defect> — <what to change>` line. The path it opens with is the file the implementer must change; naming the oracle there bounces the goal.
+Not: a numbered analysis heading in the reviewer's prose
+
+**Codex home lock**
+The exclusive lock `deepseek-code.sh` holds on the shared `CODEX_HOME` while it rewrites `config.toml` and runs. Makes concurrent runs queue rather than read each other's config.

@@ -14,14 +14,14 @@
 #
 # Required:
 #   DEEPSEEK_API_KEY   from the environment, the target repo .env, or
-#                      ~/grok-coding-workflow/.env
+#                      ~/claude-coding-workflow/.env
 # Optional:
 #   DEEPSEEK_BASE_URL  default: https://api.deepseek.com/
 #   DEEPSEEK_MODEL     default: deepseek-v4-flash
 #   DEEPSEEK_DRY_RUN=1 print the command, skip the API call
 #   CODEX_BIN          override binary path
 #   DEEPSEEK_CODEX_HOME  isolated Codex state
-#                      (default: ~/.cache/grok-coding-workflow/codex)
+#                      (default: ~/.cache/claude-coding-workflow/codex)
 #   DEEPSEEK_REQUIRE_GIT=0  allow a non-git cwd (default: require git)
 #
 # Result lines:
@@ -40,7 +40,7 @@ HOUSE="$(cd "$HERE/.." && pwd)"
 source "$HERE/lib/dotenv.sh"
 MODEL="${DEEPSEEK_MODEL:-deepseek-v4-flash}"
 BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com/}"
-CODEX_HOME_DIR="${DEEPSEEK_CODEX_HOME:-$HOME/.cache/grok-coding-workflow/codex}"
+CODEX_HOME_DIR="${DEEPSEEK_CODEX_HOME:-$HOME/.cache/claude-coding-workflow/codex}"
 SMOKE=0
 RESUME_ID=""
 HANDOFF=""
@@ -119,6 +119,50 @@ fi
 
 mkdir -p "$CODEX_HOME_DIR"
 export CODEX_HOME="$CODEX_HOME_DIR"
+
+# config.toml is rewritten per invocation (model, effort, and this repo's
+# gitdir), but CODEX_HOME is shared so `--resume THREAD_ID` can find the
+# thread. Two concurrent runs would therefore read each other's config —
+# a second repo's writable_roots, or a smoke run's low effort. Serialize
+# on an exclusive lock: mkdir is atomic, and a lock whose owner is gone is
+# reaped. Concurrency is not silently wrong, just queued.
+LOCK_DIR="$CODEX_HOME_DIR/.lock"
+LOCK_HELD=0
+LOCK_WAIT="${DEEPSEEK_LOCK_WAIT:-1800}"
+
+release_lock() {
+  [[ "$LOCK_HELD" -eq 1 ]] || return 0
+  rm -rf "$LOCK_DIR"
+  LOCK_HELD=0
+}
+
+acquire_lock() {
+  local waited=0 owner
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    owner="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+    if [[ -n "$owner" ]] && ! kill -0 "$owner" 2>/dev/null; then
+      echo "deepseek-code: reaping stale Codex lock from pid $owner" >&2
+      rm -rf "$LOCK_DIR"
+      continue
+    fi
+    if (( waited >= LOCK_WAIT )); then
+      echo "deepseek-code: timed out after ${LOCK_WAIT}s waiting for the Codex" >&2
+      echo "  home lock held by pid ${owner:-unknown} ($LOCK_DIR)." >&2
+      echo "  Another run-goal is in flight; runs are sequential by design." >&2
+      exit 1
+    fi
+    if (( waited == 0 )); then
+      echo "deepseek-code: waiting for the Codex home lock (pid ${owner:-unknown})…" >&2
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  LOCK_HELD=1
+  printf '%s' "$$" >"$LOCK_DIR/pid"
+  trap 'release_lock' EXIT INT TERM
+}
+
+acquire_lock
 cp "$HERE/lib/codex-models.deepseek.json" "$CODEX_HOME/models.json"
 
 # Isolated config. Rewritten on every invocation so a previous repo's

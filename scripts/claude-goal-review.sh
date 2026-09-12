@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 #
 # claude-goal-review.sh — one GOAL REVIEW round via headless Claude
-# Opus 5. This is NOT the plan attacker (see claude-review.sh). The
+# Opus 5. This is NOT the plan attacker (see grok-review.sh). The
 # reviewer judges an implementer's diff against a goal until DONE.
 #
 # This file owns the reviewer prompt. Do not fork it. Do not reuse the
 # attacker prompt.
 #
 # Usage:
-#   claude-goal-review.sh [--resume SESSION_ID] <brief.md>
+#   claude-goal-review.sh [--resume SESSION_ID] [--add-dir DIR]... <brief.md>
 #   claude-goal-review.sh --smoke
+#
+# --add-dir grants Read access outside the repo. The Orchestrator keeps the
+# brief, DIFF_FILE and PROOF_OUTPUT in a private run dir under TMPDIR; without
+# that grant a headless reviewer cannot open any of them and reviews blind.
+# The brief's own directory is added automatically.
 #
 # Brief SHOULD contain:
 #   GOAL: <id>
@@ -20,7 +25,7 @@
 #   DIFF_RANGE: <sha>..HEAD  # informational
 #   PROOF_OUTPUT: <path>     # Architect-run proof, packed as ground truth
 #
-# Optional env: same as claude-review.sh (CLAUDE_REVIEW_MODEL / EFFORT /
+# Optional env: CLAUDE_REVIEW_MODEL / CLAUDE_REVIEW_EFFORT /
 # DRY_RUN / OUT). Result lines:
 #   CLAUDE_REVIEW_RESULT: ok | rate_limited | error | dry_run
 #   SESSION_ID: <uuid>
@@ -40,9 +45,10 @@ EFFORT="${CLAUDE_REVIEW_EFFORT:-high}"
 SMOKE=0
 RESUME_ID=""
 BRIEF=""
+ADD_DIRS=()
 
 usage() {
-  echo "usage: claude-goal-review.sh [--resume SESSION_ID] <brief.md>" >&2
+  echo "usage: claude-goal-review.sh [--resume SESSION_ID] [--add-dir DIR]... <brief.md>" >&2
   echo "       claude-goal-review.sh --smoke" >&2
   exit 2
 }
@@ -53,6 +59,11 @@ while [[ $# -gt 0 ]]; do
     --resume)
       [[ $# -ge 2 ]] || usage
       RESUME_ID="$2"
+      shift 2
+      ;;
+    --add-dir)
+      [[ $# -ge 2 ]] || usage
+      ADD_DIRS+=("$2")
       shift 2
       ;;
     -h|--help) usage ;;
@@ -102,6 +113,13 @@ run_claude() {
     SESSION_ID="$RESUME_ID"
   fi
 
+  local add_flags=()
+  local d
+  for d in "${ADD_DIRS[@]+"${ADD_DIRS[@]}"}"; do
+    [[ -d "$d" ]] || continue
+    add_flags+=(--add-dir "$d")
+  done
+
   local cmd=(
     "$CLAUDE_BIN" -p "$prompt"
     --model "$MODEL"
@@ -110,6 +128,7 @@ run_claude() {
     --permission-mode plan
     --tools Read,Glob,Grep
     --safe-mode
+    "${add_flags[@]+"${add_flags[@]}"}"
     "${session_flag[@]}"
   )
 
@@ -149,7 +168,7 @@ run_claude() {
   fi
 
   local parsed parsed_sid parsed_text
-  parsed="$("$HERE/lib/claude-result.py" <"$raw")" || {
+  parsed="$("$HERE/lib/agent-result.py" <"$raw")" || {
     echo "CLAUDE_REVIEW_RESULT: error (unparseable JSON)"
     echo "SESSION_ID: ${SESSION_ID}"
     echo "VERDICT: MISSING"
@@ -179,7 +198,10 @@ fi
 
 [[ -n "$BRIEF" ]] || usage
 [[ -f "$BRIEF" ]] || { echo "brief not found: $BRIEF" >&2; exit 1; }
-BRIEF_ABS="$(cd "$(dirname "$BRIEF")" && pwd)/$(basename "$BRIEF")"
+BRIEF_DIR="$(cd "$(dirname "$BRIEF")" && pwd)"
+BRIEF_ABS="$BRIEF_DIR/$(basename "$BRIEF")"
+# The brief names DIFF_FILE / PROOF_OUTPUT as siblings; grant that dir.
+ADD_DIRS+=("$BRIEF_DIR")
 
 if [[ -n "$RESUME_ID" ]]; then
   SESSION_ID="$RESUME_ID"
@@ -190,7 +212,7 @@ OUT="${CLAUDE_REVIEW_OUT:-${TMPDIR:-/tmp}/claude-goal-${SESSION_ID}-$(date -u +%
 
 if [[ -n "$RESUME_ID" ]]; then
   read -r -d '' PROMPT <<EOF || true
-I applied your last FIX list (or the Architect bounced a blocker). Re-review the same goal. Read the brief at ${BRIEF_ABS} first (GOAL / PLAN / GOALS / ORACLE / DIFF_FILE / PROOF_OUTPUT), then the DIFF_FILE. Same rules. You do not edit files. End with EXACTLY one line: VERDICT: DONE or VERDICT: FIX or VERDICT: BLOCKED.
+I applied your last FIX list (or the Architect bounced a blocker). Re-review the same goal. Read the brief at ${BRIEF_ABS} first (GOAL / PLAN / GOALS / ORACLE / DIFF_FILE / PROOF_OUTPUT), then the DIFF_FILE. Same rules and the same output format: every defect on its own line starting "FIX: <path>:<line> — <defect> — <what to change>", never opening with the oracle path. You do not edit files. End with EXACTLY one line: VERDICT: DONE or VERDICT: FIX or VERDICT: BLOCKED.
 EOF
 else
   read -r -d '' PROMPT <<EOF || true
@@ -214,9 +236,25 @@ Then read GOALS.md (that goal only), PLAN.md, the oracle file if it is not "inli
 
 You are read-only. Do not edit files.
 
+OUTPUT FORMAT — the Orchestrator parses this mechanically, so follow it exactly.
+
+Write your analysis in prose first. You may number the six headings above; those
+numbered lines are NOT findings and are ignored.
+
+Then, if and only if the verdict is FIX, list each defect on its own line
+starting with the literal token "FIX:", in this shape:
+
+FIX: <path>:<line> — <defect> — <what to change>
+
+The path must be the file YOU want the implementer to change, and it must be
+the first thing after "FIX:". Never open a FIX line with the oracle path or
+anything under tests/acceptance/ — those are read-only, and doing so bounces
+the goal to the Architect. Referring to the oracle later in the sentence is
+fine ("... to satisfy tests/acceptance/test_x.py").
+
 End the body with EXACTLY one line:
 - VERDICT: DONE — goal is met, oracle green and untouched, no critical findings.
-- VERDICT: FIX — material problems the implementer can fix. Number them (file:line, defect, what to change).
+- VERDICT: FIX — material problems the implementer can fix, each on a FIX: line.
 - VERDICT: BLOCKED — the spec/oracle/goal is wrong or ambiguous. This is for the Architect, not another implementer pass.
 EOF
 fi

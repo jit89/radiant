@@ -18,6 +18,8 @@ HOUSE="$(cd "$HERE/.." && pwd)"
 source "$HERE/lib/dotenv.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/events.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/findings.sh"
 
 GOALS_PY="$HERE/goals.py"
 DEEPSEEK="$HERE/deepseek-code.sh"
@@ -151,6 +153,14 @@ wake() {
 succeed() {
   STOP_WRITTEN=1
   STOP_FILE=""
+  # Nothing here is needed once the goal lands; verdicts and fix handoffs
+  # were already copied to ART_DIR. On a wake we keep RUN_DIR — it is the
+  # evidence the stop file points at.
+  if [[ "${KEEP_RUN_DIR:-0}" != "1" && -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
+    case "$RUN_DIR" in
+      */run-goal-*) rm -rf "$RUN_DIR" ;;
+    esac
+  fi
   exit 0
 }
 
@@ -236,36 +246,6 @@ parse_last_dispatch() {
   [[ -n "$BASE_SHA" ]]
 }
 
-extract_findings() {
-  local src="$1" dest="$2"
-  python3 - "$src" "$dest" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8").read()
-out = []
-for m in re.finditer(
-    r"(?m)^(?:#{1,6}\s*)?(?:\*\*)?(\d+)[.)]\s+\*?\*?(.+?)\*?\*?$",
-    text,
-):
-    out.append(f"{m.group(1)}. {m.group(2).strip()}")
-open(sys.argv[2], "w", encoding="utf-8").write("\n".join(out) + ("\n" if out else ""))
-print(len(out))
-PY
-}
-
-findings_touch_oracle() {
-  local findings="$1"
-  python3 - "$findings" "$ORACLE" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8").read().lower()
-oracle = (sys.argv[2] or "").lower()
-if re.search(r"tests/acceptance", text):
-    sys.exit(0)
-if oracle and oracle != "inline" and oracle in text:
-    sys.exit(0)
-sys.exit(1)
-PY
-}
-
 # --- start -----------------------------------------------------------------
 [[ -n "$GOAL_ID" && "$GOAL_ID" != "-h" && "$GOAL_ID" != "--help" ]] || usage
 
@@ -277,7 +257,7 @@ cd "$ROOT"
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/run-goal-${GOAL_ID}-XXXXXX")"
 chmod 700 "$RUN_DIR"
 STOP_FILE="$RUN_DIR/stop.md"
-ART_DIR="$HOME/.cache/grok-coding-workflow/run-goal-${GOAL_ID}"
+ART_DIR="$HOME/.cache/claude-coding-workflow/run-goal-${GOAL_ID}"
 mkdir -p "$ART_DIR"
 
 [[ -f GOALS.md ]] || die_gate "GOALS.md missing — commit the DAG and oracles first"
@@ -504,7 +484,9 @@ while :; do
   else
     PROOF_NONE=0
     set +e
-    bash -lc "$PROOF" >"$PROOF_FILE" 2>&1
+    # Plain -c, not -lc: the gate must not depend on the user's interactive
+    # profile (aliases, PATH edits, version managers) being loaded.
+    bash -c "$PROOF" >"$PROOF_FILE" 2>&1
     PROOF_EXIT=$?
     set -e
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
@@ -537,10 +519,13 @@ EOF
 
   RV_OUT="$RUN_DIR/reviewer-r${ROUND}.out"
   set +e
+  # --add-dir $RUN_DIR or the reviewer cannot open BRIEF / DIFF_FILE /
+  # PROOF_OUTPUT at all: headless Claude denies reads outside the repo and
+  # there is nobody to approve the prompt. It then reviews on no evidence.
   if [[ -n "$SESSION_ID" ]]; then
-    run_timeout "$REVIEW_SECS" "$REVIEWER" --resume "$SESSION_ID" "$BRIEF" >"$RV_OUT" 2>"$RV_OUT.wrap"
+    run_timeout "$REVIEW_SECS" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" "$BRIEF" >"$RV_OUT" 2>"$RV_OUT.wrap"
   else
-    run_timeout "$REVIEW_SECS" "$REVIEWER" "$BRIEF" >"$RV_OUT" 2>"$RV_OUT.wrap"
+    run_timeout "$REVIEW_SECS" "$REVIEWER" --add-dir "$RUN_DIR" "$BRIEF" >"$RV_OUT" 2>"$RV_OUT.wrap"
   fi
   rv_rc=$?
   set -e
@@ -585,11 +570,12 @@ EOF
       ;;
     FIX)
       FINDINGS="$RUN_DIR/findings-r${ROUND}.txt"
-      FIX_COUNT_N="$(extract_findings "$VERDICT_FILE" "$FINDINGS")"
+      TARGETS="$RUN_DIR/targets-r${ROUND}.txt"
+      FIX_COUNT_N="$(extract_findings "$VERDICT_FILE" "$FINDINGS" "$TARGETS")"
       if [[ "$FIX_COUNT_N" -eq 0 ]]; then
-        wake "fix-unparseable" "VERDICT=FIX but no numbered findings. $VERDICT_FILE"
+        wake "fix-unparseable" "VERDICT=FIX but no FIX: lines. $VERDICT_FILE"
       fi
-      if findings_touch_oracle "$FINDINGS"; then
+      if findings_touch_oracle "$TARGETS"; then
         "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
         orch_commit "chore(${GOAL_ID}): orchestrator bounced"
         wake "blocked-oracle-edit" "a FIX finding names the oracle / tests/acceptance"
@@ -612,7 +598,9 @@ EOF
       } >"$FIXH"
       cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
       ROUND=$((ROUND + 1))
-      if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
+      # ROUND counts fix rounds already spent, so >= gives exactly
+      # MAX_FIX_ROUNDS of them (was > — one extra implementer pass).
+      if [[ "$ROUND" -ge "$MAX_FIX_ROUNDS" ]]; then
         wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS"
       fi
       FIX_HANDOFF="$FIXH"

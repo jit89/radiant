@@ -57,7 +57,7 @@ def cache_root() -> Path:
     raw = os.environ.get("EVENTS_CACHE")
     if raw:
         return Path(raw)
-    return Path.home() / ".cache" / "grok-coding-workflow" / "logs"
+    return Path.home() / ".cache" / "claude-coding-workflow" / "logs"
 
 
 def git_root() -> Path:

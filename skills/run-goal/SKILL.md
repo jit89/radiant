@@ -1,6 +1,7 @@
 ---
 name: run-goal
-description: Run one ready goal from GOALS.md — host script dispatches DeepSeek then Opus. Use when the user says /run-goal, "implement this goal", or "run the next goal". Not for planning (/crucible), not for cutting the DAG (/to-goals), not for walking the whole DAG (/run-goals).
+allowed-tools: Bash, Read
+description: Run one ready goal from GOALS.md — host script dispatches DeepSeek then Claude Opus 5 as reviewer. Use when the user says /run-goal, "implement this goal", or "run the next goal". Not for planning (/crucible), not for cutting the DAG (/to-goals), not for walking the whole DAG (/run-goals).
 ---
 
 # Run Goal
@@ -10,7 +11,7 @@ Phase 4 lives in code. Do not re-read a procedure from this file.
 From the **target** repo (the directory that holds `GOALS.md`):
 
 ```bash
-~/grok-coding-workflow/scripts/run-goal.sh <id>
+~/claude-coding-workflow/scripts/run-goal.sh <id>
 ```
 
 No id → first `ready` from `goals.py GOALS.md frontier`; confirm the id in one line, then run the script.
@@ -25,3 +26,5 @@ Foreground timeout: **at least 40 minutes** per call (implementer 20 + reviewer 
 The script already ran the proof, checked the oracle, and routed Opus. Do not re-implement those steps in chat.
 
 Rulebooks (do not fork): `scripts/run-goal.sh`, `scripts/deepseek-code.sh`, `scripts/claude-goal-review.sh`, `scripts/goals.py`.
+
+The reviewer is a separate headless Opus session that sees only the brief, the diff and the proof output — never this conversation. You wrote the plan and the oracle; you did not write the diff it is judging.

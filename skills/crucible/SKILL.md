@@ -1,6 +1,7 @@
 ---
 name: crucible
-description: Harden a plan before any code. Recon the codebase or research, interrogate load-bearing decisions, lock PLAN.md, then send it to headless Claude Opus 5 for bounded adversarial review. Use when the user says /crucible, "put this through the crucible", "harden this plan", "stress-test this plan", or is about to build something high-stakes (auth, schema, concurrency, migrations, payments, greenfield architecture). Replaces grill-me and grill-with-docs in this workflow. Not for reviewing already-written code and not for trivial edits.
+allowed-tools: Bash, Read, Glob, Grep, Write, Edit, AskUserQuestion, TodoWrite
+description: Harden a plan before any code. Recon the codebase or research, interrogate load-bearing decisions, lock PLAN.md, then send it to headless Grok for bounded adversarial review. Use when the user says /crucible, "put this through the crucible", "harden this plan", "stress-test this plan", or is about to build something high-stakes (auth, schema, concurrency, migrations, payments, greenfield architecture). Replaces grill-me and grill-with-docs in this workflow. Not for reviewing already-written code and not for trivial edits.
 ---
 
 # Crucible — Recon, Interrogate, Harden
@@ -9,11 +10,11 @@ Three phases. No production code in any of them.
 
 - **Phase 0 — RECON** kills interviewing blind.
 - **Phase 1 — INTERROGATE** kills building the wrong thing.
-- **Phase 2 — REVIEW** kills a plan that sounds right but breaks. Claude Opus 5 attacks; Grok arbitrates.
+- **Phase 2 — REVIEW** kills a plan that sounds right but breaks. Grok attacks; you arbitrate.
 
 You enter at three points only: confirming the assumptions ledger, answering the fire, signing off the converged plan. The attacker is read-only and never touches a file.
 
-The review prompt lives in `~/grok-coding-workflow/scripts/claude-review.sh`. Do not fork it.
+The review prompt lives in `~/claude-coding-workflow/scripts/grok-review.sh`. Do not fork it.
 
 ## PHASE 0 — RECON
 
@@ -113,7 +114,7 @@ When the decision map is fully checked, write `PLAN.md` at the **target repo roo
 
 ```markdown
 # Plan: <task>
-_Locked via crucible — by Grok + <user>_
+_Locked via crucible — by Claude + <user>_
 
 ## Goal
 <one paragraph — what the interrogation actually settled>
@@ -143,12 +144,15 @@ Phases 0-1 (recon + interrogation) complete — plan locked with the user. MAX_R
 
 Append a journal START at `docs/journal/<slug>.md`.
 
-## PHASE 2 — REVIEW (Grok ↔ Opus 5)
+## PHASE 2 — REVIEW (you ↔ Grok)
+
+You wrote the plan, so you do not get to grade it. Grok attacks it from a
+separate headless session with no access to your reasoning — only the file.
 
 ### Prerequisites (verify once, fast)
 
-- `~/grok-coding-workflow/scripts/claude-review.sh` is executable.
-- Echo the resolved model before Round 1 (`CLAUDE_REVIEW_MODEL`, default `claude-opus-5`). If the user objects, stop.
+- `~/claude-coding-workflow/scripts/grok-review.sh` is executable and `grok` is signed in.
+- Echo the resolved model before Round 1 (`GROK_REVIEW_MODEL`, default `grok-4.6`). If the user objects, stop.
 - Run from the target repo root (where `PLAN.md` lives).
 
 ### Tunables
@@ -168,22 +172,22 @@ Maintain `ROUND` (start 1) and `SESSION_ID` (empty until round 1 returns).
 **Round 1**
 
 ```bash
-~/grok-coding-workflow/scripts/claude-review.sh PLAN.md
+~/claude-coding-workflow/scripts/grok-review.sh PLAN.md
 ```
 
-Read `SESSION_ID:` and `VERDICT_FILE:`. Confirm `CLAUDE_REVIEW_RESULT: ok`. Any other result → stop and tell the user.
+Read `SESSION_ID:` and `VERDICT_FILE:`. Confirm `GROK_REVIEW_RESULT: ok`. Any other result → stop and tell the user.
 
 **Rounds 2..MAX** — resume the SAME session:
 
 ```bash
-~/grok-coding-workflow/scripts/claude-review.sh --resume "$SESSION_ID" PLAN.md
+~/claude-coding-workflow/scripts/grok-review.sh --resume "$SESSION_ID" PLAN.md
 ```
 
 Every invocation is a foreground shell call with timeout **600000** ms.
 
 ### Each round, after the script returns
 
-1. Read the verdict file. Append to `LOG_FILE`: `## Round <n> — Opus 5` + the full critique.
+1. Read the verdict file. Append to `LOG_FILE`: `## Round <n> — Grok` + the full critique.
 2. Grep the last line for the verdict:
    - `VERDICT: APPROVED` → Resolution (converged).
    - `VERDICT: REVISE` → decide **what is actually worth acting on**. Revise `PLAN_FILE`. Append `### Architect's response`: what changed, what was rejected, why. Increment round.
@@ -191,7 +195,7 @@ Every invocation is a foreground shell call with timeout **600000** ms.
 
 ### Resolution (user sign-off)
 
-- **APPROVED:** present the final `PLAN_FILE`, a 3-bullet summary of what the crucible improved, and the round count. Ask: *"Interrogated + survived N rounds of Opus 5. Sign off? Next is `/to-goals`."* On sign-off, run `to-goals`.
+- **APPROVED:** present the final `PLAN_FILE`, a 3-bullet summary of what the crucible improved, and the round count. Ask: *"Interrogated + survived N rounds of Grok. Sign off? Next is `/to-goals`."* On sign-off, run `to-goals`.
 - **MAX_ROUNDS without APPROVED:** do not fake convergence. List each unresolved point + the Architect's counter-position. The user breaks the tie.
 
 Append a journal END with the outcome.
@@ -200,13 +204,13 @@ Append a journal END with the outcome.
 
 - Phases run 0 → 1 → 2. Do not write `PLAN.md` until the decision map is resolved (or the escape hatch fired).
 - The assumptions ledger is presented ONCE as a batch.
-- Opus 5 is read-only every round. The script enforces it. Do not pass it write tools.
+- Grok is read-only every round (`read_file,grep_search,list_dir`). The script enforces it. Do not pass it write tools.
 - The loop ALWAYS terminates at `MAX_ROUNDS`.
-- Grok is final arbiter on every REVISE. Don't cave to everything; don't ignore it.
+- You are the final arbiter on every REVISE. Don't cave to everything; don't ignore it. Log the reason either way — rejecting a critique without a logged reason is how a plan rots.
 - Code only after user sign-off. Implementation is `/to-goals` then `/run-goal`.
 - `LOG_FILE` is the deliverable. Keep the whole argument.
 - `CONTEXT.md` stays a glossary.
-- If the attacker cannot run, stop. Do not self-review as a substitute.
+- If the attacker cannot run, stop. Do not self-review as a substitute — a plan you attack yourself has not been attacked.
 
 ## What NOT to do
 

@@ -1,4 +1,4 @@
-# Agentic Coding Workflow (Grok)
+# Agentic Coding Workflow (Claude)
 
 Portable house workflow. Drop this file into a target repo (or merge it
 into that repo's `AGENTS.md`). Project-specific principles do **not**
@@ -12,10 +12,10 @@ in-session (do not dispatch DeepSeek at the house).
 
 | Role | Model | Responsibilities |
 |------|-------|------------------|
-| **Architect** | Grok (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
-| **Attacker** | Claude Opus 5 (`claude-opus-5`) | Headless, read-only. Attacks a locked plan. Advises; does not command. |
+| **Architect** | Claude Code (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
+| **Attacker** | Grok (`grok-4.6`) | Headless, read-only. Attacks a locked plan. A different model on purpose — the Architect cannot attack its own plan. Advises; does not command. |
 | **Implementer** | DeepSeek V4 Flash (`deepseek-v4-flash`) in the Codex CLI harness | Cheap long TDD loops against one goal. Sibling process. |
-| **Goal reviewer** | Claude Opus 5 (`claude-opus-5`) | Headless. Reviews an implementer diff until the goal is done. Not the plan attacker. |
+| **Goal reviewer** | Claude Opus 5 (`claude-opus-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
 
 The Architect never silently switches into "just code it" mode. If the
 user asks for a quick fix, confirm whether to run the full workflow or
@@ -27,9 +27,9 @@ do a direct edit.
 |-------|--------|
 | 0 Intake | shipped |
 | 1 Recon + Interrogate (`crucible`) | shipped |
-| 2 Adversarial harden (Opus 5) | shipped |
+| 2 Adversarial harden (Grok) | shipped |
 | 3 Decompose into a goal DAG (`to-goals`) | shipped |
-| 4 Per-goal DeepSeek implement + Claude review (`run-goal`) | shipped |
+| 4 Per-goal DeepSeek implement + Opus review (`run-goal`) | shipped |
 | 5 Orchestrate the DAG (`run-goals`) | shipped |
 | A Architecture health (periodic) | existing `improve-codebase-architecture` skill |
 
@@ -67,9 +67,12 @@ and multi-step sequences where clarity matters.
 
 ### Phase 2 — Adversarial harden
 
-The locked `PLAN.md` goes to Claude Opus 5 via
-`scripts/claude-review.sh`. **The script's embedded prompt is the
+The locked `PLAN.md` goes to headless Grok via
+`scripts/grok-review.sh`. **The script's embedded prompt is the
 rulebook — do not restate or fork it.**
+
+You wrote the plan. You do not review it. Grok gets the file and nothing
+else — not this conversation, not your reasoning for the choices in it.
 
 One round per invocation. Resume the same session on every later
 round. The Architect is final arbiter on every `REVISE`: take good
@@ -111,13 +114,13 @@ Run from the **target repo** (the directory that holds `PLAN.md`):
 
 ```bash
 # Round 1
-~/grok-coding-workflow/scripts/claude-review.sh PLAN.md
+~/claude-coding-workflow/scripts/grok-review.sh PLAN.md
 
 # Rounds 2..N (same session)
-~/grok-coding-workflow/scripts/claude-review.sh --resume "$SESSION_ID" PLAN.md
+~/claude-coding-workflow/scripts/grok-review.sh --resume "$SESSION_ID" PLAN.md
 ```
 
-Read the `CLAUDE_REVIEW_RESULT:` line. Capture `SESSION_ID:` from round
+Read the `GROK_REVIEW_RESULT:` line. Capture `SESSION_ID:` from round
 1 and reuse it. The critique is in the printed `VERDICT_FILE`.
 
 Foreground timeout: **10 minutes** (600000 ms) per round. The default
@@ -128,8 +131,8 @@ agent tool timeout is too short.
 Run from the **target repo**:
 
 ```bash
-~/grok-coding-workflow/scripts/run-goal.sh <id>
-~/grok-coding-workflow/scripts/run-goals.sh
+~/claude-coding-workflow/scripts/run-goal.sh <id>
+~/claude-coding-workflow/scripts/run-goals.sh
 ```
 
 Do not drive `deepseek-code.sh` / `claude-goal-review.sh` from this
@@ -157,7 +160,7 @@ dispatch, every arbitration (taken / rejected + why), and the sign-off.
 
 The host also writes one `ORCHESTRATOR wake <id> r<n> reason=<reason>`
 line (no stop-file dump, no Opus findings) and a JSONL index in
-`~/.cache/grok-coding-workflow/logs/`. After a wake, query with
+`~/.cache/claude-coding-workflow/logs/`. After a wake, query with
 `scripts/logs.sh errors` / `warnings` / `last` / `goal <id>` /
 `since 5m|walk`. Do not invent SQL. The markdown journal is still
 source of truth for resume and for DeepSeek.
@@ -166,7 +169,7 @@ source of truth for resume and for DeepSeek.
 
 | Skill | When |
 |-------|------|
-| `crucible` | Phases 1–2 — recon, interrogate, harden |
+| `crucible` | Phases 1–2 — recon, interrogate, harden (Grok attacks) |
 | `to-goals` | Phase 3 — cut signed-off `PLAN.md` into `GOALS.md` |
 | `run-goal` | Phase 4 — exec `scripts/run-goal.sh`; wake on nonzero |
 | `run-goals` | Phase 5 — exec `scripts/run-goals.sh`; wake on nonzero |
@@ -181,16 +184,18 @@ source of truth for resume and for DeepSeek.
 | `grill-me` / `grill-with-docs` | **Not used** — `crucible` replaces them here |
 | `to-tickets` | **Not used** — `to-goals` writes in-repo `GOALS.md` |
 
-House `install.sh` only links crucible / to-goals / run-goal / run-goals.
-The borrowed eight come from `~/.agents/skills` (mattpocock + local).
-`install.sh --check` warns when they are absent.
+House `install.sh` only links crucible / to-goals / run-goal / run-goals
+into `~/.claude/skills`. The borrowed eight come from the Claude skill dir
+or `~/.agents/skills` (mattpocock + local). `install.sh --check` warns when
+they are absent.
 
 ## Hard rules
 
-- The Architect plans and arbitrates. Opus 5 attacks the **plan**
-  (`claude-review.sh`). Opus 5 reviews **code**
+- The Architect plans and arbitrates. Grok attacks the **plan**
+  (`grok-review.sh`). Opus 5 reviews **code**
   (`claude-goal-review.sh`). DeepSeek implements. Nobody grades their
-  own work.
+  own work: the Architect's plan is attacked by a different model, and
+  the code Opus judges was written by DeepSeek, not by the Architect.
 - No production feature code without a hardened, user-signed plan.
 - After Phase 2, `PLAN.md` is the product contract and
   `PLAN-REVIEW-LOG.md` is the argument. After Phase 3, `GOALS.md` plus
@@ -198,7 +203,8 @@ The borrowed eight come from `~/.agents/skills` (mattpocock + local).
 - `CONTEXT.md` = glossary only. ADRs = sparingly. `coding-standards.md`
   = project-specific principles.
 - Secrets are redacted from every handoff and log.
-- Do not use Codex/ChatGPT or a Grok self-review as the **plan
-  attacker**. Codex is the implementer harness only. If the attacker
-  or the implementer cannot run, stop and tell the user. Do not
-  switch implementer on quota death.
+- Do not use Codex/ChatGPT, and never your own second opinion, as the
+  **plan attacker** — that is the one role this session may not fill.
+  Codex is the implementer harness only. If the attacker or the
+  implementer cannot run, stop and tell the user. Do not switch
+  implementer on quota death.

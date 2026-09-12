@@ -26,7 +26,7 @@ import re
 import sys
 from pathlib import Path
 
-# todo_write statuses. House statuses map onto these.
+# TodoWrite statuses. House statuses map onto these.
 TODO_OF = {
     "done": "completed",
     "bounced": "cancelled",
@@ -336,7 +336,7 @@ def cmd_graph(path, data, **_):
 
 
 def cmd_todos(data, **_):
-    """JSON for Grok todo_write. Seed before the walk; refresh on exit."""
+    """JSON for the Architect's TodoWrite. Seed before the walk; refresh on exit."""
     out = []
     for g in data.get("goals") or []:
         st = g.get("status") or "ready"

@@ -2,7 +2,7 @@
 
 ## 2026-08-15T08:19:02Z — ARCHITECT start
 
-Brownfield crucible on `~/grok-coding-workflow`. User: put the host-loop optimisation through crucible and report the outcome. No implementation this turn.
+Brownfield crucible on `~/claude-coding-workflow`. User: put the host-loop optimisation through crucible and report the outcome. No implementation this turn.
 
 Research: `none` (house is familiar; failure modes measured in the consistent-hash dogfood).
 
@@ -51,7 +51,7 @@ Added scripts/mock-walk.sh + fixtures/GOALS.mock.md. Fake 4-goal walk (no DeepSe
 
 ## 2026-08-15T12:30:00Z — ARCHITECT
 
-Host event index: JSONL in `~/.cache/grok-coding-workflow/logs/` (not git). `walk_id` reused until walk-end so a bounce restart is the same job; remint if the journal no longer mentions the id. Journal commit stays fail-closed; JSONL append is best-effort. One `ORCHESTRATOR wake <id> r<n> reason=` line (no findings, no stop dump). Query via `scripts/logs.sh` verbs — no generated SQL.
+Host event index: JSONL in `~/.cache/claude-coding-workflow/logs/` (not git). `walk_id` reused until walk-end so a bounce restart is the same job; remint if the journal no longer mentions the id. Journal commit stays fail-closed; JSONL append is best-effort. One `ORCHESTRATOR wake <id> r<n> reason=` line (no findings, no stop dump). Query via `scripts/logs.sh` verbs — no generated SQL.
 
 ## 2026-08-15T13:10:00Z — ARCHITECT
 

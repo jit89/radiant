@@ -109,7 +109,7 @@ VERDICT: REVISE (T1–T6). **MAX_ROUNDS reached. Not APPROVED.**
 
 Architect would take all six (folded into PLAN.md after the cap; not a fake APPROVED):
 
-- T1/T2: persist artifacts under `~/.cache/grok-coding-workflow/run-goal-<id>/`, mention only in the stop file
+- T1/T2: persist artifacts under `~/.cache/claude-coding-workflow/run-goal-<id>/`, mention only in the stop file
 - T3: re-parse after in-place `status:` write; `SystemExit` on mismatch
 - T4: drop stale `dump_yaml` reformats language
 - T5: existing DAGs need a `journal:` key by hand
