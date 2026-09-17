@@ -143,7 +143,7 @@ do_check() {
     "$ROOT/scripts/tests/blockers-test.sh" || true
   fi
   if "$ROOT/scripts/tests/resume-contract-test.sh" >/dev/null 2>&1; then
-    echo "resume contract: OK (drift refused before dispatch)"
+    echo "resume contract: OK (committed, staged, unstaged, untracked and ignored drift refused)"
   else
     echo "resume contract: FAIL"; rc=1
     "$ROOT/scripts/tests/resume-contract-test.sh" || true

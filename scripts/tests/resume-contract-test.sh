@@ -95,6 +95,32 @@ check "run 1 crashed before assess" "implementer-error" "$reason1"
 check "clean resume dispatches" "2" "$calls"
 check "clean resume reaches review" "reviewer-error" "$reason"
 
+# Staged, with the worktree copy restored from HEAD: `git diff HEAD` sees
+# nothing, yet the index still publishes the edit on the next commit (F3-04).
+staged_case() {   # staged_case <name> <path> <replacement line>
+  local name="$1" path="$2" text="$3"
+  scenario '' "printf '%s\n' '$text' >'$path'
+git add -- '$path'
+git restore --source=HEAD --worktree -- '$path'"
+  check "$name: worktree looks clean" "" "$(git -C "$TMP/repo" diff --name-only HEAD -- "$path")"
+  check "$name: gate" "gate" "$reason"
+  check "$name: nothing dispatched" "1" "$calls"
+  check "$name: named as staged" "yes" "$(has "staged: $path")"
+  check "$name: index left alone" "$path" \
+    "$(git -C "$TMP/repo" diff --cached --name-only HEAD -- "$path")"
+}
+staged_case "staged plan, worktree restored" PLAN.md "# replacement plan"
+staged_case "staged oracle, worktree restored" tests/acceptance/g1-store.sh "true"
+staged_case "staged sibling acceptance file, worktree restored" tests/acceptance/g2-ack.sh "false"
+
+# GOALS.md staged with a body edit, worktree restored.
+scenario '' 'sed -i.bak "s/| mail  | stored   |/| mail  | ignored  |/" GOALS.md && rm GOALS.md.bak
+git add GOALS.md && git restore --source=HEAD --worktree GOALS.md'
+check "staged GOALS.md body edit: gate" "gate" "$reason"
+check "staged GOALS.md body edit: nothing dispatched" "1" "$calls"
+# GOALS.md is checked even earlier, by the orchestration-file preflight.
+check "staged GOALS.md named" "yes" "$(has 'GOALS.md: has staged changes')"
+
 # An ignored file under tests/acceptance is contract, not artifact (F3-02).
 scenario '' 'printf "tests/acceptance/extra.sh\n" >>.gitignore
 git add .gitignore && git commit -qm "chore: ignore a helper"

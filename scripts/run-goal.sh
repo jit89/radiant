@@ -299,9 +299,12 @@ verify_git_meta() {
 # Contract drift since BASE_SHA: the plan, this goal's file oracle,
 # tests/acceptance/, and all of GOALS.md except this goal's status. Sets
 # CONTRACT_PATHS and one-line lists CONTRACT_COMMITTED (changed by commits
-# after BASE_SHA, which are listed in CONTRACT_COMMITS), CONTRACT_UNCOMMITTED
-# (unstaged or untracked) and CONTRACT_IGNORED (untracked but matching
-# .gitignore — an artifact anywhere else, tampering here). Needs BASE_SHA,
+# after BASE_SHA, which are listed in CONTRACT_COMMITS), CONTRACT_STAGED
+# (HEAD → index), CONTRACT_UNCOMMITTED (unstaged or untracked) and
+# CONTRACT_IGNORED (untracked but matching .gitignore — an artifact anywhere
+# else, tampering here). Each state is reported on its own: staging an edit
+# and restoring the worktree copy hides it from a worktree-only comparison,
+# and a later commit still publishes what the index holds. Needs BASE_SHA,
 # PLAN_PATH and ORACLE from goals-base.md, and RUN_DIR.
 contract_drift() {
   local drift goals_commit=0
@@ -310,6 +313,7 @@ contract_drift() {
     CONTRACT_PATHS+=("$ORACLE")
   fi
   CONTRACT_COMMITTED="$(git diff --name-only "$BASE_SHA" HEAD -- "${CONTRACT_PATHS[@]}" || true)"
+  CONTRACT_STAGED="$(git diff --cached --name-only HEAD -- "${CONTRACT_PATHS[@]}" || true)"
   CONTRACT_UNCOMMITTED="$(git diff --name-only HEAD -- "${CONTRACT_PATHS[@]}" || true)
 $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
   # .gitignore makes a file an artifact outside the contract; inside it, an
@@ -317,6 +321,13 @@ $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
   CONTRACT_IGNORED="$(git ls-files --others --ignored --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
   # HEAD never carries this goal's status (committed only on done/bounced),
   # so HEAD's GOALS.md must match the base apart from it.
+  # GOALS.md as the index holds it: staged is neither HEAD nor the worktree.
+  if git cat-file -e :GOALS.md 2>/dev/null; then
+    git show :GOALS.md >"$RUN_DIR/goals-index.md"
+    if ! drift="$("$GOALS_PY" "$RUN_DIR/goals-index.md" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
+      CONTRACT_STAGED="${CONTRACT_STAGED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
+    fi
+  fi
   git show HEAD:GOALS.md >"$RUN_DIR/goals-head.md"
   if ! drift="$("$GOALS_PY" "$RUN_DIR/goals-head.md" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
     CONTRACT_COMMITTED="${CONTRACT_COMMITTED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
@@ -326,6 +337,7 @@ $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
     CONTRACT_UNCOMMITTED="${CONTRACT_UNCOMMITTED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
   fi
   CONTRACT_COMMITTED="$(sed '/^$/d' <<<"$CONTRACT_COMMITTED" | sort -u | paste -sd ',' -)"
+  CONTRACT_STAGED="$(sed '/^$/d' <<<"$CONTRACT_STAGED" | sort -u | paste -sd ',' -)"
   CONTRACT_UNCOMMITTED="$(sed '/^$/d' <<<"$CONTRACT_UNCOMMITTED" | sort -u | paste -sd ',' -)"
   CONTRACT_IGNORED="$(sed '/^$/d' <<<"$CONTRACT_IGNORED" | sort -u | paste -sd ',' -)"
   CONTRACT_COMMITS=""
@@ -592,8 +604,8 @@ chmod 400 "$PLAN_FROZEN"
 # before a paid dispatch hands the implementer the changed oracle.
 if [[ "$RESUME" -eq 1 ]]; then
   contract_drift
-  if [[ -n "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]]; then
-    die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — committed: ${CONTRACT_COMMITTED:-none} (commits: ${CONTRACT_COMMITS:-none}); uncommitted: ${CONTRACT_UNCOMMITTED:-none}; ignored-but-under-contract: ${CONTRACT_IGNORED:-none}. Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
+  if [[ -n "$CONTRACT_COMMITTED$CONTRACT_STAGED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]]; then
+    die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — committed: ${CONTRACT_COMMITTED:-none} (commits: ${CONTRACT_COMMITS:-none}); staged: ${CONTRACT_STAGED:-none}; uncommitted: ${CONTRACT_UNCOMMITTED:-none}; ignored-but-under-contract: ${CONTRACT_IGNORED:-none}. Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
   fi
 fi
 
@@ -691,6 +703,11 @@ while :; do
   if [[ -n "$CONTRACT_COMMITTED" ]]; then
     wake "contract-tamper-committed" "committed: $CONTRACT_COMMITTED — revert commits: $CONTRACT_COMMITS"
   fi
+  if [[ -n "$CONTRACT_STAGED" ]]; then
+    # Not restored: the index is the user's to keep or drop, and overwriting
+    # it would destroy work the refusal is asking them to look at.
+    wake "contract-tamper-staged" "staged in the index (the worktree copy may look clean): $CONTRACT_STAGED. Inspect with git diff --cached HEAD, then git restore --staged those paths."
+  fi
   if [[ -n "$CONTRACT_IGNORED" ]]; then
     wake "contract-tamper-ignored" "under a contract path but matching .gitignore, so absent from the review diff: $CONTRACT_IGNORED. Remove it, or take the path out of .gitignore."
   fi
@@ -759,8 +776,8 @@ while :; do
     changed="$({ grep -v '^?? ' <<<"$changed" || true; } | cut -c4- | sed '/^$/d' | sort -u | paste -sd ',' -)"
     [[ -z "$changed" ]] || moved+=("tracked changes: $changed")
     [[ -z "$created" ]] || moved+=("new files not in .gitignore: $created (declare build output in .gitignore; anything else is unreviewed code)")
-    [[ -z "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]] ||
-      moved+=("contract: ${CONTRACT_COMMITTED}${CONTRACT_COMMITTED:+,}${CONTRACT_UNCOMMITTED}${CONTRACT_IGNORED:+,ignored:}${CONTRACT_IGNORED}")
+    [[ -z "$CONTRACT_COMMITTED$CONTRACT_STAGED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]] ||
+      moved+=("contract: ${CONTRACT_COMMITTED}${CONTRACT_STAGED:+,staged:}${CONTRACT_STAGED}${CONTRACT_UNCOMMITTED:+,}${CONTRACT_UNCOMMITTED}${CONTRACT_IGNORED:+,ignored:}${CONTRACT_IGNORED}")
     if ((${#moved[@]})); then
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
     fi
