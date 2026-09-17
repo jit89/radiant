@@ -60,7 +60,8 @@ check "an ARCHITECT note is the Architect's to commit" \
   "$(V "$(printf '\n## 2026-09-18T00:00:00Z — ARCHITECT decompose g1-store\n')")"
 check "heading without a timestamp" "appended line 2 is a heading in no known shape: '## notes'" \
   "$(V "$(printf '\n## notes\n')")"
-check "walker mode takes any goal" "ok" "$(V "$(printf '\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g2-ack\n')" "")"
+check "records mode needs a goal" "1" \
+  "$(python3 "$HERE/lib/orch-files.py" journal "$TMP/head.md" "$TMP/head.md" --records >/dev/null 2>&1; echo $?)"
 
 # --- run-goal.sh ------------------------------------------------------------
 HOUSE="$TMP/house"
@@ -157,6 +158,46 @@ resume_with "resume with a loose note" '\nUSER PRIVATE NOTE\n' 0
 resume_with "resume with another goal's record" \
   '\n## 2026-09-18T00:00:01Z — IMPLEMENTER start g2-ack\nwrong goal\n' 0
 resume_with "resume with an unknown heading" '\n## 2026-09-18T00:00:01Z — INTRUDER start g1-store\n' 0
+
+# --- the walker (F4-03) -----------------------------------------------------
+# run-goals.sh recovers the same way, for the one goal that is in progress:
+# another goal's uncommitted record must not reach HEAD ahead of the child.
+cat >"$HOUSE/scripts/run-goal.sh" <<'SH'
+#!/usr/bin/env bash
+echo "run-goal $1" >>"$STUBS"
+exit 1
+SH
+chmod +x "$HOUSE/scripts/run-goal.sh"
+
+walk_with() {  # walk_with <name> <goals.py set args, ';'-separated> <record> <want committed>
+  make_repo
+  local base pairs pair
+  base="$(git rev-parse HEAD)"
+  IFS=';' read -r -a pairs <<<"$2"
+  for pair in "${pairs[@]}"; do
+    "$HERE/goals.py" GOALS.md set ${pair} >/dev/null
+  done
+  printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=%s THREAD_ID=- SESSION_ID=-\n' "$base" >>"$J"
+  printf '%b' "$3" >>"$J"
+  local bytes
+  bytes="$(shasum "$J" | awk '{print $1}')"
+  "$HOUSE/scripts/run-goals.sh" >"$TMP/walk.out" 2>&1 || true
+  check "$1: record committed" "$4" \
+    "$(git show HEAD:"$J" | grep -c "$5" || true)"
+  if [[ "$4" == "0" ]]; then
+    check "$1: journal bytes untouched" "$bytes" "$(shasum "$J" | awk '{print $1}')"
+    check "$1: walk stopped" "yes" \
+      "$(grep -q 'orchestration-files-dirty' "$TMP/walk.out" && echo yes || echo no)"
+  fi
+}
+walk_with "walk, the in-progress goal's own record" "g1-store in_progress" \
+  '\n## 2026-09-18T00:00:01Z — IMPLEMENTER start g1-store\nmine\n' 1 'IMPLEMENTER start g1-store'
+walk_with "walk, another goal's record" "g1-store in_progress" \
+  '\n## 2026-09-18T00:00:01Z — IMPLEMENTER start g2-ack\nforeign\n' 0 'IMPLEMENTER start g2-ack'
+walk_with "walk, a record for a goal that does not exist" "g1-store in_progress" \
+  '\n## 2026-09-18T00:00:01Z — IMPLEMENTER start g9-nope\nfictional\n' 0 'IMPLEMENTER start g9-nope'
+walk_with "walk, two goals in progress" "g1-store in_progress;g3-other in_progress" \
+  '\n## 2026-09-18T00:00:01Z — IMPLEMENTER start g1-store\nmine\n' 0 'IMPLEMENTER start g1-store'
 
 if [[ "$fails" -eq 0 ]]; then
   echo "journal records: OK"

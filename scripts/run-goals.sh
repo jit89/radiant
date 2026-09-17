@@ -69,17 +69,27 @@ journal_line() {
 # Nothing the walker did not write: check before the first write and after
 # each goal (which commits its own), then start expecting from there.
 # GOALS_INFLIGHT permits the in_progress a stopped goal leaves uncommitted,
-# until the first refresh commit takes it; --records permits the stopped
-# goal's own journal records (any goal id: the walker runs them all).
+# until the first refresh commit takes it, and --records permits that same
+# goal's journal records. A walk runs one goal at a time, so there is one
+# such goal or none; more than one is a state this walk did not make.
 GOALS_INFLIGHT=""
 orch_baseline() {
-  local when="$1" jmode=--none
+  local when="$1" jmode=--none goal="" inflight=() g
   GOALS_INFLIGHT=""
-  if [[ "$when" == start ]] && "$GOALS_PY" GOALS.md graph | awk '$2 == "in_progress" { f = 1 } END { exit !f }'; then
-    GOALS_INFLIGHT="*=*:in_progress"
-    jmode=--records
+  if [[ "$when" == start ]]; then
+    while IFS= read -r g; do
+      [[ -z "$g" ]] || inflight+=("$g")
+    done < <("$GOALS_PY" GOALS.md graph | awk '$2 == "in_progress" { print $1 }')
+    if ((${#inflight[@]} > 1)); then
+      walk_stop orchestration-files-dirty "GOALS.md marks ${#inflight[@]} goals in_progress (${inflight[*]}), and a walk runs one at a time. Finish or reset all but one, commit GOALS.md, then rerun."
+    fi
+    if ((${#inflight[@]} == 1)); then
+      goal="${inflight[0]}"
+      GOALS_INFLIGHT="$goal=*:in_progress"
+      jmode=--records
+    fi
   fi
-  orch_preflight "$GOALS_INFLIGHT" "$jmode" ||
+  orch_preflight "$GOALS_INFLIGHT" "$jmode" "$goal" ||
     walk_stop orchestration-files-dirty "$([[ "$when" == start ]] || echo "after goal $when: ")$(orch_refusal)"
   if [[ -n "$JOURNAL" && -f "$JOURNAL" ]]; then
     cp "$JOURNAL" "$JOURNAL_EXPECT"

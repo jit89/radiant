@@ -11,7 +11,8 @@ MODE:
               is that heading alone — the host writes one line — so text
               under it belongs to nobody and is refused, as is loose text
               before any record, and a record naming a goal other than
-              GOAL_ID (empty GOAL_ID accepts any goal).
+              GOAL_ID, which --records requires: nothing commits records
+              it cannot attribute to the goal being run.
 
 Exit 0 when the mode holds; otherwise print why and exit 1.
 
@@ -70,6 +71,8 @@ def main(argv):
         sys.exit(__doc__)
     _, head_path, work_path, mode = argv[:4]
     goal_id = argv[4] if len(argv) == 5 else ""
+    if mode == "--records" and not goal_id:
+        sys.exit("--records needs the goal whose records may appear")
     with open(head_path, "rb") as f:
         head = f.read()
     try:
