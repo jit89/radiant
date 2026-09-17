@@ -408,8 +408,13 @@ You are the IMPLEMENTATION agent (model: ${MODEL}, Codex harness). You only impl
    ADRs (docs/adr/), CONTEXT.md, and the journal (docs/journal/<slug>.md).
    Treat that PLAN + the goal's case table / oracle as the contract. ADRs bind.
    Read the journal before starting so you do not repeat past work.
-3. JOURNAL — append (never overwrite) a START entry:
-   "## <UTC from: date -u +%Y-%m-%dT%H:%M:%SZ> — IMPLEMENTER start"
+3. JOURNAL — append (never overwrite) a START entry naming the goal:
+   "## <UTC from: date -u +%Y-%m-%dT%H:%M:%SZ> — IMPLEMENTER start <goal-id>"
+   Every journal entry you append, start / checkpoint / end alike, is a
+   heading in exactly that shape naming THIS goal id, followed by its own
+   lines. The host refuses to commit a journal that grew any other way:
+   loose text outside an entry, or an entry naming another goal, stops the
+   run before your work is committed.
    with the goal id and your understanding. Append an END entry when you
    finish/stop: outcome, commit shas, test result, blockers.
 4. CHECKPOINT YOUR WORK. If this is a git repo, commit after EVERY green test

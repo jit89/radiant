@@ -166,6 +166,12 @@ do_check() {
     echo "walk end: FAIL"; rc=1
     "$ROOT/scripts/tests/walk-end-test.sh" || true
   fi
+  if "$ROOT/scripts/tests/journal-records-test.sh" >/dev/null 2>&1; then
+    echo "journal records: OK (only this goal's records are committed; resume takes them)"
+  else
+    echo "journal records: FAIL"; rc=1
+    "$ROOT/scripts/tests/journal-records-test.sh" || true
+  fi
   if "$ROOT/scripts/tests/plan-freeze-test.sh" >/dev/null 2>&1; then
     echo "plan freeze: OK (agents read the plan at BASE_SHA; edits are tamper)"
   else

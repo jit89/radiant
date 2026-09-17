@@ -158,6 +158,12 @@ committed to the target repo.
 Newest at the bottom. Never rewrite history. The Architect logs every
 dispatch, every arbitration (taken / rejected + why), and the sign-off.
 
+Every entry is a record: that heading, then its own lines. An ORCHESTRATOR
+record is the heading alone. A goal's run commits only records naming that
+goal — loose text, another goal's record, or an ARCHITECT note left
+uncommitted stops it (`reason: journal-tamper`, or the gate on a resume), so
+commit your own notes before dispatching.
+
 The host also writes one `ORCHESTRATOR wake <id> r<n> reason=<reason>`
 line (no stop-file dump, no Opus findings) and a JSONL index in
 `~/.cache/claude-coding-workflow/logs/`. After a wake, query with

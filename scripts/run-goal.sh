@@ -386,11 +386,11 @@ tracked_in_head() {
 }
 
 # orch_commit MSG ALLOW — commit GOALS.md and the journal, after checking that
-# GOALS.md moved only by ALLOW (see orch_goals_problems) and the journal was
-# only appended to since HEAD.
+# GOALS.md moved only by ALLOW (see orch_goals_problems) and the journal grew
+# only by whole records of this goal (lib/orch-files.py).
 orch_commit() {
   local msg="$1" allow="$2" problems
-  problems="$({ orch_goals_problems "$allow"; orch_journal_problems --append; } | paste -sd ';' -)"
+  problems="$({ orch_goals_problems "$allow"; orch_journal_problems --records "$GOAL_ID"; } | paste -sd ';' -)"
   if [[ -n "$problems" ]]; then
     wake "orchestration-files-changed" "not committed ($msg): $problems. Something other than this run edited them; review, then commit or restore."
   fi
@@ -406,11 +406,11 @@ orch_commit() {
   git commit -m "$msg" -- "${files[@]}" || wake "commit-failed" "$msg"
 }
 
-# Commit the journal alone, if it was only appended to since HEAD.
+# Commit the journal alone, if it grew only by whole records of this goal.
 orch_commit_journal() {
   local problems
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 0
-  problems="$(orch_journal_problems --append | paste -sd ';' -)"
+  problems="$(orch_journal_problems --records "$GOAL_ID" | paste -sd ';' -)"
   if [[ -n "$problems" ]]; then
     echo "journal not committed: $problems" >&2
     return 1
@@ -491,7 +491,7 @@ fi
 # as committed; a resume may carry what its stopped run left: this goal set
 # in_progress, and the run's own ORCHESTRATOR lines.
 if [[ "$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')" == in_progress ]]; then
-  orch_preflight "$GOAL_ID=*:in_progress" --orchestrator-lines || ORCH_FILES_OK=-1
+  orch_preflight "$GOAL_ID=*:in_progress" --records "$GOAL_ID" || ORCH_FILES_OK=-1
 else
   orch_preflight "" --none || ORCH_FILES_OK=-1
 fi
@@ -737,6 +737,14 @@ while :; do
   done < <(git status --porcelain)
   if ((${#unexpected[@]})); then
     wake "dirty-tree" "unexpected paths: ${unexpected[*]}"
+  fi
+
+  # The journal is the one file the implementer shares with the host, and the
+  # host commits it under its own name. Check its shape here, before review
+  # and before any commit, not only at commit time.
+  journal_problems="$(orch_journal_problems --records "$GOAL_ID" | paste -sd ';' -)"
+  if [[ -n "$journal_problems" ]]; then
+    wake "journal-tamper" "$journal_problems — the journal grew by something other than this goal's records. Review those lines, then commit or restore them."
   fi
 
   PROOF_FILE="$RUN_DIR/proof-${GOAL_ID}-r${ROUND}.txt"

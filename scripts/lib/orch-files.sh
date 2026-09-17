@@ -24,9 +24,10 @@ orch_goals_problems() {
   rm -f "$head"
 }
 
-# The journal against HEAD, in MODE (lib/orch-files.py). One problem a line.
+# The journal against HEAD, in MODE (lib/orch-files.py), for goal $2 when the
+# mode takes one. One problem a line.
 orch_journal_problems() {
-  local mode="$1" head
+  local mode="$1" goal="${2:-}" head
   [[ -n "${JOURNAL:-}" ]] || return 0
   head="$(mktemp "${TMPDIR:-/tmp}/orch-journal-XXXXXX")"
   if ! git show "HEAD:$JOURNAL" >"$head" 2>/dev/null; then
@@ -34,7 +35,8 @@ orch_journal_problems() {
     echo "$JOURNAL: not committed"
     return 0
   fi
-  { python3 "$ORCH_FILES_PY" journal "$head" "$JOURNAL" "$mode" || true; } | sed "s|^|$JOURNAL: |"
+  { python3 "$ORCH_FILES_PY" journal "$head" "$JOURNAL" "$mode" ${goal:+"$goal"} || true; } |
+    sed "s|^|$JOURNAL: |"
   rm -f "$head"
 }
 
@@ -46,13 +48,14 @@ orch_staged_problems() {
 }
 
 # Before the first write: nothing staged, and each file equal to HEAD except
-# the in-flight state a stopped run leaves (GOALS_ALLOW, JOURNAL_MODE). Sets
-# ORCH_PROBLEMS ("; "-joined); returns 1 when refused.
+# the in-flight state a stopped run leaves (GOALS_ALLOW, JOURNAL_MODE, and the
+# goal whose records the journal may already carry). Sets ORCH_PROBLEMS
+# ("; "-joined); returns 1 when refused.
 orch_preflight() {
   ORCH_PROBLEMS="$({
     orch_staged_problems
     orch_goals_problems "$1"
-    orch_journal_problems "$2"
+    orch_journal_problems "$2" "${3:-}"
   } | paste -sd ';' - | sed 's/;/; /g')"
   [[ -z "$ORCH_PROBLEMS" ]]
 }

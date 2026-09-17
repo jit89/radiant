@@ -69,14 +69,15 @@ journal_line() {
 # Nothing the walker did not write: check before the first write and after
 # each goal (which commits its own), then start expecting from there.
 # GOALS_INFLIGHT permits the in_progress a stopped goal leaves uncommitted,
-# until the first refresh commit takes it.
+# until the first refresh commit takes it; --records permits the stopped
+# goal's own journal records (any goal id: the walker runs them all).
 GOALS_INFLIGHT=""
 orch_baseline() {
   local when="$1" jmode=--none
   GOALS_INFLIGHT=""
   if [[ "$when" == start ]] && "$GOALS_PY" GOALS.md graph | awk '$2 == "in_progress" { f = 1 } END { exit !f }'; then
     GOALS_INFLIGHT="*=*:in_progress"
-    jmode=--orchestrator-lines
+    jmode=--records
   fi
   orch_preflight "$GOALS_INFLIGHT" "$jmode" ||
     walk_stop orchestration-files-dirty "$([[ "$when" == start ]] || echo "after goal $when: ")$(orch_refusal)"
