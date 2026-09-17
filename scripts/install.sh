@@ -107,7 +107,7 @@ do_check() {
     "$ROOT/scripts/tests/orch-commit-test.sh" || true
   fi
   if "$ROOT/scripts/tests/git-guard-test.sh" >/dev/null 2>&1; then
-    echo "git guard: OK (.git checked before every host git call, walker and signals too)"
+    echo "git guard: OK (.git plus its config include graph, checked before every host git call)"
   else
     echo "git guard: FAIL"; rc=1
     "$ROOT/scripts/tests/git-guard-test.sh" || true

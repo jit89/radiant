@@ -251,6 +251,83 @@ run_goal
 check "honest implementer is not flagged" "reviewer-error" "$reason"
 check "reviewer reached" "1" "$(grep -c claude-goal-review "$TMP/stubs" || true)"
 
+# --- config includes and symlink targets (F3-01) --------------------------
+# .git/config can name more config anywhere on disk, and a filter defined
+# there runs as the host user. Each case: baseline, mutate, then a guarded
+# `git add` of a filtered file must refuse and the filter must stay inert.
+inc_case() {
+  local name="$1" setup="$2" mutate="$3" repo="$TMP/inc" rc=0
+  rm -rf "$repo" "$TMP/inc-fired"
+  rm -f "$HOME/.cache/claude-coding-workflow/"git-meta-*.txt
+  mkdir -p "$repo/out" && (cd "$repo" && command git init -q)
+  python3 "$HERE/lib/run-timeout.py" 20 bash -c '
+    set -e
+    cd "$1"
+    command git config user.name mock
+    command git config user.email mock@localhost
+    printf "content\n" >subject.txt
+    printf "subject.txt filter=inc\n" >.gitattributes
+    command git add subject.txt .gitattributes
+    command git commit -qm base
+    eval "$3"
+    source "$2/lib/git-guard.sh"
+    git_meta_init
+    git_meta_verify "$GIT_META_SAVED" || exit 8   # baseline must be clean
+    eval "$4"
+    git_meta_verify "$GIT_META_SAVED" && exit 9   # the change must be seen
+    printf "changed\n" >subject.txt
+    git add subject.txt 2>/dev/null && exit 7     # tainted git must refuse
+    exit 1' _ "$repo" "$HERE" "$setup" "$mutate" >"$TMP/inc.out" 2>&1 || rc=$?
+  check "$name: change seen, git refuses" "1" "$rc"
+  check "$name: filter never ran" "no" \
+    "$([[ -f "$TMP/inc-fired" ]] && echo yes || echo no)"
+}
+# The payload every case installs: a clean filter that marks a file.
+EVIL="command git config --file \"\$CONF\" filter.inc.clean 'touch $TMP/inc-fired; cat'"
+BENIGN="command git config --file \"\$CONF\" filter.inc.clean cat"
+
+inc_case "include inside the gitdir" \
+  "CONF=.git/extra.conf; command git config include.path \"\$PWD/.git/extra.conf\"; $BENIGN" \
+  "CONF=.git/extra.conf; $EVIL"
+inc_case "include outside the gitdir" \
+  "CONF=out/extra.conf; command git config include.path \"\$PWD/out/extra.conf\"; $BENIGN" \
+  "CONF=out/extra.conf; $EVIL"
+inc_case "include by relative path" \
+  "CONF=.git/rel.conf; command git config include.path ./rel.conf; $BENIGN" \
+  "CONF=.git/rel.conf; $EVIL"
+inc_case "includeIf section" \
+  "CONF=.git/if.conf; command git config 'includeIf.gitdir:/.path' \"\$PWD/.git/if.conf\"; $BENIGN" \
+  "CONF=.git/if.conf; $EVIL"
+inc_case "include through a symlink, target edited" \
+  "CONF=out/real.conf; $BENIGN; ln -s \"\$PWD/out/real.conf\" .git/link.conf; command git config include.path \"\$PWD/.git/link.conf\"" \
+  "CONF=out/real.conf; $EVIL"
+inc_case "include through a symlink, retargeted" \
+  "CONF=out/real.conf; $BENIGN; ln -s \"\$PWD/out/real.conf\" .git/link.conf; command git config include.path \"\$PWD/.git/link.conf\"" \
+  "CONF=out/other.conf; $EVIL; ln -sfn \"\$PWD/out/other.conf\" .git/link.conf"
+inc_case "include created after the baseline" \
+  "command git config include.path \"\$PWD/.git/later.conf\"" \
+  "CONF=.git/later.conf; $EVIL"
+inc_case "include chain: config -> a -> b" \
+  "CONF=.git/a.conf; command git config include.path \"\$PWD/.git/a.conf\"; command git config --file .git/a.conf include.path \"\$PWD/.git/b.conf\"; CONF=.git/b.conf; $BENIGN" \
+  "CONF=.git/b.conf; $EVIL"
+
+# An include git would expand itself (~user, %(prefix)) is not resolvable
+# here: fail closed rather than guess.
+rm -rf "$TMP/inc" && rm -f "$HOME/.cache/claude-coding-workflow/"git-meta-*.txt
+mkdir -p "$TMP/inc" && (cd "$TMP/inc" && command git init -q)
+r=0
+python3 "$HERE/lib/run-timeout.py" 20 bash -c '
+  cd "$1"
+  command git config include.path "%(prefix)/etc/gitconfig"
+  source "$2/lib/git-guard.sh"
+  git_meta_init
+  git_meta_verify "$GIT_META_SAVED" && exit 0
+  echo "$GIT_META_CHANGED"
+  exit 1' _ "$TMP/inc" "$HERE" >"$TMP/inc.out" 2>&1 || r=$?
+check "unresolvable include: fails closed" "1" "$r"
+check "unresolvable include: says which path" "yes" \
+  "$(grep -q '%(prefix)' "$TMP/inc.out" && echo yes || echo no)"
+
 # --- stops that come before the post-step check (F2-01) --------------------
 # The implementer plants a clean filter (config + info/attributes) and dirties
 # a tracked file, so any host `git status` / `git add` would run the filter.
