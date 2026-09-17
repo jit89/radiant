@@ -25,28 +25,9 @@ check() {
   fi
 }
 
+# GOALS.example.md carries a body per goal; the seds below edit those.
 BASE="$TMP/base.md"
-{
-  cat "$HERE/../GOALS.example.md"
-  cat <<'MD'
-
-## g1-store — Persist inbound mail
-
-| input | expected |
-|-------|----------|
-| mail  | stored   |
-
-## g2-ack — Label-ack after enqueue
-
-| input | expected |
-|-------|----------|
-| stored | acked   |
-
-## g3-other — Independent sibling
-
-Out of scope: retries.
-MD
-} >"$BASE"
+cp "$HERE/../GOALS.example.md" "$BASE"
 
 # Prints OK or DRIFT (first line of status-only-id output).
 compare() { "$GOALS_PY" "$1" status-only-id g1-store "$BASE" 2>&1 | head -n1 || true; }

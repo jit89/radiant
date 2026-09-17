@@ -39,3 +39,27 @@ goals:
     oracle: inline
     status: blocked
 ```
+
+## g1-alpha — First slice
+
+| input | expected |
+|-------|----------|
+| a     | 1        |
+
+## g2-beta — Second slice
+
+| input | expected |
+|-------|----------|
+| b     | 2        |
+
+## g3-gamma — Third slice
+
+| input | expected |
+|-------|----------|
+| c     | 3        |
+
+## g4-delta — Fourth slice
+
+| input | expected |
+|-------|----------|
+| d     | 4        |

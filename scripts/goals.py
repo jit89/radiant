@@ -151,9 +151,14 @@ def by_id(data: dict) -> dict[str, dict]:
     return {g["id"]: g for g in data["goals"]}
 
 
+# "## <id>" then whitespace or end of line. Not \b: "-" is a word boundary,
+# so \b let g1-store match the heading of g1-store-extra.
+HEADING_RE = re.compile(r"^## (g\d+-[a-z0-9-]+)(?=\s|$)", re.M)
+
+
 def goal_body(text: str, gid: str) -> str:
     """Return the ## <id> markdown section (verbatim, including heading)."""
-    pat = re.compile(rf"^## {re.escape(gid)}\b.*$", re.M)
+    pat = re.compile(rf"^## {re.escape(gid)}(?=\s|$).*$", re.M)
     m = pat.search(text)
     if not m:
         raise SystemExit(f"no markdown section for {gid}")
@@ -258,6 +263,22 @@ def status_only_drift(text: str, data: dict, other_text: str, gid: str) -> list[
     return [f"markdown differs from line {i + 1}, under {where}"]
 
 
+def validate_bodies(text: str, data: dict) -> list[str]:
+    """The body is the handoff's spec, and for oracle: inline the oracle."""
+    errors: list[str] = []
+    counts: dict[str, int] = {}
+    for m in HEADING_RE.finditer(text):
+        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    for g in data["goals"]:
+        gid = g.get("id", "")
+        n = counts.get(gid, 0)
+        if n > 1:
+            errors.append(f"{gid}: {n} ## {gid} sections (the handoff would take the first)")
+        if n == 0 and g.get("oracle") == "inline":
+            errors.append(f"{gid}: oracle: inline but no ## {gid} section — the case table is the oracle")
+    return errors
+
+
 def validate(data: dict) -> list[str]:
     errors: list[str] = []
     if not data.get("plan"):
@@ -351,8 +372,8 @@ def refresh(data: dict) -> list[str]:
     return notes
 
 
-def cmd_validate(path, data, **_):
-    errs = validate(data)
+def cmd_validate(path, data, text, **_):
+    errs = validate(data) + validate_bodies(text, data)
     if errs:
         print("INVALID")
         for e in errs:

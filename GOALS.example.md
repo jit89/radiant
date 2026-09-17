@@ -33,3 +33,19 @@ goals:
     oracle: inline
     status: ready
 ```
+
+## g1-store — Persist inbound mail
+
+| input | expected |
+|-------|----------|
+| mail  | stored   |
+
+## g2-ack — Label-ack after enqueue
+
+| input | expected |
+|-------|----------|
+| stored | acked   |
+
+## g3-other — Independent sibling
+
+Out of scope: retries.
