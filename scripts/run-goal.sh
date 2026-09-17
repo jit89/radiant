@@ -597,7 +597,8 @@ if [[ "$RESUME" -eq 1 && -n "$PENDING_FIX_ROUND" ]]; then
   if [[ ! -f "$pending_fix" || "$pending_hash" != "$PENDING_FIX_HASH" ]]; then
     die_gate "FIX findings for r${PENDING_FIX_ROUND} are missing or do not match the journaled hash ($pending_fix). Resuming would drop them; re-review instead: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
   fi
-  if [[ "$ROUND" -ge "$MAX_FIX_ROUNDS" ]]; then
+  # ROUND is the pending repair's number (resume-state.py): same rule as the loop.
+  if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
     wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; FIX r${PENDING_FIX_ROUND} still pending. Rerun with a higher MAX_FIX_ROUNDS to apply it."
   fi
   FIX_HANDOFF="$RUN_DIR/handoff-${GOAL_ID}-fix-r${PENDING_FIX_ROUND}.md"
@@ -873,9 +874,10 @@ EOF
         --summary "fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}" \
         --payload "$(printf '{"fix_count":%s,"fix_hash":"%s"}' "$FIX_COUNT_N" "$FIX_HASH")"
       ROUND=$((ROUND + 1))
-      # ROUND counts fix rounds already spent, so >= gives exactly
-      # MAX_FIX_ROUNDS of them (was > — one extra implementer pass).
-      if [[ "$ROUND" -ge "$MAX_FIX_ROUNDS" ]]; then
+      # ROUND is now the number of the repair these findings need; the first
+      # implementation is round 0, not a repair. MAX_FIX_ROUNDS=N allows
+      # repairs 1..N. The resume check below uses the same rule.
+      if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
         wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS"
       fi
       FIX_HANDOFF="$FIXH"

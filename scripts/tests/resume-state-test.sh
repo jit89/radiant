@@ -122,18 +122,43 @@ check "3: resume handoff carries the newest findings" "yes" "$(has 'apply fix-B'
 check "3: not the superseded ones" "no" "$(has 'apply fix-A' "$CALLS/handoff-4.md")"
 check "3: resume stays in round 2" "2" "$(last_dispatch_round)"
 
-# 4. FIX then MAX_FIX_ROUNDS: resume at the same cap wakes again; a raised
-#    cap continues the pending fix round rather than redoing round 0.
+# 4. MAX_FIX_ROUNDS=N allows exactly N repair implementations (F2-07). The
+#    reviewer always says FIX; the first implementation is not a repair.
+for cap in 0 1 2 3; do
+  export MAX_FIX_ROUNDS=$cap
+  fresh "ok ok ok ok ok ok" "fix-A fix-B fix-C fix-D fix-E fix-F"
+  check "4: cap $cap: wakes on the cap" "max-fix-rounds" "$reason"
+  check "4: cap $cap: $cap repair implementation(s)" "$((cap + 1))" "$(calls ds)"
+done
+
+# 4b. Interrupted before the repair ran: the resume runs that same repair.
 export MAX_FIX_ROUNDS=1
-fresh "ok ok" "fix-A error"
-check "4: first run hit the cap" "max-fix-rounds" "$reason"
+fresh "ok rate ok ok" "fix-A fix-B fix-C"
+check "4b: first run woke on rate limit" "rate_limited" "$reason"
 run
-check "4: same cap on resume: wakes again" "max-fix-rounds" "$reason"
-check "4: same cap on resume: no dispatch" "1" "$(calls ds)"
-MAX_FIX_ROUNDS=2 run
-check "4: raised cap: dispatches the fix round" "2" "$(calls ds)"
-check "4: raised cap: handoff carries the findings" "yes" "$(has 'apply fix-A' "$CALLS/handoff-2.md")"
-check "4: raised cap: round 1" "1" "$(last_dispatch_round)"
+check "4b: resume ran repair 1, then woke on the cap" "max-fix-rounds" "$reason"
+check "4b: no repair 2" "1" "$(last_dispatch_round)"
+
+# 4c. Interrupted after the repair ran, before its review: redoing it does not
+#     spend a second repair.
+fresh "ok ok ok ok" "fix-A error fix-B"
+check "4c: first run woke on the review" "reviewer-error" "$reason"
+run
+check "4c: resume redid repair 1 and woke on the cap" "max-fix-rounds" "$reason"
+check "4c: still round 1" "1" "$(last_dispatch_round)"
+
+# 4d. Stopped at the cap with FIX pending: the same cap wakes again, a raised
+#     cap runs exactly the newly allowed repair, from the pending findings.
+export MAX_FIX_ROUNDS=0
+fresh "ok ok ok" "fix-A fix-B"
+check "4d: first run hit the cap" "max-fix-rounds" "$reason"
+run
+check "4d: same cap on resume: wakes again" "max-fix-rounds" "$reason"
+check "4d: same cap on resume: no dispatch" "1" "$(calls ds)"
+MAX_FIX_ROUNDS=1 run
+check "4d: raised cap: dispatches repair 1" "2" "$(calls ds)"
+check "4d: raised cap: handoff carries the findings" "yes" "$(has 'apply fix-A' "$CALLS/handoff-2.md")"
+check "4d: raised cap: wakes before repair 2" "max-fix-rounds" "$reason"
 unset MAX_FIX_ROUNDS
 
 # 5. Pending findings lost from the cache: refuse rather than guess.

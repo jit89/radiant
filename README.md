@@ -137,7 +137,7 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `DEEPSEEK_LOCK_WAIT` | `1800` | Seconds to wait for the Codex home lock |
 | `DEEPSEEK_REQUIRE_GIT` | `1` | Require a git repo (`0` to opt out) |
 | `MAX_ROUNDS` | `5` | Plan-attack rounds (skill) |
-| `MAX_FIX_ROUNDS` | `3` | Implement/review fix rounds |
+| `MAX_FIX_ROUNDS` | `3` | Repair passes after the first implementation: `N` lets up to `N` FIX handoffs be implemented and reviewed (`0` wakes on the first FIX) |
 | `DEEPSEEK_TIMEOUT` | `1200` | Seconds per implementer pass |
 | `CLAUDE_REVIEW_TIMEOUT` | `600` | Seconds per review |
 | `PROOF_TIMEOUT` | `600` | Seconds for the host proof |
@@ -196,8 +196,9 @@ Role swap aside, these are the behaviour fixes carried in at the fork:
    owner died.
 4. **The proof ran in a login shell.** `bash -lc` made the acceptance
    gate depend on the user's interactive profile. Now `bash -c`.
-5. **`MAX_FIX_ROUNDS` was off by one** — `>` allowed one extra
-   implementer pass. Now `>=`.
+5. **`MAX_FIX_ROUNDS` counts repairs.** `N` allows exactly `N` FIX
+   handoffs to be implemented; the first implementation is not one
+   (a `>=` check once allowed only `N - 1`).
 6. **Run dirs leaked.** They are removed when a goal lands and kept on a
    wake (they are the evidence the stop file points at). `KEEP_RUN_DIR=1`
    keeps them either way.
