@@ -12,7 +12,11 @@ MODE:
               under it belongs to nobody and is refused, as is loose text
               before any record, and a record naming a goal other than
               GOAL_ID, which --records requires: nothing commits records
-              it cannot attribute to the goal being run.
+              it cannot attribute to the goal being run. An IMPLEMENTER or
+              REVIEWER record must name GOAL_ID — the prompt tells the
+              implementer to — so a record from another run or another goal
+              cannot pass as this one's. An ORCHESTRATOR record need not:
+              walk-start belongs to the walk, not to a goal.
 
 Exit 0 when the mode holds; otherwise print why and exit 1.
 
@@ -48,6 +52,8 @@ def check_records(extra, goal_id):
             if goal_id and named - {goal_id}:
                 other = ", ".join(sorted(named - {goal_id}))
                 return f"appended line {n} is a record for {other}, not {goal_id}"
+            if goal_id and role != "ORCHESTRATOR" and goal_id not in named:
+                return f"appended line {n} is a {role} record naming no goal, not {goal_id}"
             continue
         if LOOSE_HEADING.match(line):
             other = OTHER_ROLE.match(line)

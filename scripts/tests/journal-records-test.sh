@@ -51,6 +51,11 @@ check "bare note" "appended line 2 is outside any record: 'USER PRIVATE NOTE: do
 check "note after an ORCHESTRATOR record" \
   "appended line 4 follows a one-line ORCHESTRATOR record: 'USER PRIVATE NOTE'" \
   "$(V "$(printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=abc\n\nUSER PRIVATE NOTE\n')")"
+check "implementer record naming no goal" \
+  "appended line 2 is a IMPLEMENTER record naming no goal, not g1-store" \
+  "$(V "$(printf '\n## 2026-09-18T00:00:00Z — IMPLEMENTER start\nbody\n')")"
+check "orchestrator walk-start names no goal" "ok" \
+  "$(V "$(printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR walk-start walk_id=abc\n')")"
 check "record for another goal" "appended line 2 is a record for g2-ack, not g1-store" \
   "$(V "$(printf '\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g2-ack\n')")"
 check "unknown role" "appended line 2 is a INTRUDER record, which this run does not commit: '## 2026-09-18T00:00:00Z — INTRUDER start g1-store'" \

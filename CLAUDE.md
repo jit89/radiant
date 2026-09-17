@@ -160,7 +160,8 @@ dispatch, every arbitration (taken / rejected + why), and the sign-off.
 
 Every entry is a record: that heading, then its own lines. An ORCHESTRATOR
 record is the heading alone. A goal's run commits only records naming that
-goal — loose text, another goal's record, or an ARCHITECT note left
+goal (IMPLEMENTER and REVIEWER records name it; an ORCHESTRATOR walk line
+need not) — loose text, another goal's record, or an ARCHITECT note left
 uncommitted stops it (`reason: journal-tamper`, or the gate on a resume), so
 commit your own notes before dispatching.
 
