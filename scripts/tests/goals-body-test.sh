@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Self-test: goal bodies are found by exact id, and validate rejects bodies an
-# implementer would get wrong or not at all (F-16).
+# implementer would get wrong or not at all (F-16), for every oracle kind (F2-06).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,6 +20,7 @@ check() {
 }
 
 # goals <oracle-for-g1-store> <markdown after the fence>
+# g1-store-extra (a file oracle) gets a body unless the markdown gives its own.
 goals() {
   cat <<EOF
 # Goals: body fixture
@@ -47,6 +48,7 @@ goals:
 \`\`\`
 $2
 EOF
+  [[ "$2" == *"## g1-store-extra"* ]] || printf '\n## g1-store-extra — Extra\nextra cases\n'
 }
 first_line() { "$GOALS_PY" "$1" body "$2" 2>&1 | head -n1 || true; }
 verdict() { "$GOALS_PY" "$1" validate 2>&1 | head -n1 | awk '{print $1}' || true; }
@@ -76,7 +78,21 @@ check "inline goal without a body: invalid" "INVALID" "$(verdict "$TMP/missing.m
 check "error names the goal" "1" "$(says "$TMP/missing.md" 'g1-store: oracle: inline but no ## g1-store section')"
 
 goals tests/acceptance/test_store.py '' >"$TMP/file-oracle.md"
-check "file-oracle goals may omit bodies" "OK" "$(verdict "$TMP/file-oracle.md")"
+check "file-oracle goal without a body: invalid" "INVALID" "$(verdict "$TMP/file-oracle.md")"
+check "error names the bodyless file-oracle goal" "1" "$(says "$TMP/file-oracle.md" 'g1-store: no ## g1-store section')"
+
+goals tests/acceptance/test_store.py '
+## g1-store — Store
+**What it delivers:** stored mail' >"$TMP/file-oracle-body.md"
+check "file-oracle goal with a body: valid" "OK" "$(verdict "$TMP/file-oracle-body.md")"
+
+goals tests/acceptance/test_store.py '
+## g1-store — Store
+first
+
+## g1-store — Store again
+second' >"$TMP/file-oracle-dup.md"
+check "file-oracle goal, duplicate body: invalid" "1" "$(says "$TMP/file-oracle-dup.md" 'g1-store: 2 ## g1-store sections')"
 
 goals inline '
 ## g1-store — Store

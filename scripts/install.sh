@@ -131,7 +131,7 @@ do_check() {
     "$ROOT/scripts/tests/goals-contract-test.sh" || true
   fi
   if "$ROOT/scripts/tests/goals-body-test.sh" >/dev/null 2>&1; then
-    echo "goal bodies: OK (exact id, inline needs a body)"
+    echo "goal bodies: OK (exact id, every goal needs one body)"
   else
     echo "goal bodies: FAIL"; rc=1
     "$ROOT/scripts/tests/goals-body-test.sh" || true

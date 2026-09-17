@@ -310,7 +310,7 @@ def status_transitions_drift(text: str, data: dict, other_text: str, allowed: st
 
 
 def validate_bodies(text: str, data: dict) -> list[str]:
-    """The body is the handoff's spec, and for oracle: inline the oracle."""
+    """Every goal has one body: the handoff's spec, and for oracle: inline the oracle."""
     errors: list[str] = []
     counts: dict[str, int] = {}
     for m in HEADING_RE.finditer(text):
@@ -322,6 +322,11 @@ def validate_bodies(text: str, data: dict) -> list[str]:
             errors.append(f"{gid}: {n} ## {gid} sections (the handoff would take the first)")
         if n == 0 and g.get("oracle") == "inline":
             errors.append(f"{gid}: oracle: inline but no ## {gid} section — the case table is the oracle")
+        elif n == 0:
+            errors.append(
+                f"{gid}: no ## {gid} section — the handoff carries the body "
+                "(deliverable, seams, case table, scope); a file oracle does not replace it"
+            )
         if n:
             for path in owned_acceptance_paths(goal_body(text, gid)):
                 errors.append(
