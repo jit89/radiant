@@ -265,6 +265,40 @@ verify_git_meta() {
   wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— host git is off for this run. Inspect with cat / ls -la, not git. Revert anything you did not make, then re-baseline: rm $GIT_META_SAVED"
 }
 
+# Contract drift since BASE_SHA: this goal's file oracle, tests/acceptance/,
+# and all of GOALS.md except this goal's status. Sets CONTRACT_PATHS and
+# one-line lists CONTRACT_COMMITTED (changed by commits after BASE_SHA, which
+# are listed in CONTRACT_COMMITS) and CONTRACT_UNCOMMITTED (staged, unstaged,
+# or untracked). Needs BASE_SHA, ORACLE from goals-base.md, and RUN_DIR.
+contract_drift() {
+  local drift goals_commit=0
+  CONTRACT_PATHS=(tests/acceptance)
+  if [[ "$ORACLE" != "inline" && -n "$ORACLE" ]]; then
+    CONTRACT_PATHS+=("$ORACLE")
+  fi
+  CONTRACT_COMMITTED="$(git diff --name-only "$BASE_SHA" HEAD -- "${CONTRACT_PATHS[@]}" || true)"
+  CONTRACT_UNCOMMITTED="$(git diff --name-only HEAD -- "${CONTRACT_PATHS[@]}" || true)
+$(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
+  # HEAD never carries this goal's status (committed only on done/bounced),
+  # so HEAD's GOALS.md must match the base apart from it.
+  git show HEAD:GOALS.md >"$RUN_DIR/goals-head.md"
+  if ! drift="$("$GOALS_PY" "$RUN_DIR/goals-head.md" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
+    CONTRACT_COMMITTED="${CONTRACT_COMMITTED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
+    goals_commit=1
+  fi
+  if ! drift="$("$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
+    CONTRACT_UNCOMMITTED="${CONTRACT_UNCOMMITTED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
+  fi
+  CONTRACT_COMMITTED="$(sed '/^$/d' <<<"$CONTRACT_COMMITTED" | sort -u | paste -sd ',' -)"
+  CONTRACT_UNCOMMITTED="$(sed '/^$/d' <<<"$CONTRACT_UNCOMMITTED" | sort -u | paste -sd ',' -)"
+  CONTRACT_COMMITS=""
+  if [[ -n "$CONTRACT_COMMITTED" ]]; then
+    local log_paths=("${CONTRACT_PATHS[@]}")
+    [[ "$goals_commit" -eq 0 ]] || log_paths+=(GOALS.md)
+    CONTRACT_COMMITS="$(git log --format=%h "$BASE_SHA"..HEAD -- "${log_paths[@]}" | paste -sd ' ' -)"
+  fi
+}
+
 tracked_in_head() {
   git cat-file -e "HEAD:$1" 2>/dev/null
 }
@@ -413,12 +447,7 @@ if [[ "$RESUME" -eq 0 ]]; then
 else
   echo "RESUME: $GOAL_ID — tree may be dirty"
   git status --porcelain || true
-  if [[ "$ORACLE" != "inline" ]] && ! git diff --quiet -- "$ORACLE"; then
-    die_gate "file oracle $ORACLE is dirty on resume"
-  fi
-  if [[ -d tests/acceptance ]] && ! git diff --quiet -- tests/acceptance; then
-    die_gate "tests/acceptance/ is dirty on resume"
-  fi
+  # The contract itself is checked once BASE_SHA is known, below.
 fi
 
 if ! load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env"; then
@@ -438,6 +467,16 @@ fi
 git show "$BASE_SHA:GOALS.md" >"$RUN_DIR/goals-base.md"
 ORACLE="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("oracle") or "")')"
 PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof") or "")')"
+
+# A run cut off before assess (timeout, quota, crash, Ctrl-C) can leave a
+# changed contract behind, and a paused goal invites hand edits. Refuse now,
+# before a paid dispatch hands the implementer the changed oracle.
+if [[ "$RESUME" -eq 1 ]]; then
+  contract_drift
+  if [[ -n "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED" ]]; then
+    die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — committed: ${CONTRACT_COMMITTED:-none} (commits: ${CONTRACT_COMMITS:-none}); uncommitted: ${CONTRACT_UNCOMMITTED:-none}. Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
+  fi
+fi
 
 # --- implement / review loop ----------------------------------------------
 FIX_HANDOFF=""
@@ -507,39 +546,16 @@ while :; do
   git status --porcelain
   git log --oneline -15
 
-  contract_paths=()
-  [[ "$ORACLE" != "inline" && -n "$ORACLE" ]] && contract_paths+=("$ORACLE")
-  [[ -d tests/acceptance ]] && contract_paths+=("tests/acceptance")
-
-  committed_touch=""
-  worktree_touch=""
-  if ((${#contract_paths[@]})); then
-    committed_touch="$(git diff --name-only "$BASE_SHA" HEAD -- "${contract_paths[@]}" || true)"
-    worktree_touch="$(git diff --name-only HEAD -- "${contract_paths[@]}" || true)"
+  contract_drift
+  if [[ -n "$CONTRACT_COMMITTED" ]]; then
+    wake "contract-tamper-committed" "committed: $CONTRACT_COMMITTED — revert commits: $CONTRACT_COMMITS"
   fi
-  # GOALS.md is contract end to end — every goal's body, not only this one's
-  # fence — and only this goal's status may move. HEAD never carries that
-  # status (it is committed on done/bounced), so HEAD must match exactly.
-  git show HEAD:GOALS.md >"$RUN_DIR/goals-head.md"
-  if ! drift="$("$GOALS_PY" "$RUN_DIR/goals-head.md" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
-    committed_touch="${committed_touch}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
-  fi
-  if ! drift="$("$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
-    worktree_touch="${worktree_touch}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
-  fi
-  # One line each: the stop file's detail field is a single line.
-  committed_touch="$(sed '/^$/d' <<<"$committed_touch" | paste -sd ',' -)"
-  worktree_touch="$(sed '/^$/d' <<<"$worktree_touch" | paste -sd ',' -)"
-
-  if [[ -n "$committed_touch" ]]; then
-    wake "contract-tamper-committed" "revert: git revert $(git rev-parse HEAD)  (touched: $committed_touch)"
-  fi
-  if [[ -n "$worktree_touch" ]]; then
-    if ((${#contract_paths[@]})); then
-      git checkout "$BASE_SHA" -- "${contract_paths[@]}" || true
-      git restore --staged "${contract_paths[@]}" || true
-    fi
-    wake "contract-tamper-worktree" "$worktree_touch"
+  if [[ -n "$CONTRACT_UNCOMMITTED" ]]; then
+    # Per path: one pathspec absent at BASE_SHA must not block the others.
+    for p in "${CONTRACT_PATHS[@]}"; do
+      git checkout "$BASE_SHA" -- "$p" 2>/dev/null || true
+    done
+    wake "contract-tamper-worktree" "uncommitted: $CONTRACT_UNCOMMITTED"
   fi
 
   unexpected=()
