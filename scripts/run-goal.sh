@@ -264,7 +264,7 @@ run_step() {
 # Wake if .git config/hooks/info differ from the saved manifest. git_meta_verify
 # has already disabled host git by then, so the wake path runs none.
 verify_git_meta() {
-  git_meta_verify "$GIT_META_SAVED" "$RUN_DIR/git-meta-now.txt" && return 0
+  git_meta_verify "$GIT_META_SAVED" && return 0
   wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— host git is off for this run. Inspect with cat / ls -la, not git. Revert anything you did not make, then re-baseline: rm $GIT_META_SAVED"
 }
 

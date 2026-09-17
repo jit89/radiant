@@ -107,7 +107,7 @@ do_check() {
     "$ROOT/scripts/tests/orch-commit-test.sh" || true
   fi
   if "$ROOT/scripts/tests/git-guard-test.sh" >/dev/null 2>&1; then
-    echo "git guard: OK (.git tamper wakes, hooks inert)"
+    echo "git guard: OK (.git tamper wakes, hooks inert, special files fail closed)"
   else
     echo "git guard: FAIL"; rc=1
     "$ROOT/scripts/tests/git-guard-test.sh" || true

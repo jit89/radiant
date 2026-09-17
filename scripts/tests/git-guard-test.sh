@@ -52,23 +52,23 @@ plant_fsmonitor() {
   git_meta_init
   S="$TMP/lib-saved.txt"
 
-  git_meta_verify "$S" "$TMP/m0.txt"
-  git_meta_verify "$S" "$TMP/m1.txt" && r=0 || r=1
+  git_meta_verify "$S"
+  git_meta_verify "$S" && r=0 || r=1
   check "unchanged gitdir verifies" "0" "$r"
 
   echo x >a && git add a && git commit -qm legit
-  git_meta_verify "$S" "$TMP/m2.txt" && r=0 || r=1
+  git_meta_verify "$S" && r=0 || r=1
   check "an ordinary commit is not tampering" "0" "$r"
 
   # Background auto-maintenance repacks after commits and rewrites
   # info/refs (a generated ref list for dumb HTTP; nothing executes it).
   command git repack -q -d
   printf 'deadbeef\trefs/heads/x\n' >>.git/info/refs
-  git_meta_verify "$S" "$TMP/m2b.txt" && r=0 || r=1
+  git_meta_verify "$S" && r=0 || r=1
   check "git-generated info/refs is not tampering" "0" "$r"
 
   plant_hook .git
-  git_meta_verify "$S" "$TMP/m3.txt" && r=0 || r=1
+  git_meta_verify "$S" && r=0 || r=1
   check "planted hook detected" "1" "$r"
   check "changed path named" "yes" \
     "$([[ "$GIT_META_CHANGED" == *hooks/pre-commit* ]] && echo yes || echo no)"
@@ -77,19 +77,19 @@ plant_fsmonitor() {
   check "tainted git refuses to run" "1" "$r"
   check "hook never fired" "0" "$(fired)"
 
-  GIT_META_TAINTED=0 && rm -f "$S" && git_meta_verify "$S" "$TMP/m4.txt"
+  GIT_META_TAINTED=0 && rm -f "$S" && git_meta_verify "$S"
   chmod -x .git/hooks/pre-commit
-  git_meta_verify "$S" "$TMP/m5.txt" && r=0 || r=1
+  git_meta_verify "$S" && r=0 || r=1
   check "mode change detected" "1" "$r"
 
-  GIT_META_TAINTED=0 && rm -f "$S" && git_meta_verify "$S" "$TMP/m6.txt"
+  GIT_META_TAINTED=0 && rm -f "$S" && git_meta_verify "$S"
   echo 'secret/' >>.git/info/exclude
-  git_meta_verify "$S" "$TMP/m7.txt" && r=0 || r=1
+  git_meta_verify "$S" && r=0 || r=1
   check "info/exclude change detected" "1" "$r"
 
-  GIT_META_TAINTED=0 && rm -f "$S" && git_meta_verify "$S" "$TMP/m8.txt"
+  GIT_META_TAINTED=0 && rm -f "$S" && git_meta_verify "$S"
   plant_fsmonitor
-  git_meta_verify "$S" "$TMP/m9.txt" && r=0 || r=1
+  git_meta_verify "$S" && r=0 || r=1
   check "config change detected" "1" "$r"
 
   # Wrapper alone, taint off: armed hook + fsmonitor stay inert.
@@ -114,13 +114,55 @@ rm -f "$MARK"
   git_meta_init
   check "linked worktree tracks both gitdirs" "2" "${#GIT_META_DIRS[@]}"
   S="$TMP/wt-saved.txt"
-  git_meta_verify "$S" "$TMP/w0.txt"
+  git_meta_verify "$S"
   plant_hook "$TMP/wt-main/.git"
-  git_meta_verify "$S" "$TMP/w1.txt" && r=0 || r=1
+  git_meta_verify "$S" && r=0 || r=1
   check "hook in common gitdir detected" "1" "$r"
   echo "$fails" >"$TMP/wt-fails"
 ) || echo 1 >"$TMP/wt-fails"
 fails=$((fails + $(cat "$TMP/wt-fails" 2>/dev/null || echo 1)))
+
+# --- special and unreadable files (F2-05) --------------------------------
+# A FIFO in hooks/ once blocked the read forever, outside every step timeout.
+# Each case runs under a timeout and must fail closed: verify returns 1,
+# taints, and host git refuses. rc 124 = hung; 0 = passed as unchanged.
+special() {
+  local name="$1" setup="$2" repo="$TMP/special" rc=0
+  chmod -R u+rwx "$repo" 2>/dev/null || true
+  rm -rf "$repo" "$TMP/special-saved.txt"
+  mkdir -p "$repo" && (cd "$repo" && command git init -q)
+  python3 "$HERE/lib/run-timeout.py" 10 bash -c '
+    cd "$1" && source "$2/lib/git-guard.sh" && git_meta_init || exit 9
+    git_meta_verify "$3" || exit 8
+    eval "$4"
+    git_meta_verify "$3" && exit 0
+    git status >/dev/null 2>&1 && exit 7
+    exit 1' _ "$repo" "$HERE" "$TMP/special-saved.txt" "$setup" \
+    >"$TMP/special.out" 2>&1 || rc=$?
+  check "$name: fails closed promptly" "1" "$rc"
+}
+special "FIFO in hooks" 'mkfifo .git/hooks/review-fifo'
+special "socket in hooks" 'python3 -c "import os, socket; os.chdir(\".git/hooks\"); socket.socket(socket.AF_UNIX).bind(\"s\")"'
+special "unreadable hook" 'echo x >.git/hooks/locked && chmod 000 .git/hooks/locked'
+special "unreadable hooks dir" 'mkdir .git/hooks/d && chmod 000 .git/hooks/d'
+chmod -R u+rwx "$TMP/special" 2>/dev/null || true
+
+# A file removed between listing and reading is a failure, not a traceback.
+check "removed mid-walk: fails closed" "failed" "$(python3 - "$HERE/lib/git-meta.py" "$TMP/special/.git" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("gm", sys.argv[1])
+gm = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gm)
+real = os.lstat
+def vanished(p, *a, **k):
+    if p.endswith("pre-commit.sample"):
+        raise FileNotFoundError(2, "No such file or directory")
+    return real(p, *a, **k)
+os.lstat = vanished
+_, problems = gm.manifest([sys.argv[2]])
+print("failed" if any("pre-commit.sample" in x for x in problems) else "passed")
+PY
+)"
 
 # --- run-goal.sh -----------------------------------------------------------
 HOUSE="$TMP/house"

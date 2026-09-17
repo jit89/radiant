@@ -34,74 +34,25 @@ git_meta_init() {
   [[ "$c" == "$d" ]] || GIT_META_DIRS+=("$c")
 }
 
+GIT_META_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/git-meta.py"
+
 # Write a sorted manifest (path, type, mode, content hash or link target) of
 # everything in the gitdirs that can make git execute or hide something.
+# Fails, printing the paths, on special or unreadable files (lib/git-meta.py).
 git_meta_manifest() {
-  python3 - "$1" "${GIT_META_DIRS[@]}" <<'PY'
-import hashlib, os, stat, sys
-
-out, dirs = sys.argv[1], sys.argv[2:]
-NAMES = ("config", "config.worktree", "hooks", "info")
-# Written by git itself: repack (run by background auto-maintenance after
-# commits) regenerates info/refs, a ref list for dumb HTTP that nothing runs.
-GENERATED = ("info/refs",)
-rows = []
-
-def add(path, rel):
-    if rel in GENERATED:
-        return
-    st = os.lstat(path)
-    if stat.S_ISLNK(st.st_mode):
-        rows.append(f"{path}\tlink\t-\t{os.readlink(path)}")
-    elif stat.S_ISDIR(st.st_mode):
-        rows.append(f"{path}\tdir\t{oct(st.st_mode & 0o7777)}\t-")
-        for name in sorted(os.listdir(path)):
-            add(os.path.join(path, name), f"{rel}/{name}")
-    else:
-        with open(path, "rb") as f:
-            digest = hashlib.sha256(f.read()).hexdigest()
-        rows.append(f"{path}\tfile\t{oct(st.st_mode & 0o7777)}\t{digest}")
-
-for d in dirs:
-    for name in NAMES:
-        p = os.path.join(d, name)
-        if os.path.lexists(p):
-            add(p, name)
-
-with open(out, "w") as f:
-    f.write("".join(r + "\n" for r in sorted(rows)))
-PY
-}
-
-# Print each path whose manifest row was added, removed, or changed.
-git_meta_changed() {
-  python3 - "$1" "$2" <<'PY'
-import sys
-
-def rows(p):
-    with open(p) as f:
-        return {line.split("\t", 1)[0]: line for line in f if line.strip()}
-
-a, b = rows(sys.argv[1]), rows(sys.argv[2])
-for path in sorted(set(a) | set(b)):
-    if a.get(path) != b.get(path):
-        print(path)
-PY
+  python3 "$GIT_META_PY" manifest "$1" "${GIT_META_DIRS[@]}"
 }
 
 # Compare the gitdirs to the saved manifest; save one if there is none.
-# On a change: taint host git, set GIT_META_CHANGED, return 1. Call it
-# directly, never in $(...) — the taint must land in the caller's shell.
+# On a change, or a path that cannot be fingerprinted: taint host git, set
+# GIT_META_CHANGED, return 1. Call it directly, never in $(...) — the taint
+# must land in the caller's shell.
 GIT_META_CHANGED=""
 git_meta_verify() {
-  local saved="$1" now="$2"
-  git_meta_manifest "$now"
-  if [[ ! -f "$saved" ]]; then
-    cp "$now" "$saved"
-    return 0
-  fi
-  GIT_META_CHANGED="$(git_meta_changed "$saved" "$now" | tr '\n' ' ')"
-  [[ -n "$GIT_META_CHANGED" ]] || return 0
+  local saved="$1" out rc=0
+  out="$(python3 "$GIT_META_PY" verify "$saved" "${GIT_META_DIRS[@]}" 2>&1)" || rc=$?
+  [[ "$rc" -ne 0 ]] || return 0
+  GIT_META_CHANGED="$(printf '%s\n' "${out:-verification failed (exit $rc)}" | paste -sd ';' -) "
   GIT_META_TAINTED=1
   return 1
 }
