@@ -43,6 +43,7 @@ walk() {
   mkdir -p "$TMP/repo/docs/journal" && cd "$TMP/repo"
   git init -q
   cp "$HERE/../GOALS.example.md" GOALS.md
+  printf '# Plan\n' >PLAN.md
   local pair
   for pair in $1; do
     "$GOALS_PY" GOALS.md set "${pair%%=*}" "${pair#*=}" >/dev/null

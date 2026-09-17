@@ -404,9 +404,9 @@ read -r -d '' PROMPT <<EOF || true
 You are the IMPLEMENTATION agent (model: ${MODEL}, Codex harness). You only implement.
 
 1. Read the handoff document: ${HANDOFF_ABS}
-2. Read every artifact it references — PLAN.md, GOALS.md (the named goal only),
+2. Read every artifact it references — the PLAN copy it names, GOALS.md (the named goal only),
    ADRs (docs/adr/), CONTEXT.md, and the journal (docs/journal/<slug>.md).
-   Treat PLAN.md + the goal's case table / oracle as the contract. ADRs bind.
+   Treat that PLAN + the goal's case table / oracle as the contract. ADRs bind.
    Read the journal before starting so you do not repeat past work.
 3. JOURNAL — append (never overwrite) a START entry:
    "## <UTC from: date -u +%Y-%m-%dT%H:%M:%SZ> — IMPLEMENTER start"

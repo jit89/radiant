@@ -74,6 +74,7 @@ chmod +x "$TMP/house/scripts/"*.sh
 mkdir -p "$TMP/repo/docs/journal" && cd "$TMP/repo"
 git init -q
 cp "$HERE/../GOALS.example.md" GOALS.md
+printf '# Plan\n' >PLAN.md
 printf '# Journal: example\n' >docs/journal/example.md
 git add -A && git commit -q -m base
 "$TMP/house/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true

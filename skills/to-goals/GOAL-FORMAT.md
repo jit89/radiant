@@ -63,6 +63,8 @@ goals:
 If the target has no test harness, set `oracle: inline` and `proof: (case table)`.
 The case table in the body *is* the oracle.
 
+`plan:` names the signed plan, committed. A goal's run freezes it at the goal's base commit: both agents read that copy, and a change to the live file during the run stops the goal as contract tampering, like an oracle edit.
+
 ## Field rules
 
 - `id` — `g<n>-<slug>`, numbered in dependency order (blockers first). Stable once written.

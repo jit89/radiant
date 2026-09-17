@@ -166,6 +166,12 @@ do_check() {
     echo "walk end: FAIL"; rc=1
     "$ROOT/scripts/tests/walk-end-test.sh" || true
   fi
+  if "$ROOT/scripts/tests/plan-freeze-test.sh" >/dev/null 2>&1; then
+    echo "plan freeze: OK (agents read the plan at BASE_SHA; edits are tamper)"
+  else
+    echo "plan freeze: FAIL"; rc=1
+    "$ROOT/scripts/tests/plan-freeze-test.sh" || true
+  fi
   if "$ROOT/scripts/tests/proof-test.sh" >/dev/null 2>&1; then
     echo "proof: OK (timeout, no credentials, repo unchanged)"
   else
@@ -258,8 +264,9 @@ do_check() {
     git init -q
     mkdir -p docs/journal
     cp "$ROOT/GOALS.example.md" GOALS.md
+    printf '# Plan\n' > PLAN.md
     printf '# Journal: example\n' > docs/journal/example.md
-    git add -- GOALS.md docs/journal/example.md
+    git add -- GOALS.md PLAN.md docs/journal/example.md
     git -c user.email=mock@localhost -c user.name=mock \
       commit -q -m "chore: wake-check DAG"
     echo dirt > dirt.txt

@@ -88,8 +88,9 @@ make_repo() {
   mkdir -p "$TMP/repo/docs/journal" "$TMP/repo/tests/acceptance" && cd "$TMP/repo"
   git init -q
   cp "$HERE/../GOALS.example.md" GOALS.md
+  printf '# Plan\n' >PLAN.md
   printf '# Journal: example\n' >docs/journal/example.md
-  git add -- GOALS.md docs/journal/example.md
+  git add -- GOALS.md PLAN.md docs/journal/example.md
   git commit -q -m base
 }
 

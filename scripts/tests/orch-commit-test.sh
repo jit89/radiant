@@ -35,9 +35,10 @@ make_repo() {
   git init -q
   sed -e '/id: g1-store/,/status:/s/status: ready/status: done/' \
     "$HERE/../GOALS.example.md" >GOALS.md
+  printf '# Plan\n' >PLAN.md
   printf '# Journal: example\n' >docs/journal/example.md
   printf 'original\n' >source.py
-  git add -- GOALS.md docs/journal/example.md source.py
+  git add -- GOALS.md PLAN.md docs/journal/example.md source.py
   git commit -q -m base
   printf 'user work\n' >source.py
   git add -- source.py

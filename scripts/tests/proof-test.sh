@@ -54,6 +54,7 @@ proof() {
 s|proof: true|proof: bash tests/acceptance/g1-store.sh|
 s|oracle: inline|oracle: tests/acceptance/g1-store.sh|
 }' "$HERE/../GOALS.example.md" >GOALS.md
+  printf '# Plan\n' >PLAN.md
   printf '%s\n' "$1" >tests/acceptance/g1-store.sh
   printf '.gitignore\n' >.gitignore
   printf '# Journal: example\n' >docs/journal/example.md

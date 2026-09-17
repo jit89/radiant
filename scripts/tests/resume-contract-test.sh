@@ -67,6 +67,7 @@ scenario() {
 s|proof: true|proof: bash tests/acceptance/g1-store.sh|
 s|oracle: inline|oracle: tests/acceptance/g1-store.sh|
 }' "$HERE/../GOALS.example.md" >GOALS.md
+  printf '# Plan\n' >PLAN.md
   printf 'test "$(head -c1 impl.txt)" != ""\n' >tests/acceptance/g1-store.sh
   printf 'true\n' >tests/acceptance/g2-ack.sh
   printf '# Journal: example\n' >docs/journal/example.md

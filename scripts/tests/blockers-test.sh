@@ -58,10 +58,11 @@ run_goal() {
   mkdir -p "$TMP/repo/docs/journal" && cd "$TMP/repo"
   git init -q
   cp "$HERE/../GOALS.example.md" GOALS.md
+  printf '# Plan\n' >PLAN.md
   "$GOALS_PY" GOALS.md set g1-store "$1" >/dev/null
   "$GOALS_PY" GOALS.md set g2-ack "$2" >/dev/null
   printf '# Journal: example\n' >docs/journal/example.md
-  git add -- GOALS.md docs/journal/example.md
+  git add -- GOALS.md PLAN.md docs/journal/example.md
   git commit -q -m base
   "$HOUSE/scripts/run-goal.sh" g2-ack >"$TMP/out" 2>&1 || true
   local stop

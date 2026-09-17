@@ -18,7 +18,7 @@
 #
 # Brief SHOULD contain:
 #   GOAL: <id>
-#   PLAN: PLAN.md
+#   PLAN: <run dir>/plan-at-base-PLAN.md   (the signed plan, frozen at BASE_SHA)
 #   GOALS: GOALS.md
 #   ORACLE: <path|inline>
 #   DIFF_FILE: <path>        # Architect-written git diff (read this)
@@ -203,7 +203,7 @@ I applied your last FIX list (or the Architect bounced a blocker). Re-review the
 EOF
 else
   read -r -d '' PROMPT <<EOF || true
-You are the GOAL REVIEWER (model: ${MODEL}), not the plan attacker and not the implementer. You judge whether one goal is done. You do not write production code and you do not re-litigate product decisions locked in PLAN.md.
+You are the GOAL REVIEWER (model: ${MODEL}), not the plan attacker and not the implementer. You judge whether one goal is done. You do not write production code and you do not re-litigate product decisions locked in the plan.
 
 Read the brief at ${BRIEF_ABS}. It names:
 - GOAL — the id in GOALS.md
@@ -212,7 +212,7 @@ Read the brief at ${BRIEF_ABS}. It names:
 - DIFF_RANGE — informational (the range used to produce DIFF_FILE)
 - PROOF_OUTPUT — actual output of the proof command the Architect already ran. Treat it as ground truth. Do not invent a different test result.
 
-Then read GOALS.md (that goal only), PLAN.md, the oracle file if it is not "inline", CONTEXT.md, coding-standards.md if present, and DIFF_FILE. Identify:
+Then read GOALS.md (that goal only), the PLAN file the brief names (the signed plan as of BASE_SHA; judge against it, not the repo's copy), the oracle file if it is not "inline", CONTEXT.md, coding-standards.md if present, and DIFF_FILE. Identify:
 
 1. SPEC — does the diff implement this goal and only this goal?
 2. ORACLE — is the acceptance file unmodified? A touch is CRITICAL.

@@ -80,7 +80,8 @@ run_goal() {
   git init -q
   cp "$BASE" GOALS.md
   printf '# Journal: example\n' >docs/journal/example.md
-  git add -- GOALS.md docs/journal/example.md
+  printf "# Plan\n" >PLAN.md
+  git add -- GOALS.md PLAN.md docs/journal/example.md
   git commit -q -m base
   if [[ -n "${1:-}" ]]; then eval "$1"; fi
   "$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true

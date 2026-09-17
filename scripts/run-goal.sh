@@ -40,6 +40,8 @@ ART_DIR=""
 JOURNAL=""
 ORACLE=""
 PROOF=""
+PLAN_PATH=""
+PLAN_FROZEN=""
 BASE_SHA=""
 THREAD_ID=""
 SESSION_ID=""
@@ -283,14 +285,15 @@ verify_git_meta() {
   wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— $(git_meta_help)"
 }
 
-# Contract drift since BASE_SHA: this goal's file oracle, tests/acceptance/,
-# and all of GOALS.md except this goal's status. Sets CONTRACT_PATHS and
+# Contract drift since BASE_SHA: the plan, this goal's file oracle,
+# tests/acceptance/, and all of GOALS.md except this goal's status. Sets CONTRACT_PATHS and
 # one-line lists CONTRACT_COMMITTED (changed by commits after BASE_SHA, which
 # are listed in CONTRACT_COMMITS) and CONTRACT_UNCOMMITTED (staged, unstaged,
-# or untracked). Needs BASE_SHA, ORACLE from goals-base.md, and RUN_DIR.
+# or untracked). Needs BASE_SHA, PLAN_PATH and ORACLE from goals-base.md, and
+# RUN_DIR.
 contract_drift() {
   local drift goals_commit=0
-  CONTRACT_PATHS=(tests/acceptance)
+  CONTRACT_PATHS=(tests/acceptance "$PLAN_PATH")
   if [[ "$ORACLE" != "inline" && -n "$ORACLE" ]]; then
     CONTRACT_PATHS+=("$ORACLE")
   fi
@@ -458,6 +461,9 @@ fi
 ORACLE="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("oracle") or "")')"
 PROOF="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof") or "")')"
 
+PLAN_PATH="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("plan") or "")')"
+tracked_in_head "$PLAN_PATH" || die_gate "commit the signed plan $PLAN_PATH first (GOALS.md plan:)"
+
 if [[ "$ORACLE" != "inline" ]]; then
   [[ -n "$ORACLE" ]] || die_gate "$GOAL_ID has empty oracle"
   tracked_in_head "$ORACLE" || die_gate "commit file oracle $ORACLE first"
@@ -516,6 +522,14 @@ fi
 git show "$BASE_SHA:GOALS.md" >"$RUN_DIR/goals-base.md"
 ORACLE="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("oracle") or "")')"
 PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof") or "")')"
+# The signed plan as it stood at BASE_SHA. Both agents read this copy: the live
+# file is contract (contract_drift), and an edit to it must not become the
+# spec the reviewer judges that same edit against.
+PLAN_PATH="$("$GOALS_PY" "$RUN_DIR/goals-base.md" meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("plan") or "")')"
+PLAN_FROZEN="$RUN_DIR/plan-at-base-$(basename "$PLAN_PATH")"
+git cat-file -e "$BASE_SHA:$PLAN_PATH" 2>/dev/null && git show "$BASE_SHA:$PLAN_PATH" >"$PLAN_FROZEN" ||
+  die_gate "plan $PLAN_PATH is not committed at BASE_SHA ${BASE_SHA:0:12}"
+chmod 400 "$PLAN_FROZEN"
 
 # A run cut off before assess (timeout, quota, crash, Ctrl-C) can leave a
 # changed contract behind, and a paused goal invites hand edits. Refuse now,
@@ -557,7 +571,7 @@ while :; do
       echo "# Handoff: $GOAL_ID"
       echo
       echo "- Goal id: \`$GOAL_ID\`"
-      echo "- PLAN: PLAN.md"
+      echo "- PLAN (signed, frozen at BASE_SHA): \`$PLAN_FROZEN\` — read this copy. \`$PLAN_PATH\` in the repo is READ-ONLY."
       echo "- GOALS: GOALS.md (read fence from BASE_SHA)"
       echo "- Journal: \`$JOURNAL\` — git add this path on every checkpoint"
       echo "- Oracle (READ-ONLY): \`$ORACLE\`"
@@ -704,7 +718,7 @@ while :; do
   BRIEF="$RUN_DIR/review-${GOAL_ID}-r${ROUND}.md"
   cat >"$BRIEF" <<EOF
 GOAL: ${GOAL_ID}
-PLAN: PLAN.md
+PLAN: ${PLAN_FROZEN}
 GOALS: GOALS.md
 ORACLE: ${ORACLE}
 DIFF_FILE: ${DIFF}

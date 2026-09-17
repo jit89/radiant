@@ -75,6 +75,7 @@ fresh() {
   mkdir -p "$TMP/repo/docs/journal" "$CALLS" && cd "$TMP/repo"
   git init -q
   cp "$HERE/../GOALS.example.md" GOALS.md
+  printf '# Plan\n' >PLAN.md
   printf '# Journal: example\n' >docs/journal/example.md
   git add -A && git commit -q -m base
   printf '%s\n' $1 >"$CALLS/ds.plan"
