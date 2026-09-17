@@ -65,6 +65,8 @@ do_install() {
     "$ROOT/scripts/tests/blockers-test.sh" \
     "$ROOT/scripts/tests/resume-contract-test.sh" \
     "$ROOT/scripts/tests/verdict-test.sh" \
+    "$ROOT/scripts/tests/resume-state-test.sh" \
+    "$ROOT/scripts/lib/resume-state.py" \
     "$ROOT/scripts/lib/verdict.py" \
     "$ROOT/scripts/lib/run-timeout.py" \
     "$ROOT/scripts/lib/agent-result.py"
@@ -149,6 +151,12 @@ do_check() {
   else
     echo "verdicts: FAIL"; rc=1
     "$ROOT/scripts/tests/verdict-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/resume-state-test.sh" >/dev/null 2>&1; then
+    echo "resume state: OK (same thread/session, pending FIX restored)"
+  else
+    echo "resume state: FAIL"; rc=1
+    "$ROOT/scripts/tests/resume-state-test.sh" || true
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \

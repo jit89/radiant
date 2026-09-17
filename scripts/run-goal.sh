@@ -58,6 +58,8 @@ FIX_COUNT_N=0
 GIT_META_SAVED=""
 PHASE="gate"
 CHILD_PID=""
+PENDING_FIX_ROUND=""
+PENDING_FIX_HASH=""
 
 usage() {
   echo "usage: run-goal.sh <goal-id>" >&2
@@ -324,19 +326,29 @@ journal_line() {
   printf '\n%s\n' "$line" >>"$JOURNAL"
 }
 
-parse_last_dispatch() {
-  local gid="$1"
-  [[ -f "$JOURNAL" ]] || return 1
-  local line
-  line="$(grep -E "ORCHESTRATOR dispatch ${gid} " "$JOURNAL" | tail -n1 || true)"
-  [[ -n "$line" ]] || return 1
-  BASE_SHA="$(sed -n 's/.*BASE_SHA=\([^ ]*\).*/\1/p' <<<"$line")"
-  THREAD_ID="$(sed -n 's/.*THREAD_ID=\([^ ]*\).*/\1/p' <<<"$line")"
-  SESSION_ID="$(sed -n 's/.*SESSION_ID=\([^ ]*\).*/\1/p' <<<"$line")"
-  ROUND="$(sed -n 's/.* r\([0-9][0-9]*\) .*/\1/p' <<<"$line")"
-  [[ "$THREAD_ID" == "-" ]] && THREAD_ID=""
-  [[ "$SESSION_ID" == "-" ]] && SESSION_ID=""
+# Where this in_progress goal stopped, from the journal (lib/resume-state.py).
+# Sets BASE_SHA, ROUND, THREAD_ID, SESSION_ID, PENDING_FIX_ROUND and
+# PENDING_FIX_HASH (the last two empty when no FIX is owed).
+load_resume_state() {
+  local state
+  state="$(python3 "$HERE/lib/resume-state.py" "$JOURNAL" "$1")" || return 1
+  [[ -n "$state" ]] || return 1
+  IFS=$'\t' read -r BASE_SHA ROUND THREAD_ID SESSION_ID PENDING_FIX_ROUND PENDING_FIX_HASH <<<"$state"
+  local v
+  for v in BASE_SHA THREAD_ID SESSION_ID PENDING_FIX_ROUND PENDING_FIX_HASH; do
+    [[ "${!v}" != "-" ]] || printf -v "$v" '%s' ""
+  done
   [[ -n "$BASE_SHA" ]]
+}
+
+# Journal the thread/session ids as soon as a launcher returns them, so a
+# resume after any later stop continues the same conversations.
+JOURNALED_IDS=""
+journal_ids() {
+  local ids="THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
+  [[ "$ids" != "$JOURNALED_IDS" ]] || return 0
+  journal_line "## $(utc) — ORCHESTRATOR ids ${GOAL_ID} r${ROUND} ${ids}"
+  JOURNALED_IDS="$ids"
 }
 
 # --- start -----------------------------------------------------------------
@@ -455,7 +467,7 @@ if ! load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env"; then
 fi
 
 if [[ "$RESUME" -eq 1 ]]; then
-  parse_last_dispatch "$GOAL_ID" || die_gate "in_progress but no journaled BASE_SHA for $GOAL_ID"
+  load_resume_state "$GOAL_ID" || die_gate "in_progress but no journaled BASE_SHA for $GOAL_ID"
   git merge-base --is-ancestor "$BASE_SHA" HEAD || \
     die_gate "journaled BASE_SHA $BASE_SHA is not an ancestor of HEAD"
 else
@@ -478,8 +490,26 @@ if [[ "$RESUME" -eq 1 ]]; then
   fi
 fi
 
-# --- implement / review loop ----------------------------------------------
+# A resume owing FIX findings continues that fix round with those findings,
+# verified against the hash the journal recorded when they were issued.
 FIX_HANDOFF=""
+if [[ "$RESUME" -eq 1 && -n "$PENDING_FIX_ROUND" ]]; then
+  pending_fix="$ART_DIR/fix-r${PENDING_FIX_ROUND}.md"
+  # The journaled hash is of the findings, which the handoff carries verbatim
+  # after its "## Findings" line.
+  pending_hash="$({ awk 'found { print } /^## Findings$/ { found = 1 }' "$pending_fix" 2>/dev/null || true; } |
+    shasum -a 256 | awk '{print $1}')"
+  if [[ ! -f "$pending_fix" || "$pending_hash" != "$PENDING_FIX_HASH" ]]; then
+    die_gate "FIX findings for r${PENDING_FIX_ROUND} are missing or do not match the journaled hash ($pending_fix). Resuming would drop them; re-review instead: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
+  fi
+  if [[ "$ROUND" -ge "$MAX_FIX_ROUNDS" ]]; then
+    wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; FIX r${PENDING_FIX_ROUND} still pending. Rerun with a higher MAX_FIX_ROUNDS to apply it."
+  fi
+  FIX_HANDOFF="$RUN_DIR/handoff-${GOAL_ID}-fix-r${PENDING_FIX_ROUND}.md"
+  cp "$pending_fix" "$FIX_HANDOFF"
+fi
+
+# --- implement / review loop ----------------------------------------------
 while :; do
   if [[ -n "$FIX_HANDOFF" ]]; then
     HAND="$FIX_HANDOFF"
@@ -504,6 +534,7 @@ while :; do
   fi
 
   journal_line "## $(utc) — ORCHESTRATOR dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA} THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
+  JOURNALED_IDS="THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
   events_append --event dispatch --severity info --goal "$GOAL_ID" --round "$ROUND" \
     --base-sha "$BASE_SHA" \
     --summary "dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA}" \
@@ -523,6 +554,7 @@ while :; do
   verify_git_meta "during implementer r${ROUND}"
   LAST_DEEPSEEK="$(kv "$DS_OUT" DEEPSEEK_RESULT)"
   kv_keep THREAD_ID "$DS_OUT" THREAD_ID
+  journal_ids
   RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
   DEEPSEEK_LOG="$(kv "$DS_OUT" LOG)"
   DEEPSEEK_ERR="$(kv "$DS_OUT" stderr)"
@@ -640,6 +672,7 @@ EOF
   [[ -s "$RV_OUT.wrap" ]] && cat "$RV_OUT.wrap" >&2 || true
   LAST_CLAUDE="$(kv "$RV_OUT" CLAUDE_REVIEW_RESULT)"
   kv_keep SESSION_ID "$RV_OUT" SESSION_ID
+  journal_ids
   VERDICT_FILE="$(kv "$RV_OUT" VERDICT_FILE)"
   if [[ -n "$VERDICT_FILE" ]]; then
     cp -f "$VERDICT_FILE" "$ART_DIR/verdict-r${ROUND}.md" 2>/dev/null || true
@@ -699,11 +732,6 @@ EOF
         wake "blocked-oracle-edit" "a FIX finding names the oracle / tests/acceptance"
       fi
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
-      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}"
-      events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
-        --verdict FIX --base-sha "$BASE_SHA" \
-        --summary "fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}" \
-        --payload "$(printf '{"fix_count":%s,"fix_hash":"%s"}' "$FIX_COUNT_N" "$FIX_HASH")"
       FIXH="$RUN_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
       {
         echo "# Fix handoff: $GOAL_ID (round $ROUND)"
@@ -714,7 +742,15 @@ EOF
         echo "## Findings"
         cat "$FINDINGS"
       } >"$FIXH"
+      # Saved before the journal names their hash: a resume rebuilds the
+      # fix round from these (never from the journal, which the implementer
+      # reads and which must not carry finding text).
       cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
+      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}"
+      events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
+        --verdict FIX --base-sha "$BASE_SHA" \
+        --summary "fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}" \
+        --payload "$(printf '{"fix_count":%s,"fix_hash":"%s"}' "$FIX_COUNT_N" "$FIX_HASH")"
       ROUND=$((ROUND + 1))
       # ROUND counts fix rounds already spent, so >= gives exactly
       # MAX_FIX_ROUNDS of them (was > — one extra implementer pass).
