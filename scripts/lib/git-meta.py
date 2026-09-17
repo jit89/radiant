@@ -12,7 +12,10 @@ FIFO in hooks/ would otherwise block the read forever, outside every step
 timeout. A FIFO, socket, device, or a path that cannot be read (permissions,
 removed mid-walk) fails verification: nothing git needs there is like that.
 
-A config file is followed: `include.path` and `includeIf.*.path` name more
+A config file is read the way git reads it — physical lines joined on a
+trailing backslash into logical lines first, then quotes, escapes and
+comments — or git and this would resolve different files. A config file is
+followed: `include.path` and `includeIf.*.path` name more
 config, anywhere on disk, and a filter or textconv driver defined there runs
 as the host user just the same. Every include is fingerprinted, whatever its
 condition — conditions are not evaluated here, so the set is a superset of
@@ -77,12 +80,32 @@ def unquote(value):
     return "".join(out).strip()
 
 
+def logical_lines(text):
+    """Git's logical lines: a physical line ending in an unescaped backslash
+    continues onto the next. Returns (lines, error)."""
+    out, buf = [], None
+    for line in text.splitlines():
+        trailing = len(line) - len(line.rstrip("\\"))
+        if trailing % 2 == 1:  # an odd count ends in a continuation
+            buf = (buf or "") + line[:-1]
+            continue
+        out.append((buf or "") + line)
+        buf = None
+    if buf is not None:
+        return out, "ends in a dangling backslash continuation"
+    return out, None
+
+
 def include_paths(text, config_path):
     """Every path an [include] / [includeIf] section names, plus unresolvable
-    ones as (None, raw). Relative paths resolve against the config's dir."""
+    ones as (None, raw). Relative paths resolve against the config's dir.
+    Raises ValueError when the file cannot be read the way git reads it."""
     found, section = [], ""
     base = os.path.dirname(config_path)
-    for line in text.splitlines():
+    lines, error = logical_lines(text)
+    if error:
+        raise ValueError(error)
+    for line in lines:
         m = SECTION_RE.match(line)
         if m:
             section = m.group(1).lower()
@@ -177,7 +200,12 @@ def manifest(dirs):
         except OSError as e:
             problems.append(f"{path} (unreadable: {e.strerror or e})")
             return
-        for target, raw in include_paths(text, path):
+        try:
+            includes = include_paths(text, path)
+        except ValueError as e:
+            problems.append(f"{path} ({e})")
+            return
+        for target, raw in includes:
             if target is None:
                 problems.append(f"{path} (include path {raw!r} cannot be resolved here)")
                 continue

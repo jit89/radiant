@@ -311,6 +311,38 @@ inc_case "include chain: config -> a -> b" \
   "CONF=.git/a.conf; command git config include.path \"\$PWD/.git/a.conf\"; command git config --file .git/a.conf include.path \"\$PWD/.git/b.conf\"; CONF=.git/b.conf; $BENIGN" \
   "CONF=.git/b.conf; $EVIL"
 
+# Git joins a physical line ending in a backslash with the next one, so a
+# path may be split anywhere. The guard must resolve what git resolves.
+inc_case "include split before the extension" \
+  'printf "[filter \"inc\"]\n\tclean = cat\n" >.git/split.conf
+   printf "\n[include]\n\tpath = split\\\\\n.conf\n" >>.git/config' \
+  'CONF=.git/split.conf; '"$EVIL"
+inc_case "absolute include split across lines" \
+  'printf "[filter \"inc\"]\n\tclean = cat\n" >out/abs.conf
+   printf "\n[include]\n\tpath = %s/out/ab\\\\\ns.conf\n" "$PWD" >>.git/config
+   mv out/abs.conf out/abs.conf.tmp && mv out/abs.conf.tmp out/abs.conf' \
+  'CONF=out/abs.conf; '"$EVIL"
+inc_case "quoted include split across lines" \
+  'printf "[filter \"inc\"]\n\tclean = cat\n" >.git/quoted.conf
+   printf "\n[include]\n\tpath = \"quoted\\\\\n.conf\"\n" >>.git/config' \
+  'CONF=.git/quoted.conf; '"$EVIL"
+
+# A config the guard cannot read the way git does: fail closed.
+rm -rf "$TMP/inc" && rm -f "$HOME/.cache/claude-coding-workflow/"git-meta-*.txt
+mkdir -p "$TMP/inc" && (cd "$TMP/inc" && command git init -q)
+r=0
+python3 "$HERE/lib/run-timeout.py" 20 bash -c '
+  cd "$1"
+  printf "\n[include]\n\tpath = dangling\134\n" >>.git/config
+  source "$2/lib/git-guard.sh"
+  git_meta_init
+  git_meta_verify "$GIT_META_SAVED" && exit 0
+  echo "$GIT_META_CHANGED"
+  exit 1' _ "$TMP/inc" "$HERE" >"$TMP/inc.out" 2>&1 || r=$?
+check "dangling continuation: fails closed" "1" "$r"
+check "dangling continuation: says why" "yes" \
+  "$(grep -q 'dangling backslash' "$TMP/inc.out" && echo yes || echo no)"
+
 # An include git would expand itself (~user, %(prefix)) is not resolvable
 # here: fail closed rather than guess.
 rm -rf "$TMP/inc" && rm -f "$HOME/.cache/claude-coding-workflow/"git-meta-*.txt
