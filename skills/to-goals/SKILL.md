@@ -62,8 +62,26 @@ The implementer will be forbidden to edit these. A weak oracle (vague
 assertions, missing plan cases) is a Phase 3 failure, not a Phase 4
 problem.
 
+Then **sweep** the acceptance files that already exist. The host guards
+the whole `tests/acceptance/` directory, so every edit the plan owes
+there is yours, now (GOAL-FORMAT.md, Oracle rules):
+
+1. Search every existing file under `tests/acceptance/` — earlier goals'
+   and earlier weeks', none excluded by name — for **pins** the plan
+   changes.
+2. Apply each acceptance edit, red, and list it under the goal's
+   **Acceptance edits (applied, read-only)**.
+3. List each pinned file outside the directory under the owning goal's
+   **Edits owned**.
+4. Journal a satisfiability note per edit: where code exists, the
+   scratch fix that turned it green (then reverted); where it cannot
+   exist yet, what you measured and what is inferred.
+5. Set each `proof` to the acceptance files green once that goal is done.
+
 Done when every goal has either a red acceptance file or an inline
-case table covering every plan case for that slice.
+case table covering every plan case for that slice, and every existing
+acceptance file has been swept, with each pin the plan changes applied
+or owned by a goal.
 
 ## 5. Write and stop
 
@@ -78,9 +96,12 @@ Append the journal (`docs/journal/<slug>.md`):
 
 Ids, edges the user changed, where the oracles live.
 
-**Commit** `GOALS.md`, every file oracle, and `docs/journal/<slug>.md`
-before telling the user they can run. The host orchestrator refuses
-an uncommitted DAG.
+Run `~/claude-coding-workflow/scripts/goals.py GOALS.md validate`; fix
+every error it names.
+
+**Commit** `GOALS.md`, every file oracle, every swept acceptance edit,
+and `docs/journal/<slug>.md` in one commit before telling the user they
+can run. The host orchestrator refuses an uncommitted DAG.
 
 Present the cut. Ask: *"/run-goal for one ready goal, or `/run-goals`
 to walk the DAG."* Do not dispatch until they say so.
@@ -91,7 +112,8 @@ journal are committed, and the user has seen the stop.
 ## Hard rules
 
 - Product decisions stay in `PLAN.md`. This skill only cuts.
-- The Architect owns every oracle. Write them here, red.
+- The Architect owns everything under `tests/acceptance/`: new oracles
+  and edits to existing ones. Write them here, red.
 - No Opus pass on the DAG (v1).
 - No dispatch from this skill. `/run-goal` is Phase 4.
 - `to-tickets` is not this skill. In-repo `GOALS.md` only.

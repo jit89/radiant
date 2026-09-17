@@ -87,6 +87,39 @@ second' >"$TMP/dup.md"
 check "duplicate section: invalid" "INVALID" "$(verdict "$TMP/dup.md")"
 check "error names the duplicate" "1" "$(says "$TMP/dup.md" 'g1-store: 2 ## g1-store sections')"
 
+# D-08: acceptance edits are the Architect's; "Edits owned" is implementer work.
+goals inline '
+## g1-store — Store
+cases
+
+**Acceptance edits (applied, read-only):** `tests/acceptance/test_g0.py` count 22 → 23
+
+**Edits owned:** `pyproject.toml` packages += tools
+- `tests/unit/test_store.py` row scope' >"$TMP/owned-ok.md"
+check "owned files outside tests/acceptance: valid" "OK" "$(verdict "$TMP/owned-ok.md")"
+
+goals inline '
+## g1-store — Store
+cases
+
+**Edits owned:**
+- `tests/unit/test_store.py` row scope
+- `tests/acceptance/test_g0.py:187` count 22 → 23
+
+**Out of scope:** retries' >"$TMP/owned-bad.md"
+check "acceptance path under Edits owned: invalid" "INVALID" "$(verdict "$TMP/owned-bad.md")"
+check "error names goal and path" "1" \
+  "$(says "$TMP/owned-bad.md" 'g1-store: tests/acceptance/test_g0.py:187 is under \*\*Edits owned\*\*')"
+
+goals inline '
+## g1-store — Store
+cases
+
+**Edits owned:** `src/store.py`
+
+**Out of scope:** changes to `tests/acceptance/test_g0.py`' >"$TMP/owned-later.md"
+check "acceptance path in a later section: valid" "OK" "$(verdict "$TMP/owned-later.md")"
+
 check "GOALS.example.md validates" "OK" "$(verdict "$HERE/../GOALS.example.md")"
 check "mock fixture validates" "OK" "$(verdict "$HERE/fixtures/GOALS.mock.md")"
 

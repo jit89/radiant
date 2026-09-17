@@ -547,6 +547,7 @@ while :; do
       echo "- GOALS: GOALS.md (read fence from BASE_SHA)"
       echo "- Journal: \`$JOURNAL\` — git add this path on every checkpoint"
       echo "- Oracle (READ-ONLY): \`$ORACLE\`"
+      echo "- tests/acceptance/ is READ-ONLY, every file in it. One that looks wrong is a blocker to report, not an edit."
       echo "- BASE_SHA: \`$BASE_SHA\`"
       echo "- Proof: \`$PROOF\`"
       echo "- Suggested skills: tdd"

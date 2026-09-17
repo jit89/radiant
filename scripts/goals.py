@@ -278,7 +278,29 @@ def validate_bodies(text: str, data: dict) -> list[str]:
             errors.append(f"{gid}: {n} ## {gid} sections (the handoff would take the first)")
         if n == 0 and g.get("oracle") == "inline":
             errors.append(f"{gid}: oracle: inline but no ## {gid} section — the case table is the oracle")
+        if n:
+            for path in owned_acceptance_paths(goal_body(text, gid)):
+                errors.append(
+                    f"{gid}: {path} is under **Edits owned** — the host guards all of "
+                    "tests/acceptance/; the Architect applies that edit before dispatch "
+                    "and lists it under **Acceptance edits (applied, read-only)**"
+                )
     return errors
+
+
+# A body section starts with a bold label line, "**Label:**".
+SECTION_RE = re.compile(r"^\*\*[^*\n]+:\*\*", re.M)
+ACCEPTANCE_PATH_RE = re.compile(r"tests/acceptance/[^\s`'\"),;]*")
+
+
+def owned_acceptance_paths(body: str) -> list[str]:
+    """tests/acceptance/ paths listed under the body's **Edits owned:** section."""
+    m = re.search(r"^\*\*Edits owned:\*\*", body, re.M)
+    if not m:
+        return []
+    nxt = SECTION_RE.search(body, m.end())
+    section = body[m.end() : nxt.start() if nxt else len(body)]
+    return ACCEPTANCE_PATH_RE.findall(section)
 
 
 def validate(data: dict) -> list[str]:

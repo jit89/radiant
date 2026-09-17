@@ -50,6 +50,10 @@ goals:
 |-------|----------|
 | <concrete> | <concrete> |
 
+**Acceptance edits (applied, read-only):** <edits the Architect already made under `tests/acceptance/` for this goal — file:line, old → new — or None>
+
+**Edits owned:** <files outside `tests/acceptance/` this goal must change because an acceptance assertion pins them (config, packaging, unit tests), or None>
+
 **Out of scope:** <bounds + ceilings that need a ponytail comment>
 
 **Oracle:** `tests/acceptance/g1-store.test.ts` (read-only to the implementer)
@@ -87,3 +91,24 @@ Each goal has exactly one `## <id> — <title>` section: the id, then a space or
 The Architect authors the oracle. The implementer makes it pass and does not edit it. A case that looks wrong is a blocker to bounce, not a license to change the test.
 
 Each case is an example: concrete input → concrete output, plus the edges the plan named. Assertions are exact values, not "does not throw".
+
+### The whole directory is the Architect's
+
+The host guards all of `tests/acceptance/`, not only a goal's own oracle: a change to any file there during a goal's run — an earlier goal's, an earlier week's — stops that goal as tampering, and a resume refuses one made while the goal was paused. So every edit under `tests/acceptance/` is the Architect's, applied in Phase 3 before dispatch and listed under **Acceptance edits (applied, read-only)**. **Edits owned** holds only paths outside the directory; `goals.py validate` rejects a `tests/acceptance/` path there.
+
+### Pins
+
+A **pin** is an existing assertion that fixes something the plan changes. When a plan changes behaviour an earlier oracle already covers, each pin owes an edit. The kinds that slipped through before:
+
+- exact counts and totals — a whole-library count, `len(x) == 22`, `{"held": 1, "skipped": 22}`
+- field, parameter, and signature lists, including argument order
+- pinned lists and sets, including ones a test reads from config (a package list in `pyproject.toml`)
+- single-row picks — `[0]`, `fetchone()`, a read of the first row where the plan adds rows of another kind
+- example values whose width or format the plan changes
+- docstrings and comments saying "until g<n>" or describing the old behaviour
+
+A pin on a file outside the directory (the `pyproject.toml` list itself) is implementer work under that goal's **Edits owned**.
+
+### Proof composition
+
+Pre-applied edits stay red until their goal lands. A goal's `proof` runs only acceptance files that are green once that goal is done; a file carrying a later goal's red edit stays out of it.

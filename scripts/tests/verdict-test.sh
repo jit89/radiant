@@ -64,10 +64,10 @@ export DEEPSEEK_API_KEY=stub-not-a-key
 unset ANTHROPIC_API_KEY
 mkdir -p "$HOME" "$TMP/house/scripts"
 cp -R "$HERE/." "$TMP/house/scripts/"
-printf '%s\n' '#!/usr/bin/env bash' \
+# Implementer stub keeps the handoff; reviewer stub keeps the brief (last arg).
+printf '%s\n' '#!/usr/bin/env bash' "cp \"\${!#}\" $TMP/handoff.md" \
   'echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"' \
   'printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"' >"$TMP/house/scripts/deepseek-code.sh"
-# Reviewer stub keeps the brief it was handed (last argument).
 printf '%s\n' '#!/usr/bin/env bash' "cp \"\${!#}\" $TMP/brief.md" 'exit 1' \
   >"$TMP/house/scripts/claude-goal-review.sh"
 chmod +x "$TMP/house/scripts/"*.sh
@@ -82,6 +82,8 @@ check "reviewer received a brief" "yes" "$([[ -s "$TMP/brief.md" ]] && echo yes 
 check "brief asks for no numbered findings" "0" \
   "$(grep -cE '"?1\. *file:line' "$TMP/brief.md" || true)"
 check "brief points at FIX: lines" "1" "$(grep -c 'FIX:' "$TMP/brief.md" || true)"
+check "handoff marks all of tests/acceptance read-only" "1" \
+  "$(grep -c 'tests/acceptance/ is READ-ONLY, every file' "$TMP/handoff.md" || true)"
 
 # A finding written from the prompt's own template must parse.
 template="$(grep -m1 '^FIX: <path>' "$HERE/claude-goal-review.sh")"
