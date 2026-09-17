@@ -20,6 +20,9 @@ source "$HERE/lib/dotenv.sh"
 source "$HERE/lib/events.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/findings.sh"
+# Defines git(): every git call below runs with hooks and fsmonitor off.
+# shellcheck disable=SC1091
+source "$HERE/lib/git-guard.sh"
 
 GOALS_PY="$HERE/goals.py"
 DEEPSEEK="$HERE/deepseek-code.sh"
@@ -52,6 +55,7 @@ DEEPSEEK_LOG=""
 DEEPSEEK_ERR=""
 FIX_HASH=""
 FIX_COUNT_N=0
+GIT_META_SAVED=""
 
 usage() {
   echo "usage: run-goal.sh <goal-id>" >&2
@@ -115,7 +119,7 @@ write_stop() {
   git restore -- <paths>   # or commit / stash the in-flight cycle
 
 ## git status --porcelain
-$(git status --porcelain 2>/dev/null || echo "(no git)")
+$(git status --porcelain 2>/dev/null || echo "(git skipped or unavailable)")
 EOF
   STOP_WRITTEN=1
 }
@@ -127,14 +131,17 @@ record_wake() {
   case "$reason" in
     rate_limited|reviewer-rate-limited) sev=warning ;;
   esac
-  if [[ -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] && tracked_in_head "$JOURNAL"; then
+  # Tainted: no git at all, so journal the line and leave it uncommitted.
+  if [[ -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] \
+    && { [[ "$GIT_META_TAINTED" -eq 1 ]] || tracked_in_head "$JOURNAL"; }; then
     journal_line "## $(utc) — ORCHESTRATOR wake ${GOAL_ID:-?} r${ROUND} reason=${reason}"
   fi
   events_append --event wake --severity "$sev" \
     --goal "${GOAL_ID:-}" --round "${ROUND}" --reason "$reason" \
     --verdict "${LAST_VERDICT:-}" --base-sha "${BASE_SHA:-}" \
     --summary "wake ${GOAL_ID:-?} r${ROUND} reason=${reason}"
-  if [[ -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] && tracked_in_head "$JOURNAL"; then
+  if [[ "$GIT_META_TAINTED" -eq 0 && -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] \
+    && tracked_in_head "$JOURNAL"; then
     git add -- "$JOURNAL" || true
     if ! git diff --cached --quiet -- "$JOURNAL" 2>/dev/null; then
       git commit -m "chore(${GOAL_ID:-?}): orchestrator wake ${reason}" -- "$JOURNAL" || \
@@ -153,6 +160,7 @@ wake() {
 succeed() {
   STOP_WRITTEN=1
   STOP_FILE=""
+  [[ -n "$GIT_META_SAVED" ]] && rm -f "$GIT_META_SAVED"
   # Nothing here is needed once the goal lands; verdicts and fix handoffs
   # were already copied to ART_DIR. On a wake we keep RUN_DIR — it is the
   # evidence the stop file points at.
@@ -205,6 +213,13 @@ except subprocess.TimeoutExpired:
     sys.exit(124)
 sys.exit(rc)
 PY
+}
+
+# Wake if .git config/hooks/info differ from the saved manifest. git_meta_verify
+# has already disabled host git by then, so the wake path runs none.
+verify_git_meta() {
+  git_meta_verify "$GIT_META_SAVED" "$RUN_DIR/git-meta-now.txt" && return 0
+  wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— host git is off for this run. Inspect with cat / ls -la, not git. Revert anything you did not make, then re-baseline: rm $GIT_META_SAVED"
 }
 
 tracked_in_head() {
@@ -274,6 +289,12 @@ JOURNAL="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.l
 if ! tracked_in_head GOALS.md || ! tracked_in_head "$JOURNAL"; then
   die_gate "commit GOALS.md, oracles, and the journal first"
 fi
+
+# .git baseline, before any git command that can run a program. A saved
+# manifest outlives a wake, so tampering is caught on resume too.
+git_meta_init || die_gate "cannot locate the gitdir"
+GIT_META_SAVED="$ART_DIR/git-meta-$(printf '%s\n' "${GIT_META_DIRS[@]}" | shasum -a 256 | cut -c1-16).txt"
+verify_git_meta "since the last run of $GOAL_ID"
 
 # Cache walk_id until walk-end. Mint → one journal line, fail-closed commit.
 # Before the dirty-tree gate so a later wake still has a walk_id.
@@ -406,6 +427,7 @@ while :; do
   fi
   ds_rc=$?
   set -e
+  verify_git_meta "during implementer r${ROUND}"
   LAST_DEEPSEEK="$(kv "$DS_OUT" DEEPSEEK_RESULT)"
   THREAD_ID="$(kv "$DS_OUT" THREAD_ID)"
   RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
@@ -490,6 +512,7 @@ while :; do
     bash -c "$PROOF" >"$PROOF_FILE" 2>&1
     PROOF_EXIT=$?
     set -e
+    verify_git_meta "during proof r${ROUND}"
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
       if [[ "$LAST_DEEPSEEK" == ok* ]]; then
         wake "proof-red" "host proof exit $PROOF_EXIT after DEEPSEEK_RESULT=ok"
@@ -499,7 +522,7 @@ while :; do
   fi
 
   DIFF="$RUN_DIR/diff-${GOAL_ID}-r${ROUND}.patch"
-  git diff "$BASE_SHA"..HEAD -- . ':!GOALS.md' ":!${JOURNAL}" >"$DIFF"
+  git diff --no-ext-diff --no-textconv "$BASE_SHA"..HEAD -- . ':!GOALS.md' ":!${JOURNAL}" >"$DIFF"
   if [[ ! -s "$DIFF" ]]; then
     wake "empty-diff" "no implementer changes in $BASE_SHA..HEAD"
   fi

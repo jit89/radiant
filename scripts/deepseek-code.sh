@@ -182,6 +182,9 @@ toml_quote() {
 # rule and skips that carve-out, so `git commit` can create
 # index.lock without require_escalated. Linked worktrees need both
 # the per-worktree gitdir and the common gitdir.
+# That hands the model hooks and config too. run-goal.sh closes the
+# gap: lib/git-guard.sh runs host git with hooks off and wakes if
+# .git config / hooks / info changed during the pass.
 compute_git_writable_roots() {
   local git_dir common
   git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"

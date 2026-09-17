@@ -6,7 +6,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-orch-commit-XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-export EVENTS_CACHE="$TMP/cache"
+export EVENTS_CACHE="$TMP/cache" HOME="$TMP/home"
+mkdir -p "$HOME"
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
 export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
 fails=0

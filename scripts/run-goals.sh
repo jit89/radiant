@@ -13,6 +13,9 @@ GOALS_PY="$HERE/goals.py"
 RUN_GOAL="$HERE/run-goal.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/events.sh"
+# Defines git(): hooks and fsmonitor off. run-goal.sh checks .git itself.
+# shellcheck disable=SC1091
+source "$HERE/lib/git-guard.sh"
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "not a git repo" >&2

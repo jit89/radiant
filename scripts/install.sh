@@ -57,6 +57,7 @@ do_install() {
     "$ROOT/scripts/install.sh" \
     "$ROOT/scripts/tests/findings-test.sh" \
     "$ROOT/scripts/tests/orch-commit-test.sh" \
+    "$ROOT/scripts/tests/git-guard-test.sh" \
     "$ROOT/scripts/lib/agent-result.py"
   echo "launchers: grok-review.sh claude-goal-review.sh deepseek-code.sh goals.py"
 }
@@ -91,6 +92,12 @@ do_check() {
   else
     echo "orchestrator commits: FAIL"; rc=1
     "$ROOT/scripts/tests/orch-commit-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/git-guard-test.sh" >/dev/null 2>&1; then
+    echo "git guard: OK (.git tamper wakes, hooks inert)"
+  else
+    echo "git guard: FAIL"; rc=1
+    "$ROOT/scripts/tests/git-guard-test.sh" || true
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \
@@ -170,7 +177,8 @@ do_check() {
   rm -rf "$evtmp"
   waketmp="$(mktemp -d "${TMPDIR:-/tmp}/cw-wake-check-XXXXXX")"
   if (
-    export EVENTS_CACHE="$waketmp/cache"
+    export EVENTS_CACHE="$waketmp/cache" HOME="$waketmp/home"
+    mkdir -p "$HOME"
     export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
     export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
     cd "$waketmp"
