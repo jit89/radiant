@@ -64,6 +64,8 @@ do_install() {
     "$ROOT/scripts/tests/goals-body-test.sh" \
     "$ROOT/scripts/tests/blockers-test.sh" \
     "$ROOT/scripts/tests/resume-contract-test.sh" \
+    "$ROOT/scripts/tests/verdict-test.sh" \
+    "$ROOT/scripts/lib/verdict.py" \
     "$ROOT/scripts/lib/run-timeout.py" \
     "$ROOT/scripts/lib/agent-result.py"
   echo "launchers: grok-review.sh claude-goal-review.sh deepseek-code.sh goals.py"
@@ -141,6 +143,12 @@ do_check() {
   else
     echo "resume contract: FAIL"; rc=1
     "$ROOT/scripts/tests/resume-contract-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/verdict-test.sh" >/dev/null 2>&1; then
+    echo "verdicts: OK (final VERDICT: line only; brief matches prompt)"
+  else
+    echo "verdicts: FAIL"; rc=1
+    "$ROOT/scripts/tests/verdict-test.sh" || true
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \

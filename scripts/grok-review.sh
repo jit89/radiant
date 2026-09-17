@@ -91,14 +91,9 @@ GROK_BIN="$(find_grok)" || {
 
 new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 
+# Final line only, full "VERDICT: <TOKEN>" form; the grammar is lib/verdict.py.
 verdict_of() {
-  local last
-  last="$(grep -oE 'VERDICT:[[:space:]]*(APPROVED|REVISE)' "$1" | tail -n1 || true)"
-  case "$last" in
-    *APPROVED*) echo APPROVED ;;
-    *REVISE*) echo REVISE ;;
-    *) echo MISSING ;;
-  esac
+  python3 "$HERE/lib/verdict.py" "$1" APPROVED REVISE
 }
 
 run_grok() {

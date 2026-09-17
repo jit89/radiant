@@ -619,7 +619,7 @@ DIFF_FILE: ${DIFF}
 DIFF_RANGE: ${BASE_SHA}..HEAD
 PROOF_OUTPUT: ${PROOF_FILE}
 
-Number FIX findings as "1. file:line — defect — what to change".
+Findings: the FIX: line format in your instructions. Numbered lists are not parsed.
 Do not ask the implementer to edit the oracle or tests/acceptance/.
 EOF
 

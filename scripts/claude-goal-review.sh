@@ -87,22 +87,9 @@ load_key_from_files ANTHROPIC_API_KEY .env "$HOUSE/.env" || true
 
 new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 
+# Final line only, full "VERDICT: <TOKEN>" form; the grammar is lib/verdict.py.
 verdict_of() {
-  # Last non-empty line only. A quoted VERDICT: DONE in the body must not win.
-  # The prompt's example is `VERDICT: DONE — goal is met…`; accept a suffix
-  # after the token (bash case globs are not regex, so VERDICT:*DONE required
-  # the line to *end* with DONE and treated the documented example as MISSING).
-  local last token
-  last="$(grep -Ev '^[[:space:]]*$' "$1" | tail -n1 | tr -d '\r' || true)"
-  token="${last#VERDICT:}"
-  token="${token#"${token%%[![:space:]]*}"}"
-  token="${token%%[[:space:]—-]*}"
-  case "$token" in
-    DONE) echo DONE ;;
-    FIX) echo FIX ;;
-    BLOCKED) echo BLOCKED ;;
-    *) echo MISSING ;;
-  esac
+  python3 "$HERE/lib/verdict.py" "$1" DONE FIX BLOCKED
 }
 
 run_claude() {
