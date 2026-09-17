@@ -365,6 +365,13 @@ case "$STATUS" in
   *) die_gate "$GOAL_ID is $STATUS (need ready or in_progress)" ;;
 esac
 
+# A status is a cache of the edges, and can be stale or hand-edited. The walker
+# never dispatches past an unfinished blocker; neither does a direct run.
+OPEN_BLOCKERS="$("$GOALS_PY" GOALS.md blockers "$GOAL_ID" | paste -sd ',' -)"
+if [[ -n "$OPEN_BLOCKERS" ]]; then
+  die_gate "$GOAL_ID has unfinished blockers: ${OPEN_BLOCKERS//,/, }. Finish them first, or remove the edge from blocked_by in GOALS.md and commit that decision."
+fi
+
 ORACLE="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("oracle") or "")')"
 PROOF="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof") or "")')"
 

@@ -14,6 +14,7 @@ Usage (from the target repo):
   goals.py [GOALS.md] set <id> <status>
   goals.py [GOALS.md] show <id>
   goals.py [GOALS.md] body <id>
+  goals.py [GOALS.md] blockers <id>     # unfinished blocked_by, "id (status)"
   goals.py [GOALS.md] meta
   goals.py [GOALS.md] status-only-id <id> <other.md>   # whole file, not just the fence
   goals.py [GOALS.md] todos
@@ -351,6 +352,16 @@ def frontier(data: dict) -> list[str]:
     return progress + ready
 
 
+def open_blockers(data: dict, gid: str) -> list[str]:
+    """blocked_by entries that are not done — the same rule frontier uses."""
+    idx = by_id(data)
+    return [
+        f"{b} ({idx[b].get('status')})"
+        for b in by_id(data)[gid].get("blocked_by") or []
+        if b in idx and unfinished(idx[b]["status"])
+    ]
+
+
 def refresh(data: dict) -> list[str]:
     """Flip blocked↔ready from edges. Do not touch in_progress/done/bounced."""
     idx = by_id(data)
@@ -465,6 +476,16 @@ def cmd_show(path, data, extra, **_):
     return 0
 
 
+def cmd_blockers(path, data, extra, **_):
+    if len(extra) != 1:
+        raise SystemExit("blockers <id>")
+    if extra[0] not in by_id(data):
+        raise SystemExit(f"unknown goal {extra[0]}")
+    for b in open_blockers(data, extra[0]):
+        print(b)
+    return 0
+
+
 def cmd_body(path, text, extra, **_):
     if len(extra) != 1:
         raise SystemExit("body <id>")
@@ -518,6 +539,7 @@ def main(argv: list[str]) -> int:
             "set",
             "show",
             "body",
+            "blockers",
             "meta",
             "status-only-id",
             "todos",
@@ -537,6 +559,7 @@ def main(argv: list[str]) -> int:
         "set": cmd_set,
         "show": cmd_show,
         "body": cmd_body,
+        "blockers": cmd_blockers,
         "meta": cmd_meta,
         "status-only-id": cmd_status_only_id,
         "todos": cmd_todos,
