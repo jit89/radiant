@@ -101,7 +101,7 @@ do_check() {
     "$ROOT/scripts/tests/findings-test.sh" || true
   fi
   if "$ROOT/scripts/tests/orch-commit-test.sh" >/dev/null 2>&1; then
-    echo "orchestrator commits: OK (narrow)"
+    echo "orchestrator commits: OK (narrow; no foreign GOALS.md or journal edits)"
   else
     echo "orchestrator commits: FAIL"; rc=1
     "$ROOT/scripts/tests/orch-commit-test.sh" || true

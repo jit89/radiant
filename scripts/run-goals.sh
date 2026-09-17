@@ -16,6 +16,8 @@ source "$HERE/lib/events.sh"
 # Defines git(): hooks and fsmonitor off, .git checked before each call.
 # shellcheck disable=SC1091
 source "$HERE/lib/git-guard.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/orch-files.sh"
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "not a git repo" >&2
@@ -29,42 +31,66 @@ utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # its first commit — a planted filter would otherwise run on that commit.
 git_meta_init || { echo "cannot locate the gitdir" >&2; exit 1; }
 
+# walk_stop REASON DETAIL — nonzero stop that writes and commits nothing in the
+# repo: the reasons that use it are ones where a commit is unsafe.
+walk_stop() {
+  local dir stop
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/run-goals-stop-XXXXXX")"
+  chmod 700 "$dir"
+  stop="$dir/stop.md"
+  printf '# Stop: walk\n\n- reason: %s\n- detail: %s\n- utc: %s\n' "$1" "$2" "$(utc)" >"$stop"
+  echo "=== $1 ==="
+  events_append --event wake --severity error --reason "$1" --summary "walk $1: $2"
+  echo "STOP_FILE: $stop"
+  exit 1
+}
+
 # A .git change is a nonzero stop of its own, before any git command: with the
 # check failed, the git() wrapper refuses to run, so nothing here is committed.
 meta_stop() {
   git_meta_verify "$GIT_META_SAVED" && return 0
-  local dir stop
-  dir="$(mktemp -d "${TMPDIR:-/tmp}/run-goals-meta-XXXXXX")"
-  chmod 700 "$dir"
-  stop="$dir/stop.md"
-  cat >"$stop" <<EOF
-# Stop: walk
-
-- reason: git-metadata-tamper
-- detail: .git changed $1: ${GIT_META_CHANGED}
-- utc: $(utc)
-- host git is off for this walk. Inspect with cat / ls -la, not git. Revert anything
-  you did not make, then re-baseline: rm $GIT_META_SAVED
-EOF
-  echo "=== git-metadata-tamper ==="
-  events_append --event wake --severity error --reason git-metadata-tamper \
-    --summary "walk git-metadata-tamper: ${GIT_META_CHANGED}"
-  echo "STOP_FILE: $stop"
-  exit 1
+  walk_stop git-metadata-tamper ".git changed $1: ${GIT_META_CHANGED}— host git is off for this walk. Inspect with cat / ls -la, not git. Revert anything you did not make, then re-baseline: rm $GIT_META_SAVED"
 }
 
 [[ -f GOALS.md ]] || { echo "GOALS.md missing" >&2; exit 1; }
 "$GOALS_PY" GOALS.md validate
 
 JOURNAL="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("journal") or "")')"
-meta_stop "since the last run in this repo"
 
+# JOURNAL_EXPECT is the journal as this walker last saw it plus every line it
+# has appended since: at commit time the file must be exactly that.
+JOURNAL_EXPECT=""
 journal_line() {
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 0
   printf '\n%s\n' "$1" >>"$JOURNAL"
+  printf '\n%s\n' "$1" >>"$JOURNAL_EXPECT"
+}
+
+# Nothing the walker did not write: check before the first write and after
+# each goal (which commits its own), then start expecting from there.
+# GOALS_INFLIGHT permits the in_progress a stopped goal leaves uncommitted,
+# until the first refresh commit takes it.
+GOALS_INFLIGHT=""
+orch_baseline() {
+  local when="$1" jmode=--none
+  GOALS_INFLIGHT=""
+  if [[ "$when" == start ]] && "$GOALS_PY" GOALS.md graph | awk '$2 == "in_progress" { f = 1 } END { exit !f }'; then
+    GOALS_INFLIGHT="*=*:in_progress"
+    jmode=--orchestrator-lines
+  fi
+  orch_preflight "$GOALS_INFLIGHT" "$jmode" ||
+    walk_stop orchestration-files-dirty "$([[ "$when" == start ]] || echo "after goal $when: ")$(orch_refusal)"
+  if [[ -n "$JOURNAL" && -f "$JOURNAL" ]]; then
+    cp "$JOURNAL" "$JOURNAL_EXPECT"
+  fi
 }
 
 commit_goals() {
+  local problems
+  problems="$({ orch_staged_problems | grep '^GOALS.md:' || true; orch_goals_problems "*=blocked:ready,*=ready:blocked${GOALS_INFLIGHT:+,$GOALS_INFLIGHT}"; } | paste -sd ';' -)"
+  [[ -z "$problems" ]] ||
+    walk_stop orchestration-files-changed "GOALS.md not committed: $problems. Something other than the walker edited it; review, then commit or restore."
+  GOALS_INFLIGHT=""
   git add -- GOALS.md
   if git diff --cached --quiet -- GOALS.md; then
     return 0
@@ -81,6 +107,9 @@ commit_goals() {
 commit_journal() {
   local msg="${1:-chore: orchestrator journal}"
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 0
+  if ! cmp -s "$JOURNAL" "$JOURNAL_EXPECT" || ! git diff --cached --quiet -- "$JOURNAL"; then
+    walk_stop orchestration-files-changed "$JOURNAL not committed ($msg): it holds more than the walker appended. Review, then commit or restore."
+  fi
   git add -- "$JOURNAL"
   if git diff --cached --quiet -- "$JOURNAL"; then
     return 0
@@ -90,6 +119,11 @@ commit_journal() {
     exit 1
   }
 }
+
+meta_stop "since the last run in this repo"
+JOURNAL_EXPECT="$(mktemp "${TMPDIR:-/tmp}/run-goals-journal-XXXXXX")"
+trap 'rm -f "$JOURNAL_EXPECT"' EXIT
+orch_baseline start
 
 events_ensure_walk
 events_journal_walk_start
@@ -164,7 +198,6 @@ print_status() {
 }
 
 while :; do
-  meta_stop "during the last goal"
   "$GOALS_PY" GOALS.md refresh
   commit_goals
   print_status
@@ -198,4 +231,6 @@ while :; do
     exit "$rc"
   fi
   rm -f "$STOP_PTR"
+  meta_stop "during goal $id"
+  orch_baseline "$id"
 done

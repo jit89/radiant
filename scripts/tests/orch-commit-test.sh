@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Self-test: Orchestrator commits are narrow. A path the user staged before
-# the walk must never ride along in a GOALS.md / journal commit (F-11).
+# the walk must never ride along in a GOALS.md / journal commit (F-11), and
+# neither may an edit someone else left in GOALS.md or the journal (F2-04).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -90,6 +91,80 @@ check "run-goal stopped at the dirty gate" "1" \
   "$(grep -c 'GATE: working tree is not clean.*source.py' "$TMP/goal.out" || true)"
 check "run-goal reached no model launcher" "0" \
   "$(grep -c 'stub reached' "$TMP/goal.out" || true)"
+
+# --- edits to the orchestration files themselves (F2-04) ------------------
+J=docs/journal/example.md
+# Everything a refusal must leave as it was: commits, index, both files' bytes.
+state() {
+  printf '%s\n' "$(git rev-parse HEAD)" "$(git diff --cached | shasum)" \
+    "$(shasum GOALS.md "$J")"
+}
+# refused NAME SCRIPT ARGS... — run it, expect a nonzero stop that names the
+# orchestration files, no child dispatched, and state unchanged.
+refused() {
+  local name="$1" before out rc=0
+  shift
+  before="$(state)"
+  rm -f "$TMP/dispatched"
+  "$@" >"$TMP/refused.out" 2>&1 || rc=$?
+  check "$name: stops nonzero" "yes" "$([[ $rc -ne 0 ]] && echo yes || echo no)"
+  check "$name: says why" "yes" \
+    "$(grep -q 'did not make' "$TMP/refused.out" "$(sed -n 's/^STOP_FILE: //p' "$TMP/refused.out" | tail -n1)" 2>/dev/null && echo yes || echo no)"
+  check "$name: nothing committed, bytes and index kept" "$before" "$(state)"
+  check "$name: nothing dispatched" "no" "$([[ -f "$TMP/dispatched" ]] && echo yes || echo no)"
+}
+stub run-goal.sh 'touch "'"$TMP"'/dispatched"; echo "STOP_FILE: /dev/null"; exit 1'
+walker="$HOUSE/scripts/run-goals.sh"
+
+make_repo "$TMP/j1" && printf '\nUSER PRIVATE NOTE\n' >>"$J"
+refused "walk, unstaged journal note" "$walker"
+
+make_repo "$TMP/j2" && printf '\nUSER PRIVATE NOTE\n' >>"$J" && git add "$J"
+refused "walk, staged journal note" "$walker"
+
+make_repo "$TMP/g1" && sed -i.bak 's/Label-ack after enqueue/Label-ack, renamed/' GOALS.md && rm GOALS.md.bak
+refused "walk, GOALS title edit" "$walker"
+
+make_repo "$TMP/g2" && sed -i.bak 's/Label-ack after enqueue/Label-ack, renamed/' GOALS.md && rm GOALS.md.bak && git add GOALS.md
+refused "walk, staged GOALS edit" "$walker"
+
+make_repo "$TMP/g3" && "$HERE/goals.py" GOALS.md set g2-ack bounced >/dev/null
+refused "walk, GOALS status no step makes" "$walker"
+
+# A stopped goal's own leftovers are not user edits: in_progress, and its
+# ORCHESTRATOR lines. The walker takes them and dispatches.
+make_repo "$TMP/r1" && "$HERE/goals.py" GOALS.md set g2-ack in_progress >/dev/null
+printf '\n## 2026-09-17T00:00:00Z — ORCHESTRATOR wake g2-ack r0 reason=interrupted\n' >>"$J"
+"$walker" >"$TMP/r1.out" 2>&1 || true
+check "walk, in-flight state: goal dispatched" "yes" "$([[ -f "$TMP/dispatched" ]] && echo yes || echo no)"
+check "walk, in-flight state: user file still staged" "source.py" "$(git diff --cached --name-only)"
+rm -f "$TMP/dispatched"
+
+make_repo "$TMP/r2" && "$HERE/goals.py" GOALS.md set g2-ack in_progress >/dev/null
+printf '\n## 2026-09-17T00:00:00Z — ORCHESTRATOR wake g2-ack r0 reason=interrupted\n\nUSER NOTE\n' >>"$J"
+refused "walk, in-flight state plus a user line" "$walker"
+
+# Checked again after each goal, not only at the start: a goal that returns
+# success with an edit left in the journal stops the walk uncommitted.
+stub run-goal.sh 'printf "\\nSOMEONE ELSE\\n" >>'"$J"'; exit 0'
+make_repo "$TMP/mid"
+rc=0
+"$walker" >"$TMP/mid.out" 2>&1 || rc=$?
+check "walk, edit left during a goal: stops nonzero" "yes" "$([[ $rc -ne 0 ]] && echo yes || echo no)"
+check "walk, edit left during a goal: not committed" "0" "$(git log --format= -p | grep -c 'SOMEONE ELSE' || true)"
+check "walk, edit left during a goal: still in the file" "1" "$(grep -c 'SOMEONE ELSE' "$J" || true)"
+stub run-goal.sh 'touch "'"$TMP"'/dispatched"; echo "STOP_FILE: /dev/null"; exit 1'
+
+# run-goal.sh on its own: the same refusals, before its walk-start commit.
+cp "$HERE/run-goal.sh" "$HOUSE/scripts/run-goal.sh"
+make_repo "$TMP/rg1" && printf '\nUSER PRIVATE NOTE\n' >>"$J"
+refused "goal, unstaged journal note" "$HOUSE/scripts/run-goal.sh" g3-other
+
+make_repo "$TMP/rg2" && sed -i.bak 's/Label-ack after enqueue/Label-ack, renamed/' GOALS.md && rm GOALS.md.bak && git add GOALS.md
+refused "goal, staged GOALS edit" "$HOUSE/scripts/run-goal.sh" g2-ack
+
+make_repo "$TMP/rg3" && "$HERE/goals.py" GOALS.md set g3-other done >/dev/null
+refused "goal, GOALS status no step makes" "$HOUSE/scripts/run-goal.sh" g3-other
 
 if [[ "$fails" -eq 0 ]]; then
   echo "orch-commit: OK"

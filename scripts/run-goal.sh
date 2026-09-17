@@ -23,6 +23,8 @@ source "$HERE/lib/findings.sh"
 # Defines git(): every git call below runs with hooks and fsmonitor off.
 # shellcheck disable=SC1091
 source "$HERE/lib/git-guard.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/orch-files.sh"
 
 GOALS_PY="$HERE/goals.py"
 DEEPSEEK="$HERE/deepseek-code.sh"
@@ -62,6 +64,9 @@ PHASE="gate"
 CHILD_PID=""
 PENDING_FIX_ROUND=""
 PENDING_FIX_HASH=""
+# 1 once GOALS.md and the journal hold nothing this workflow did not write;
+# -1 when they were refused (then the stop leaves them, and HEAD, untouched).
+ORCH_FILES_OK=0
 
 usage() {
   echo "usage: run-goal.sh <goal-id>" >&2
@@ -186,22 +191,28 @@ record_wake() {
   case "$reason" in
     rate_limited|reviewer-rate-limited) sev=warning ;;
   esac
-  # Tainted: no git at all, so journal the line and leave it uncommitted.
-  if [[ -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] \
-    && { [[ "$GIT_META_TAINTED" -eq 1 ]] || tracked_in_head "$JOURNAL"; }; then
+  # The journal is written only once it holds nothing this workflow did not
+  # write (checked here if the stop came before the run's own check). Tainted:
+  # no git at all, so journal the line and leave it uncommitted.
+  local journal_ok=0
+  if [[ -n "${JOURNAL:-}" && -f "${JOURNAL}" ]]; then
+    if [[ "$ORCH_FILES_OK" -eq 1 ]]; then
+      journal_ok=1
+    elif [[ "$ORCH_FILES_OK" -eq 0 && "$GIT_META_TAINTED" -eq 0 ]] && tracked_in_head "$JOURNAL" &&
+      [[ -z "$(orch_staged_problems | grep -F "$JOURNAL:" || true; orch_journal_problems --none)" ]]; then
+      journal_ok=1
+    fi
+  fi
+  if [[ "$journal_ok" -eq 1 ]]; then
     journal_line "## $(utc) — ORCHESTRATOR wake ${GOAL_ID:-?} r${ROUND} reason=${reason}"
   fi
   events_append --event wake --severity "$sev" \
     --goal "${GOAL_ID:-}" --round "${ROUND}" --reason "$reason" \
     --verdict "${LAST_VERDICT:-}" --base-sha "${BASE_SHA:-}" \
     --summary "wake ${GOAL_ID:-?} r${ROUND} reason=${reason}"
-  if [[ "$GIT_META_TAINTED" -eq 0 && -n "${JOURNAL:-}" && -f "${JOURNAL}" ]] \
-    && tracked_in_head "$JOURNAL"; then
-    git add -- "$JOURNAL" || true
-    if ! git diff --cached --quiet -- "$JOURNAL" 2>/dev/null; then
-      git commit -m "chore(${GOAL_ID:-?}): orchestrator wake ${reason}" -- "$JOURNAL" || \
-        echo "failed to commit wake journal line" >&2
-    fi
+  if [[ "$journal_ok" -eq 1 && "$GIT_META_TAINTED" -eq 0 ]]; then
+    orch_commit_journal "chore(${GOAL_ID:-?}): orchestrator wake ${reason}" ||
+      echo "failed to commit wake journal line" >&2
   fi
   return 0
 }
@@ -350,8 +361,15 @@ tracked_in_head() {
   git cat-file -e "HEAD:$1" 2>/dev/null
 }
 
+# orch_commit MSG ALLOW — commit GOALS.md and the journal, after checking that
+# GOALS.md moved only by ALLOW (see orch_goals_problems) and the journal was
+# only appended to since HEAD.
 orch_commit() {
-  local msg="$1"
+  local msg="$1" allow="$2" problems
+  problems="$({ orch_goals_problems "$allow"; orch_journal_problems --append; } | paste -sd ';' -)"
+  if [[ -n "$problems" ]]; then
+    wake "orchestration-files-changed" "not committed ($msg): $problems. Something other than this run edited them; review, then commit or restore."
+  fi
   local files=()
   [[ -f GOALS.md ]] && files+=(GOALS.md)
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] && files+=("$JOURNAL")
@@ -362,6 +380,20 @@ orch_commit() {
   fi
   # Pathspec commit: anything else the user staged stays staged, uncommitted.
   git commit -m "$msg" -- "${files[@]}" || wake "commit-failed" "$msg"
+}
+
+# Commit the journal alone, if it was only appended to since HEAD.
+orch_commit_journal() {
+  local problems
+  [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 0
+  problems="$(orch_journal_problems --append | paste -sd ';' -)"
+  if [[ -n "$problems" ]]; then
+    echo "journal not committed: $problems" >&2
+    return 1
+  fi
+  git add -- "$JOURNAL" || return 1
+  git diff --cached --quiet -- "$JOURNAL" && return 0
+  git commit -m "$1" -- "$JOURNAL"
 }
 
 journal_line() {
@@ -431,22 +463,30 @@ if ! tracked_in_head GOALS.md || ! tracked_in_head "$JOURNAL"; then
   die_gate "commit GOALS.md, oracles, and the journal first"
 fi
 
+# Before the first write to either orchestration file. A fresh run needs both
+# as committed; a resume may carry what its stopped run left: this goal set
+# in_progress, and the run's own ORCHESTRATOR lines.
+if [[ "$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')" == in_progress ]]; then
+  orch_preflight "$GOAL_ID=*:in_progress" --orchestrator-lines || ORCH_FILES_OK=-1
+else
+  orch_preflight "" --none || ORCH_FILES_OK=-1
+fi
+[[ "$ORCH_FILES_OK" -eq 0 ]] || die_gate "$(orch_refusal)"
+ORCH_FILES_OK=1
+
 # Cache walk_id until walk-end. Mint → one journal line, fail-closed commit.
 # Before the dirty-tree gate so a later wake still has a walk_id.
 events_ensure_walk
 events_journal_walk_start
 if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
-  git add -- "$JOURNAL"
-  if ! git diff --cached --quiet -- "$JOURNAL"; then
-    git commit -m "chore: orchestrator walk-start" -- "$JOURNAL" || wake "commit-failed" "walk-start"
-  fi
+  orch_commit_journal "chore: orchestrator walk-start" || wake "commit-failed" "walk-start"
 fi
 
 # refresh blocked→ready if this id's blockers are done
 STATUS="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
 if [[ "$STATUS" == "blocked" ]]; then
   "$GOALS_PY" GOALS.md refresh >/dev/null
-  orch_commit "chore(${GOAL_ID}): orchestrator refresh"
+  orch_commit "chore(${GOAL_ID}): orchestrator refresh" "*=blocked:ready,*=ready:blocked"
   STATUS="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
 fi
 
@@ -796,7 +836,7 @@ EOF
       events_append --event done --severity info --goal "$GOAL_ID" --round "$ROUND" \
         --verdict DONE --base-sha "$BASE_SHA" \
         --summary "done ${GOAL_ID} r${ROUND}"
-      orch_commit "chore(${GOAL_ID}): orchestrator done"
+      orch_commit "chore(${GOAL_ID}): orchestrator done" "$GOAL_ID=*:done"
       echo "GOAL $GOAL_ID DONE"
       succeed
       ;;
@@ -809,7 +849,7 @@ EOF
       fi
       if findings_touch_oracle "$TARGETS"; then
         "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
-        orch_commit "chore(${GOAL_ID}): orchestrator bounced"
+        orch_commit "chore(${GOAL_ID}): orchestrator bounced" "$GOAL_ID=*:bounced"
         wake "blocked-oracle-edit" "a FIX finding names the oracle / tests/acceptance"
       fi
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
@@ -847,7 +887,7 @@ EOF
       events_append --event bounced --severity error --goal "$GOAL_ID" --round "$ROUND" \
         --verdict BLOCKED --base-sha "$BASE_SHA" \
         --summary "bounced ${GOAL_ID} r${ROUND}"
-      orch_commit "chore(${GOAL_ID}): orchestrator bounced"
+      orch_commit "chore(${GOAL_ID}): orchestrator bounced" "$GOAL_ID=*:bounced"
       wake "blocked" "reviewer BLOCKED. $VERDICT_FILE"
       ;;
     *)

@@ -118,7 +118,7 @@ stub deepseek-code.sh "$OK_LINES"
 run_goal "sed -i.bak 's/retries/everything/' GOALS.md && rm GOALS.md.bak"
 check "dirty body at fresh start: gate" "gate" "$reason"
 check "gate names GOALS.md" "yes" \
-  "$([[ "$detail" == *"Offending paths: GOALS.md"* ]] && echo yes || echo "no: $detail")"
+  "$([[ "$detail" == *"GOALS.md: markdown"* ]] && echo yes || echo "no: $detail")"
 
 if [[ "$fails" -eq 0 ]]; then
   echo "goals-contract: OK"

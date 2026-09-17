@@ -18,6 +18,8 @@ Usage (from the target repo):
   goals.py [GOALS.md] remaining         # every goal not done, and why
   goals.py [GOALS.md] meta
   goals.py [GOALS.md] status-only-id <id> <other.md>   # whole file, not just the fence
+  goals.py [GOALS.md] status-transitions <other.md> [<id>=<old>:<new>,...]
+                                        # whole file; only listed status moves ("*" = any)
   goals.py [GOALS.md] todos
 """
 
@@ -263,6 +265,48 @@ def status_only_drift(text: str, data: dict, other_text: str, gid: str) -> list[
         heads = [line for line in now[:i + 1] if line.startswith("## ")]
         where = heads[-1] if heads else "the preamble"
     return [f"markdown differs from line {i + 1}, under {where}"]
+
+
+def status_transitions_drift(text: str, data: dict, other_text: str, allowed: str) -> list[str]:
+    """Empty if text is other_text with only allowed status moves.
+
+    allowed is "<id>=<old>:<new>,..." where any part may be "*". The rest of
+    the file — fence fields and markdown bodies — must match exactly.
+    """
+    _, other_start, other_end = extract_fence(other_text)
+    other_data = parse_yaml_subset(other_text[other_start:other_end])
+    errs: list[str] = []
+    for k in sorted((set(data) | set(other_data)) - {"goals"}):
+        if data.get(k) != other_data.get(k):
+            errs.append(f"top-level {k} differs")
+    now, was = by_id(data), by_id(other_data)
+    if set(now) != set(was):
+        return errs + ["goal id set differs"]
+    rules = [r.strip() for r in allowed.split(",") if r.strip()]
+
+    def permitted(gid: str, old: str, new: str) -> bool:
+        for rule in rules:
+            rid, _, move = rule.partition("=")
+            rold, _, rnew = move.partition(":")
+            if rid in ("*", gid) and rold in ("*", old) and rnew in ("*", new):
+                return True
+        return False
+
+    blob = other_text[other_start:other_end]
+    for gid in now:
+        a, b = dict(now[gid]), dict(was[gid])
+        new, old = a.pop("status", None), b.pop("status", None)
+        if a != b:
+            errs.append(f"{gid}: fence fields differ beyond status")
+        elif new != old:
+            if not permitted(gid, old, new):
+                errs.append(f"{gid}: status {old} → {new} is not a move this step makes")
+            blob = rewrite_goal_status(blob, gid, new)
+    if errs:
+        return errs
+    if other_text[:other_start] + blob + other_text[other_end:] != text:
+        errs.append("markdown or fence formatting differs beyond status")
+    return errs
 
 
 def validate_bodies(text: str, data: dict) -> list[str]:
@@ -565,6 +609,22 @@ def cmd_status_only_id(path, data, text, extra, **_):
     return 0
 
 
+def cmd_status_transitions(path, data, text, extra, **_):
+    if len(extra) not in (1, 2):
+        raise SystemExit("status-transitions <other.md> [<id>=<old>:<new>,...]")
+    op = Path(extra[0])
+    if not op.is_file():
+        raise SystemExit(f"not found: {op}")
+    errs = status_transitions_drift(text, data, op.read_text(), extra[1] if len(extra) == 2 else "")
+    if errs:
+        print("DRIFT")
+        for e in errs:
+            print(e)
+        return 1
+    print("OK")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="goals.py")
     p.add_argument("path", nargs="?", default="GOALS.md")
@@ -582,6 +642,7 @@ def main(argv: list[str]) -> int:
             "remaining",
             "meta",
             "status-only-id",
+            "status-transitions",
             "todos",
         ),
     )
@@ -603,6 +664,7 @@ def main(argv: list[str]) -> int:
         "remaining": cmd_remaining,
         "meta": cmd_meta,
         "status-only-id": cmd_status_only_id,
+        "status-transitions": cmd_status_transitions,
         "todos": cmd_todos,
     }[args.cmd]
     return fn(path=path, data=data, text=text, start=start, end=end, extra=args.extra)

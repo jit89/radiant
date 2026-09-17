@@ -33,6 +33,6 @@ Do not re-enter between goals to repaint todos. The badge stays stale until the 
 Re-run `goals.py todos` and `TodoWrite` again so the list matches HEAD.
 
 - **0** — every goal is `done`. Report the graph. Stop.
-- **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. `reason: walk-stuck` means nothing is left to run but goals are bounced or blocked behind one; the stop file lists each and why. `scripts/logs.sh errors --last 20` (or `since walk`) for the machine index; do not invent SQL. Do not start the next goal yourself. Do not swap implementer.
+- **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. `reason: walk-stuck` means nothing is left to run but goals are bounced or blocked behind one; the stop file lists each and why. `reason: orchestration-files-dirty` / `orchestration-files-changed` means GOALS.md or the journal held edits the workflow did not make; nothing was committed — ask the user to commit or restore them. `scripts/logs.sh errors --last 20` (or `since walk`) for the machine index; do not invent SQL. Do not start the next goal yourself. Do not swap implementer.
 
 `scripts/run-goals.sh` calls `scripts/run-goal.sh` as a subprocess and keys on exit code only.
