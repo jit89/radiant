@@ -297,11 +297,12 @@ verify_git_meta() {
 }
 
 # Contract drift since BASE_SHA: the plan, this goal's file oracle,
-# tests/acceptance/, and all of GOALS.md except this goal's status. Sets CONTRACT_PATHS and
-# one-line lists CONTRACT_COMMITTED (changed by commits after BASE_SHA, which
-# are listed in CONTRACT_COMMITS) and CONTRACT_UNCOMMITTED (staged, unstaged,
-# or untracked). Needs BASE_SHA, PLAN_PATH and ORACLE from goals-base.md, and
-# RUN_DIR.
+# tests/acceptance/, and all of GOALS.md except this goal's status. Sets
+# CONTRACT_PATHS and one-line lists CONTRACT_COMMITTED (changed by commits
+# after BASE_SHA, which are listed in CONTRACT_COMMITS), CONTRACT_UNCOMMITTED
+# (unstaged or untracked) and CONTRACT_IGNORED (untracked but matching
+# .gitignore — an artifact anywhere else, tampering here). Needs BASE_SHA,
+# PLAN_PATH and ORACLE from goals-base.md, and RUN_DIR.
 contract_drift() {
   local drift goals_commit=0
   CONTRACT_PATHS=(tests/acceptance "$PLAN_PATH")
@@ -311,6 +312,9 @@ contract_drift() {
   CONTRACT_COMMITTED="$(git diff --name-only "$BASE_SHA" HEAD -- "${CONTRACT_PATHS[@]}" || true)"
   CONTRACT_UNCOMMITTED="$(git diff --name-only HEAD -- "${CONTRACT_PATHS[@]}" || true)
 $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
+  # .gitignore makes a file an artifact outside the contract; inside it, an
+  # ignored file is invisible to the diff the reviewer reads, so it is drift.
+  CONTRACT_IGNORED="$(git ls-files --others --ignored --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
   # HEAD never carries this goal's status (committed only on done/bounced),
   # so HEAD's GOALS.md must match the base apart from it.
   git show HEAD:GOALS.md >"$RUN_DIR/goals-head.md"
@@ -323,6 +327,7 @@ $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
   fi
   CONTRACT_COMMITTED="$(sed '/^$/d' <<<"$CONTRACT_COMMITTED" | sort -u | paste -sd ',' -)"
   CONTRACT_UNCOMMITTED="$(sed '/^$/d' <<<"$CONTRACT_UNCOMMITTED" | sort -u | paste -sd ',' -)"
+  CONTRACT_IGNORED="$(sed '/^$/d' <<<"$CONTRACT_IGNORED" | sort -u | paste -sd ',' -)"
   CONTRACT_COMMITS=""
   if [[ -n "$CONTRACT_COMMITTED" ]]; then
     local log_paths=("${CONTRACT_PATHS[@]}")
@@ -351,10 +356,17 @@ proof_env_unsets() {
 # declares in .gitignore (caches, reports, coverage) is the proof's to write,
 # and the next goal's clean-tree gate does not see it. Anything else a proof
 # creates — source, config, a symlink — nobody reviews and it can steer the
-# proof, so it is tampering.
+# proof, so it is tampering. Under a contract path that policy does not
+# apply: ignored files there are listed too, or a proof could drop an
+# ignored script into tests/acceptance/ that no check and no reviewer sees.
 tree_snapshot() {
   git rev-parse HEAD
   git status --porcelain --untracked-files=all
+  local guarded=(tests/acceptance)
+  [[ -z "${ORACLE:-}" || "$ORACLE" == inline ]] || guarded+=("$ORACLE")
+  [[ -z "${PLAN_PATH:-}" ]] || guarded+=("$PLAN_PATH")
+  { git status --porcelain --ignored=matching -- "${guarded[@]}" || true; } |
+    { grep '^!! ' || true; }
 }
 
 tracked_in_head() {
@@ -580,8 +592,8 @@ chmod 400 "$PLAN_FROZEN"
 # before a paid dispatch hands the implementer the changed oracle.
 if [[ "$RESUME" -eq 1 ]]; then
   contract_drift
-  if [[ -n "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED" ]]; then
-    die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — committed: ${CONTRACT_COMMITTED:-none} (commits: ${CONTRACT_COMMITS:-none}); uncommitted: ${CONTRACT_UNCOMMITTED:-none}. Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
+  if [[ -n "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]]; then
+    die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — committed: ${CONTRACT_COMMITTED:-none} (commits: ${CONTRACT_COMMITS:-none}); uncommitted: ${CONTRACT_UNCOMMITTED:-none}; ignored-but-under-contract: ${CONTRACT_IGNORED:-none}. Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
   fi
 fi
 
@@ -679,6 +691,9 @@ while :; do
   if [[ -n "$CONTRACT_COMMITTED" ]]; then
     wake "contract-tamper-committed" "committed: $CONTRACT_COMMITTED — revert commits: $CONTRACT_COMMITS"
   fi
+  if [[ -n "$CONTRACT_IGNORED" ]]; then
+    wake "contract-tamper-ignored" "under a contract path but matching .gitignore, so absent from the review diff: $CONTRACT_IGNORED. Remove it, or take the path out of .gitignore."
+  fi
   if [[ -n "$CONTRACT_UNCOMMITTED" ]]; then
     # Per path: one pathspec absent at BASE_SHA must not block the others.
     for p in "${CONTRACT_PATHS[@]}"; do
@@ -744,8 +759,8 @@ while :; do
     changed="$({ grep -v '^?? ' <<<"$changed" || true; } | cut -c4- | sed '/^$/d' | sort -u | paste -sd ',' -)"
     [[ -z "$changed" ]] || moved+=("tracked changes: $changed")
     [[ -z "$created" ]] || moved+=("new files not in .gitignore: $created (declare build output in .gitignore; anything else is unreviewed code)")
-    [[ -z "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED" ]] ||
-      moved+=("contract: ${CONTRACT_COMMITTED}${CONTRACT_COMMITTED:+,}${CONTRACT_UNCOMMITTED}")
+    [[ -z "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]] ||
+      moved+=("contract: ${CONTRACT_COMMITTED}${CONTRACT_COMMITTED:+,}${CONTRACT_UNCOMMITTED}${CONTRACT_IGNORED:+,ignored:}${CONTRACT_IGNORED}")
     if ((${#moved[@]})); then
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
     fi

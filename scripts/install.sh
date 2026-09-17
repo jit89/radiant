@@ -173,7 +173,7 @@ do_check() {
     "$ROOT/scripts/tests/plan-freeze-test.sh" || true
   fi
   if "$ROOT/scripts/tests/proof-test.sh" >/dev/null 2>&1; then
-    echo "proof: OK (timeout, no credentials, repo unchanged, only ignored files created)"
+    echo "proof: OK (timeout, no credentials, repo unchanged; ignored files only outside the contract)"
   else
     echo "proof: FAIL"; rc=1
     "$ROOT/scripts/tests/proof-test.sh" || true

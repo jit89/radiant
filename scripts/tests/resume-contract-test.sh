@@ -95,6 +95,15 @@ check "run 1 crashed before assess" "implementer-error" "$reason1"
 check "clean resume dispatches" "2" "$calls"
 check "clean resume reaches review" "reviewer-error" "$reason"
 
+# An ignored file under tests/acceptance is contract, not artifact (F3-02).
+scenario '' 'printf "tests/acceptance/extra.sh\n" >>.gitignore
+git add .gitignore && git commit -qm "chore: ignore a helper"
+printf "true\n" >tests/acceptance/extra.sh'
+check "ignored acceptance addition: gate" "gate" "$reason"
+check "ignored acceptance addition: nothing dispatched" "1" "$calls"
+check "ignored addition named separately" "yes" \
+  "$(has 'ignored-but-under-contract: tests/acceptance/extra.sh')"
+
 scenario "$WEAKEN; git add tests/acceptance/g1-store.sh" ''
 check "staged oracle edit: gate" "gate" "$reason"
 check "staged oracle edit: nothing dispatched" "1" "$calls"

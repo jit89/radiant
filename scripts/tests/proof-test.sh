@@ -139,7 +139,19 @@ proof 'ln -s /etc/hosts hosts-link'
 check "untracked symlink: proof-tamper" "proof-tamper" "$reason"
 check "untracked symlink: no review" "no" "$reviewed"
 
-# 11. Red proof still red.
+# 11. .gitignore makes a file an artifact — but not under tests/acceptance,
+#     where an ignored file would be invisible to every check and the reviewer.
+IGNORE=$'tests/acceptance/extra.sh\n' \
+  proof 'printf "true\n" >tests/acceptance/extra.sh'
+check "ignored acceptance addition: proof-tamper" "proof-tamper" "$reason"
+check "ignored acceptance addition: names it" "yes" "$(has 'tests/acceptance/extra.sh')"
+check "ignored acceptance addition: no review" "no" "$reviewed"
+
+IGNORE=$'tests/acceptance/junk/\n' \
+  proof 'mkdir -p tests/acceptance/junk && printf "x\n" >tests/acceptance/junk/x.sh'
+check "ignored acceptance directory: proof-tamper" "proof-tamper" "$reason"
+
+# 12. Red proof still red.
 proof 'exit 3'
 check "red: proof-red" "proof-red" "$reason"
 
