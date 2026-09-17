@@ -67,6 +67,7 @@ do_install() {
     "$ROOT/scripts/tests/verdict-test.sh" \
     "$ROOT/scripts/tests/resume-state-test.sh" \
     "$ROOT/scripts/tests/walk-end-test.sh" \
+    "$ROOT/scripts/tests/proof-test.sh" \
     "$ROOT/scripts/lib/resume-state.py" \
     "$ROOT/scripts/lib/verdict.py" \
     "$ROOT/scripts/lib/run-timeout.py" \
@@ -164,6 +165,12 @@ do_check() {
   else
     echo "walk end: FAIL"; rc=1
     "$ROOT/scripts/tests/walk-end-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/proof-test.sh" >/dev/null 2>&1; then
+    echo "proof: OK (timeout, no credentials, repo unchanged)"
+  else
+    echo "proof: FAIL"; rc=1
+    "$ROOT/scripts/tests/proof-test.sh" || true
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \

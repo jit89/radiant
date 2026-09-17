@@ -138,6 +138,10 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `DEEPSEEK_REQUIRE_GIT` | `1` | Require a git repo (`0` to opt out) |
 | `MAX_ROUNDS` | `5` | Plan-attack rounds (skill) |
 | `MAX_FIX_ROUNDS` | `3` | Implement/review fix rounds |
+| `DEEPSEEK_TIMEOUT` | `1200` | Seconds per implementer pass |
+| `CLAUDE_REVIEW_TIMEOUT` | `600` | Seconds per review |
+| `PROOF_TIMEOUT` | `600` | Seconds for the host proof |
+| `PROOF_ENV_KEEP` | empty | Space-separated credential-like variables the proof may still see (others named `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*` are removed) |
 | `KEEP_RUN_DIR=1` | off | Keep the run dir after a goal lands |
 
 `deepseek-code.sh` keeps Codex in `workspace-write` (not

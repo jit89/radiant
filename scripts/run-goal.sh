@@ -31,6 +31,7 @@ REVIEWER="$HERE/claude-goal-review.sh"
 MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
 IMPL_SECS="${DEEPSEEK_TIMEOUT:-1200}"
 REVIEW_SECS="${CLAUDE_REVIEW_TIMEOUT:-600}"
+PROOF_SECS="${PROOF_TIMEOUT:-600}"
 
 GOAL_ID="${1:-}"
 RUN_DIR=""
@@ -299,6 +300,28 @@ $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
     [[ "$goals_commit" -eq 0 ]] || log_paths+=(GOALS.md)
     CONTRACT_COMMITS="$(git log --format=%h "$BASE_SHA"..HEAD -- "${log_paths[@]}" | paste -sd ' ' -)"
   fi
+}
+
+# `env -u` arguments for every exported variable named like a credential — a
+# whole _-separated part KEY, APIKEY, TOKEN, SECRET, PASSWORD, PASSWD or
+# CREDENTIAL(S) — except names in PROOF_ENV_KEEP and git's own GIT_CONFIG_*.
+# The proof runs implementer-written code on the host; it gets PATH and the
+# rest, not the keys.
+proof_env_unsets() {
+  local name keep=" ${PROOF_ENV_KEEP:-} "
+  for name in $(compgen -e); do
+    [[ "$keep" != *" $name "* && "$name" != GIT_CONFIG_* ]] || continue
+    if grep -qiE '(^|_)(API)?KEY(_|$)|(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)' <<<"$name"; then
+      printf '%s\n' -u "$name"
+    fi
+  done
+}
+
+# HEAD plus tracked and staged changes — what a proof must leave as it found.
+# Untracked files are left out: test runs write caches and reports.
+tree_snapshot() {
+  git rev-parse HEAD
+  git status --porcelain --untracked-files=no
 }
 
 tracked_in_head() {
@@ -620,13 +643,35 @@ while :; do
     set +e
     # Plain -c, not -lc: the gate must not depend on the user's interactive
     # profile (aliases, PATH edits, version managers) being loaded.
-    # Timeout 0 (none) for now; the wrapper still owns the process group.
     PHASE="proof r${ROUND}"
-    run_step 0 "$PROOF_FILE" "$PROOF_FILE" bash -c "$PROOF"
+    tree_snapshot >"$RUN_DIR/tree-before-proof.txt"
+    unsets=()
+    while IFS= read -r u; do unsets+=("$u"); done < <(proof_env_unsets)
+    run_step "$PROOF_SECS" "$PROOF_FILE" "$PROOF_FILE" \
+      env "${unsets[@]+"${unsets[@]}"}" bash -c "$PROOF"
     PROOF_EXIT=$?
     set -e
     PHASE="assess r${ROUND}"
     verify_git_meta "during proof r${ROUND}"
+    if [[ "$PROOF_EXIT" -eq 124 ]]; then
+      wake "proof-timeout" "proof ran past ${PROOF_SECS}s (PROOF_TIMEOUT). Output: $PROOF_FILE"
+    fi
+    # The checks above ran before the proof; proof code could have changed
+    # what they approved. Nothing is restored: the stop file says what moved.
+    tree_snapshot >"$RUN_DIR/tree-after-proof.txt"
+    contract_drift
+    moved=()
+    if [[ "$(head -n1 "$RUN_DIR/tree-before-proof.txt")" != "$(head -n1 "$RUN_DIR/tree-after-proof.txt")" ]]; then
+      moved+=("HEAD moved: $(git log --format=%h "$(head -n1 "$RUN_DIR/tree-before-proof.txt")"..HEAD | paste -sd ' ' -)")
+    fi
+    changed="$({ diff <(sed 1d "$RUN_DIR/tree-before-proof.txt") <(sed 1d "$RUN_DIR/tree-after-proof.txt") || true; } |
+      sed -n 's/^[<>] ...//p' | sort -u | paste -sd ',' -)"
+    [[ -z "$changed" ]] || moved+=("tracked changes: $changed")
+    [[ -z "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED" ]] ||
+      moved+=("contract: ${CONTRACT_COMMITTED}${CONTRACT_COMMITTED:+,}${CONTRACT_UNCOMMITTED}")
+    if ((${#moved[@]})); then
+      wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
+    fi
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
       if [[ "$LAST_DEEPSEEK" == ok* ]]; then
         wake "proof-red" "host proof exit $PROOF_EXIT after DEEPSEEK_RESULT=ok"
