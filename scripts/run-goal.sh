@@ -56,6 +56,8 @@ DEEPSEEK_ERR=""
 FIX_HASH=""
 FIX_COUNT_N=0
 GIT_META_SAVED=""
+PHASE="gate"
+CHILD_PID=""
 
 usage() {
   echo "usage: run-goal.sh <goal-id>" >&2
@@ -75,6 +77,7 @@ die_gate() {
 on_exit() {
   local ec=$?
   trap - EXIT INT TERM
+  stop_child
   if [[ "$ec" -ne 0 && "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
     write_stop "trap" "exit $ec" || true
     record_wake "trap" || true
@@ -82,8 +85,40 @@ on_exit() {
   fi
   if [[ -n "$STOP_FILE" && -f "$STOP_FILE" ]]; then
     echo "STOP_FILE: $STOP_FILE"
+    # run-goals.sh reads the path here to reprint it as its own last line.
+    if [[ -n "${RUN_GOAL_STOP_PTR:-}" ]]; then
+      printf '%s\n' "$STOP_FILE" >"$RUN_GOAL_STOP_PTR" || true
+    fi
   fi
   exit "$ec"
+}
+
+# INT/TERM: bash runs this as soon as a `wait` is interrupted. Take the running
+# step down, record the stop, and never let the exit status read as success.
+on_signal() {
+  local sig="$1" code="$2"
+  trap - INT TERM
+  stop_child
+  if [[ "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
+    write_stop "interrupted" "SIG${sig} during ${PHASE}" || true
+    record_wake "interrupted" || true
+  fi
+  exit "$code"
+}
+
+# TERM the running step (its timeout wrapper stops the whole process group),
+# KILL it if it outlives the wrapper's own grace period.
+stop_child() {
+  [[ -n "$CHILD_PID" ]] || return 0
+  local pid="$CHILD_PID" i
+  CHILD_PID=""
+  kill -TERM "$pid" 2>/dev/null || return 0
+  for i in $(seq 80); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
 }
 
 write_stop() {
@@ -185,34 +220,29 @@ is_non_command_proof() {
   esac
 }
 
-run_timeout() {
-  local secs="$1"
-  shift
+# run_step SECS OUT ERR CMD... — CMD under a timeout (0 = none), in its own
+# process group, in the background. Waiting with `wait` rather than in the
+# foreground is what lets INT/TERM act now instead of when CMD ends. ERR equal
+# to OUT merges the streams.
+run_step() {
+  local secs="$1" out="$2" err="$3"
+  shift 3
+  local timer=(python3 "$HERE/lib/run-timeout.py" "$secs")
   if command -v gtimeout >/dev/null 2>&1; then
-    gtimeout --kill-after=5 "$secs" "$@"
-    return
+    timer=(gtimeout --kill-after=5 "$secs")
+  elif command -v timeout >/dev/null 2>&1; then
+    timer=(timeout --kill-after=5 "$secs")
   fi
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --kill-after=5 "$secs" "$@"
-    return
+  if [[ "$err" == "$out" ]]; then
+    "${timer[@]}" "$@" >"$out" 2>&1 &
+  else
+    "${timer[@]}" "$@" >"$out" 2>"$err" &
   fi
-  python3 - "$secs" "$@" <<'PY'
-import os, signal, subprocess, sys
-secs = int(sys.argv[1])
-cmd = sys.argv[2:]
-p = subprocess.Popen(cmd, start_new_session=True)
-try:
-    rc = p.wait(timeout=secs)
-except subprocess.TimeoutExpired:
-    os.killpg(p.pid, signal.SIGTERM)
-    try:
-        p.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL)
-        p.wait()
-    sys.exit(124)
-sys.exit(rc)
-PY
+  CHILD_PID=$!
+  local rc=0
+  wait "$CHILD_PID" || rc=$?
+  CHILD_PID=""
+  return "$rc"
 }
 
 # Wake if .git config/hooks/info differ from the saved manifest. git_meta_verify
@@ -265,7 +295,9 @@ parse_last_dispatch() {
 # --- start -----------------------------------------------------------------
 [[ -n "$GOAL_ID" && "$GOAL_ID" != "-h" && "$GOAL_ID" != "--help" ]] || usage
 
-trap on_exit EXIT INT TERM
+trap on_exit EXIT
+trap 'on_signal INT 130' INT
+trap 'on_signal TERM 143' TERM
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die_gate "not a git repo"
 cd "$ROOT"
@@ -419,14 +451,16 @@ while :; do
     --payload "$(printf '{"thread_id":"%s","session_id":"%s"}' "${THREAD_ID:--}" "${SESSION_ID:--}")"
 
   DS_OUT="$RUN_DIR/deepseek-r${ROUND}.out"
+  PHASE="implementer r${ROUND}"
   set +e
   if [[ -n "$THREAD_ID" ]]; then
-    run_timeout "$IMPL_SECS" "$DEEPSEEK" --resume "$THREAD_ID" "$HAND" >"$DS_OUT" 2>"$DS_OUT.wrap"
+    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$DEEPSEEK" --resume "$THREAD_ID" "$HAND"
   else
-    run_timeout "$IMPL_SECS" "$DEEPSEEK" "$HAND" >"$DS_OUT" 2>"$DS_OUT.wrap"
+    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$DEEPSEEK" "$HAND"
   fi
   ds_rc=$?
   set -e
+  PHASE="assess r${ROUND}"
   verify_git_meta "during implementer r${ROUND}"
   LAST_DEEPSEEK="$(kv "$DS_OUT" DEEPSEEK_RESULT)"
   THREAD_ID="$(kv "$DS_OUT" THREAD_ID)"
@@ -509,9 +543,12 @@ while :; do
     set +e
     # Plain -c, not -lc: the gate must not depend on the user's interactive
     # profile (aliases, PATH edits, version managers) being loaded.
-    bash -c "$PROOF" >"$PROOF_FILE" 2>&1
+    # Timeout 0 (none) for now; the wrapper still owns the process group.
+    PHASE="proof r${ROUND}"
+    run_step 0 "$PROOF_FILE" "$PROOF_FILE" bash -c "$PROOF"
     PROOF_EXIT=$?
     set -e
+    PHASE="assess r${ROUND}"
     verify_git_meta "during proof r${ROUND}"
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
       if [[ "$LAST_DEEPSEEK" == ok* ]]; then
@@ -542,17 +579,19 @@ Do not ask the implementer to edit the oracle or tests/acceptance/.
 EOF
 
   RV_OUT="$RUN_DIR/reviewer-r${ROUND}.out"
+  PHASE="review r${ROUND}"
   set +e
   # --add-dir $RUN_DIR or the reviewer cannot open BRIEF / DIFF_FILE /
   # PROOF_OUTPUT at all: headless Claude denies reads outside the repo and
   # there is nobody to approve the prompt. It then reviews on no evidence.
   if [[ -n "$SESSION_ID" ]]; then
-    run_timeout "$REVIEW_SECS" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" "$BRIEF" >"$RV_OUT" 2>"$RV_OUT.wrap"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" "$BRIEF"
   else
-    run_timeout "$REVIEW_SECS" "$REVIEWER" --add-dir "$RUN_DIR" "$BRIEF" >"$RV_OUT" 2>"$RV_OUT.wrap"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" "$REVIEWER" --add-dir "$RUN_DIR" "$BRIEF"
   fi
   rv_rc=$?
   set -e
+  PHASE="route r${ROUND}"
   [[ -s "$RV_OUT.wrap" ]] && cat "$RV_OUT.wrap" >&2 || true
   LAST_CLAUDE="$(kv "$RV_OUT" CLAUDE_REVIEW_RESULT)"
   SESSION_ID="$(kv "$RV_OUT" SESSION_ID)"

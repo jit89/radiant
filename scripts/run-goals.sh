@@ -68,6 +68,34 @@ if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
   commit_journal "chore: orchestrator walk-start"
 fi
 
+RG_PID=""
+STOP_PTR=""
+
+print_child_stop() {
+  local stop
+  stop="$(cat "$STOP_PTR" 2>/dev/null || true)"
+  [[ -n "$stop" ]] && echo "STOP_FILE: $stop"
+  rm -f "$STOP_PTR"
+  return 0
+}
+
+# INT/TERM: stop the running goal (it records its own stop), reprint its stop
+# file, end the walk nonzero. A child started with & ignores terminal INT, so
+# it is always told with TERM.
+on_signal() {
+  local sig="$1" code="$2"
+  trap - INT TERM
+  if [[ -n "$RG_PID" ]]; then
+    kill -TERM "$RG_PID" 2>/dev/null || true
+    wait "$RG_PID" 2>/dev/null || true
+    print_child_stop
+  fi
+  echo "=== walk interrupted (SIG${sig}) ===" >&2
+  exit "$code"
+}
+trap 'on_signal INT 130' INT
+trap 'on_signal TERM 143' TERM
+
 print_status() {
   echo "=== graph ==="
   "$GOALS_PY" GOALS.md graph
@@ -91,17 +119,17 @@ while :; do
   events_append --event walk --severity info --goal "$id" --summary "walk ${id}"
   commit_journal "chore: orchestrator walk ${id}"
   echo "=== walk ${id} ==="
-  out="$(mktemp "${TMPDIR:-/tmp}/run-goals-XXXXXX.out")"
-  set +e
-  set -o pipefail
-  "$RUN_GOAL" "$id" | tee "$out"
-  rc=$?
-  set +o pipefail
-  set -e
-  stop="$(grep -E '^STOP_FILE:' "$out" | tail -n1 || true)"
-  rm -f "$out"
+  STOP_PTR="$(mktemp "${TMPDIR:-/tmp}/run-goals-stop-XXXXXX")"
+  # Background + wait, not a foreground call: a signal to the walker is
+  # handled now, and $RG_PID is the goal itself to pass it on to.
+  RUN_GOAL_STOP_PTR="$STOP_PTR" "$RUN_GOAL" "$id" &
+  RG_PID=$!
+  rc=0
+  wait "$RG_PID" || rc=$?
+  RG_PID=""
   if [[ "$rc" -ne 0 ]]; then
-    [[ -n "$stop" ]] && echo "$stop"
+    print_child_stop
     exit "$rc"
   fi
+  rm -f "$STOP_PTR"
 done
