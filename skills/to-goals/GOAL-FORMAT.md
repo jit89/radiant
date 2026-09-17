@@ -71,7 +71,7 @@ The case table in the body *is* the oracle.
 - `blocked_by` — ids that must be **done** before this goal can start. A true gate: B is a lie until A exists.
 - `conflicts_with` — ids that are not gates but share an area hard enough that Phase 5 must not merge them in parallel. Same-`area` is not automatic conflict; only declare it when a parallel merge would actually collide.
 - `area` — coarse module lock (`mailer/inbound`, not a file path). File paths go stale.
-- `proof` — exact command that counts as done. Architect runs it, not the implementer's word.
+- `proof` — exact command that counts as done. Architect runs it, not the implementer's word. It must leave the repo as it found it: every file it writes (caches, reports, coverage) must match `.gitignore`, or the goal stops as `proof-tamper`.
 - `oracle` — path of the Architect-authored acceptance file, or `inline`.
 - `status` — `ready` (no unfinished blockers) or `blocked` when first
   written. Phase 4 sets `in_progress`, then `done` or `bounced`.

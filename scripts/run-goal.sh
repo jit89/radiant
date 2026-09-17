@@ -335,11 +335,15 @@ proof_env_unsets() {
   done
 }
 
-# HEAD plus tracked and staged changes — what a proof must leave as it found.
-# Untracked files are left out: test runs write caches and reports.
+# HEAD, tracked and staged changes, and every untracked path not ignored —
+# what a proof must leave as it found. Artifact policy: output a project
+# declares in .gitignore (caches, reports, coverage) is the proof's to write,
+# and the next goal's clean-tree gate does not see it. Anything else a proof
+# creates — source, config, a symlink — nobody reviews and it can steer the
+# proof, so it is tampering.
 tree_snapshot() {
   git rev-parse HEAD
-  git status --porcelain --untracked-files=no
+  git status --porcelain --untracked-files=all
 }
 
 tracked_in_head() {
@@ -694,8 +698,11 @@ while :; do
       moved+=("HEAD moved: $(git log --format=%h "$(head -n1 "$RUN_DIR/tree-before-proof.txt")"..HEAD | paste -sd ' ' -)")
     fi
     changed="$({ diff <(sed 1d "$RUN_DIR/tree-before-proof.txt") <(sed 1d "$RUN_DIR/tree-after-proof.txt") || true; } |
-      sed -n 's/^[<>] ...//p' | sort -u | paste -sd ',' -)"
+      sed -n 's/^[<>] //p' | sort -u)"
+    created="$({ grep '^?? ' <<<"$changed" || true; } | cut -c4- | paste -sd ',' -)"
+    changed="$({ grep -v '^?? ' <<<"$changed" || true; } | cut -c4- | sed '/^$/d' | sort -u | paste -sd ',' -)"
     [[ -z "$changed" ]] || moved+=("tracked changes: $changed")
+    [[ -z "$created" ]] || moved+=("new files not in .gitignore: $created (declare build output in .gitignore; anything else is unreviewed code)")
     [[ -z "$CONTRACT_COMMITTED$CONTRACT_UNCOMMITTED" ]] ||
       moved+=("contract: ${CONTRACT_COMMITTED}${CONTRACT_COMMITTED:+,}${CONTRACT_UNCOMMITTED}")
     if ((${#moved[@]})); then

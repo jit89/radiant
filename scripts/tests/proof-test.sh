@@ -56,7 +56,7 @@ s|oracle: inline|oracle: tests/acceptance/g1-store.sh|
 }' "$HERE/../GOALS.example.md" >GOALS.md
   printf '# Plan\n' >PLAN.md
   printf '%s\n' "$1" >tests/acceptance/g1-store.sh
-  printf '.gitignore\n' >.gitignore
+  printf '.gitignore\n%s' "${IGNORE:-}" >.gitignore
   printf '# Journal: example\n' >docs/journal/example.md
   git add -A && git commit -q -m base
   local t0=$SECONDS
@@ -113,12 +113,33 @@ check "oracle rewrite: names the oracle" "yes" "$(has 'tests/acceptance/g1-store
 proof 'echo x >tests/acceptance/extra.sh'
 check "acceptance addition: proof-tamper" "proof-tamper" "$reason"
 
-# 7. Ordinary build/test artifacts outside the contract are fine.
-proof 'mkdir -p .cache-out && echo x >.cache-out/result.xml && echo y >coverage.txt'
-check "artifacts: not tamper" "reviewer-error" "$reason"
-check "artifacts: review reached" "yes" "$reviewed"
+# 7. Build/test output the project declares in .gitignore is fine, and leaves
+#    nothing the next goal's clean-tree gate would refuse.
+IGNORE=$'.cache-out/\ncoverage.txt\n' \
+  proof 'mkdir -p .cache-out && echo x >.cache-out/result.xml && echo y >coverage.txt'
+check "declared artifacts: not tamper" "reviewer-error" "$reason"
+check "declared artifacts: review reached" "yes" "$reviewed"
+check "declared artifacts: nothing untracked for the next goal" "" \
+  "$(git status --porcelain --untracked-files=all | grep '^??' || true)"
 
-# 8. Red proof still red.
+# 8. The same output, undeclared: a deterministic stop, not silent acceptance.
+proof 'mkdir -p .cache-out && echo x >.cache-out/result.xml && echo y >coverage.txt'
+check "undeclared artifacts: proof-tamper" "proof-tamper" "$reason"
+check "undeclared artifacts: names them" "yes" "$(has 'coverage.txt')"
+check "undeclared artifacts: no review" "no" "$reviewed"
+
+# 9. An untracked source file the proof writes (and could import).
+proof 'printf "def helper():\n    return 1\n" >generated.py'
+check "untracked source: proof-tamper" "proof-tamper" "$reason"
+check "untracked source: names it" "yes" "$(has 'generated.py')"
+check "untracked source: no review" "no" "$reviewed"
+
+# 10. An untracked symlink.
+proof 'ln -s /etc/hosts hosts-link'
+check "untracked symlink: proof-tamper" "proof-tamper" "$reason"
+check "untracked symlink: no review" "no" "$reviewed"
+
+# 11. Red proof still red.
 proof 'exit 3'
 check "red: proof-red" "proof-red" "$reason"
 
