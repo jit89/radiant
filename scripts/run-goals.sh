@@ -13,7 +13,7 @@ GOALS_PY="$HERE/goals.py"
 RUN_GOAL="$HERE/run-goal.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/events.sh"
-# Defines git(): hooks and fsmonitor off. run-goal.sh checks .git itself.
+# Defines git(): hooks and fsmonitor off, .git checked before each call.
 # shellcheck disable=SC1091
 source "$HERE/lib/git-guard.sh"
 
@@ -22,13 +22,42 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 cd "$ROOT"
+utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# Arms the .git check in git(). The baseline is shared with run-goal.sh: a goal
+# that stopped on tampering leaves it behind, and the walker checks it before
+# its first commit — a planted filter would otherwise run on that commit.
+git_meta_init || { echo "cannot locate the gitdir" >&2; exit 1; }
+
+# A .git change is a nonzero stop of its own, before any git command: with the
+# check failed, the git() wrapper refuses to run, so nothing here is committed.
+meta_stop() {
+  git_meta_verify "$GIT_META_SAVED" && return 0
+  local dir stop
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/run-goals-meta-XXXXXX")"
+  chmod 700 "$dir"
+  stop="$dir/stop.md"
+  cat >"$stop" <<EOF
+# Stop: walk
+
+- reason: git-metadata-tamper
+- detail: .git changed $1: ${GIT_META_CHANGED}
+- utc: $(utc)
+- host git is off for this walk. Inspect with cat / ls -la, not git. Revert anything
+  you did not make, then re-baseline: rm $GIT_META_SAVED
+EOF
+  echo "=== git-metadata-tamper ==="
+  events_append --event wake --severity error --reason git-metadata-tamper \
+    --summary "walk git-metadata-tamper: ${GIT_META_CHANGED}"
+  echo "STOP_FILE: $stop"
+  exit 1
+}
 
 [[ -f GOALS.md ]] || { echo "GOALS.md missing" >&2; exit 1; }
 "$GOALS_PY" GOALS.md validate
 
 JOURNAL="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("journal") or "")')"
-
-utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+meta_stop "since the last run in this repo"
 
 journal_line() {
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 0
@@ -135,6 +164,7 @@ print_status() {
 }
 
 while :; do
+  meta_stop "during the last goal"
   "$GOALS_PY" GOALS.md refresh
   commit_goals
   print_status
@@ -147,6 +177,7 @@ while :; do
     events_append --event walk_end --severity info --summary "walk-end"
     commit_journal "chore: orchestrator walk-end"
     events_end_walk
+    git_meta_forget
     exit 0
   fi
 

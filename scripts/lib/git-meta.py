@@ -91,8 +91,12 @@ def main(argv):
     if problems:
         return 1
     if mode == "manifest" or not os.path.exists(target):
-        with open(target, "w") as f:
+        # Atomic: every host git call verifies, and a $(git ...) subshell can
+        # race the caller's own first check to write the baseline.
+        tmp = f"{target}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
             f.write("".join(r + "\n" for r in rows))
+        os.replace(tmp, target)
         return 0
     saved = read_rows(target)
     now = {r.split("\t", 1)[0]: r for r in rows}

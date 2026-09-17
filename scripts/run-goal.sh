@@ -56,7 +56,6 @@ DEEPSEEK_LOG=""
 DEEPSEEK_ERR=""
 FIX_HASH=""
 FIX_COUNT_N=0
-GIT_META_SAVED=""
 PHASE="gate"
 CHILD_PID=""
 PENDING_FIX_ROUND=""
@@ -82,8 +81,7 @@ on_exit() {
   trap - EXIT INT TERM
   stop_child
   if [[ "$ec" -ne 0 && "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
-    write_stop "trap" "exit $ec" || true
-    record_wake "trap" || true
+    stop_unplanned "trap" "exit $ec during ${PHASE}"
     STOP_WRITTEN=1
   fi
   if [[ -n "$STOP_FILE" && -f "$STOP_FILE" ]]; then
@@ -103,10 +101,27 @@ on_signal() {
   trap - INT TERM
   stop_child
   if [[ "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
-    write_stop "interrupted" "SIG${sig} during ${PHASE}" || true
-    record_wake "interrupted" || true
+    stop_unplanned "interrupted" "SIG${sig} during ${PHASE}"
   fi
   exit "$code"
+}
+
+# A stop no check led to (signal, crash) can land mid-step, before the .git
+# check that follows it. Check first — no git runs until then — and let a
+# change be the reason: the stop record's own git calls are skipped.
+stop_unplanned() {
+  local reason="$1" detail="$2"
+  if [[ "$GIT_META_TAINTED" -eq 1 ]] ||
+    { [[ -n "$GIT_META_SAVED" ]] && ! git_meta_verify "$GIT_META_SAVED"; }; then
+    reason="git-metadata-tamper"
+    detail="${detail}; .git changed: ${GIT_META_CHANGED}— $(git_meta_help)"
+  fi
+  write_stop "$reason" "$detail" || true
+  record_wake "$reason" || true
+}
+
+git_meta_help() {
+  echo "host git is off for this run. Inspect with cat / ls -la, not git. Revert anything you did not make, then re-baseline: rm $GIT_META_SAVED"
 }
 
 # TERM the running step (its timeout wrapper stops the whole process group),
@@ -198,7 +213,7 @@ wake() {
 succeed() {
   STOP_WRITTEN=1
   STOP_FILE=""
-  [[ -n "$GIT_META_SAVED" ]] && rm -f "$GIT_META_SAVED"
+  git_meta_forget
   # Nothing here is needed once the goal lands; verdicts and fix handoffs
   # were already copied to ART_DIR. On a wake we keep RUN_DIR — it is the
   # evidence the stop file points at.
@@ -265,7 +280,7 @@ run_step() {
 # has already disabled host git by then, so the wake path runs none.
 verify_git_meta() {
   git_meta_verify "$GIT_META_SAVED" && return 0
-  wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— host git is off for this run. Inspect with cat / ls -la, not git. Revert anything you did not make, then re-baseline: rm $GIT_META_SAVED"
+  wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— $(git_meta_help)"
 }
 
 # Contract drift since BASE_SHA: this goal's file oracle, tests/acceptance/,
@@ -390,6 +405,11 @@ STOP_FILE="$RUN_DIR/stop.md"
 ART_DIR="$HOME/.cache/claude-coding-workflow/run-goal-${GOAL_ID}"
 mkdir -p "$ART_DIR"
 
+# .git baseline, before any git command that can run a program. The saved
+# manifest outlives a stop, so tampering is caught on resume and by the walker.
+git_meta_init || die_gate "cannot locate the gitdir"
+verify_git_meta "since the last run in this repo"
+
 [[ -f GOALS.md ]] || die_gate "GOALS.md missing — commit the DAG and oracles first"
 git rev-parse --verify HEAD >/dev/null 2>&1 || die_gate "repo has no commits"
 
@@ -403,12 +423,6 @@ JOURNAL="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.l
 if ! tracked_in_head GOALS.md || ! tracked_in_head "$JOURNAL"; then
   die_gate "commit GOALS.md, oracles, and the journal first"
 fi
-
-# .git baseline, before any git command that can run a program. A saved
-# manifest outlives a wake, so tampering is caught on resume too.
-git_meta_init || die_gate "cannot locate the gitdir"
-GIT_META_SAVED="$ART_DIR/git-meta-$(printf '%s\n' "${GIT_META_DIRS[@]}" | shasum -a 256 | cut -c1-16).txt"
-verify_git_meta "since the last run of $GOAL_ID"
 
 # Cache walk_id until walk-end. Mint → one journal line, fail-closed commit.
 # Before the dirty-tree gate so a later wake still has a walk_id.

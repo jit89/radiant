@@ -50,6 +50,10 @@ plant_fsmonitor() {
   source "$HERE/lib/git-guard.sh"
   mkdir -p "$TMP/lib" && cd "$TMP/lib" && command git init -q
   git_meta_init
+  # git() checks before every call once init has run (below). This section
+  # drives git_meta_verify by hand against its own file, so disarm it.
+  ARMED="$GIT_META_SAVED"
+  GIT_META_SAVED=""
   S="$TMP/lib-saved.txt"
 
   git_meta_verify "$S"
@@ -97,6 +101,16 @@ plant_fsmonitor() {
   chmod +x .git/hooks/pre-commit
   echo y >b && git add b && git status --porcelain >/dev/null && git commit -qm t
   check "wrapper runs no hook or fsmonitor" "0" "$(fired)"
+
+  # Armed: no explicit verify — the wrapper's own check refuses the call.
+  GIT_META_SAVED="$ARMED"
+  rm -f "$GIT_META_SAVED"
+  git status >/dev/null && r=0 || r=1
+  check "armed wrapper: first call saves a baseline" "0" "$r"
+  echo 'echo x' >.git/hooks/post-checkout
+  git status >/dev/null 2>&1 && r=0 || r=1
+  check "armed wrapper: refuses after a change" "1" "$r"
+  check "armed wrapper: taint set" "1" "$GIT_META_TAINTED"
   echo "$fails" >"$TMP/lib-fails"
 ) || echo 1 >"$TMP/lib-fails"
 # The subshell's own count; a crash before the end counts as one failure.
@@ -112,6 +126,7 @@ rm -f "$MARK"
   git worktree add -q "$TMP/wt-linked"
   cd "$TMP/wt-linked"
   git_meta_init
+  GIT_META_SAVED=""  # verify by hand, as above
   check "linked worktree tracks both gitdirs" "2" "${#GIT_META_DIRS[@]}"
   S="$TMP/wt-saved.txt"
   git_meta_verify "$S"
@@ -234,6 +249,59 @@ make_repo
 run_goal
 check "honest implementer is not flagged" "reviewer-error" "$reason"
 check "reviewer reached" "1" "$(grep -c claude-goal-review "$TMP/stubs" || true)"
+
+# --- stops that come before the post-step check (F2-01) --------------------
+# The implementer plants a clean filter (config + info/attributes) and dirties
+# a tracked file, so any host `git status` / `git add` would run the filter.
+cat >"$TMP/filter.sh" <<SH
+#!/bin/sh
+echo filter >>$MARK
+cat
+SH
+chmod +x "$TMP/filter.sh"
+PLANT_FILTER="
+printf '* filter=evil\\n' >>.git/info/attributes
+command git config filter.evil.clean $TMP/filter.sh
+echo more >>docs/journal/example.md"
+
+# Walker: the goal stops on tampering; the rerun walker commits nothing.
+stub deepseek-code.sh "$PLANT_FILTER
+$DS_OK"
+make_repo
+"$HOUSE/scripts/run-goals.sh" >"$TMP/out" 2>&1 && rc=0 || rc=$?
+walk_reason() {
+  sed -n 's/^- reason: //p' "$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)" 2>/dev/null || true
+}
+check "walk: goal stops on the planted filter" "git-metadata-tamper" "$(walk_reason)"
+head_before="$(command git rev-parse HEAD)"
+: >"$TMP/stubs"
+"$HOUSE/scripts/run-goals.sh" >"$TMP/out" 2>&1 && rc=0 || rc=$?
+check "walk rerun: exits nonzero" "yes" "$([[ $rc -ne 0 ]] && echo yes || echo no)"
+check "walk rerun: its own stop names the tamper" "git-metadata-tamper" "$(walk_reason)"
+check "walk rerun: stop names the changed path" "yes" \
+  "$(grep -q 'info/attributes' "$TMP/out" "$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)" && echo yes || echo no)"
+check "walk rerun: no commit" "$head_before" "$(command git rev-parse HEAD)"
+check "walk rerun: nothing dispatched" "0" "$(grep -c reached "$TMP/stubs" || true)"
+check "walk: filter never ran on the host" "0" "$(fired)"
+
+# Signal: TERM arrives while the implementer still runs, after it planted.
+NAP="43.$$"
+stub deepseek-code.sh "$PLANT_FILTER
+echo planted >>$TMP/stubs
+sleep $NAP"
+make_repo
+"$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 &
+pid=$!
+for _ in $(seq 150); do
+  grep -q planted "$TMP/stubs" 2>/dev/null && break
+  sleep 0.1
+done
+kill -TERM "$pid"
+wait "$pid" && rc=0 || rc=$?
+pkill -f "sleep $NAP" 2>/dev/null || true
+check "signal: exit 143" "143" "$rc"
+check "signal: stop reason is the tamper" "git-metadata-tamper" "$(walk_reason)"
+check "signal: filter never ran on the host" "0" "$(fired)"
 
 if [[ "$fails" -eq 0 ]]; then
   echo "git-guard: OK"
