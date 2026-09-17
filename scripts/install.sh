@@ -66,6 +66,7 @@ do_install() {
     "$ROOT/scripts/tests/resume-contract-test.sh" \
     "$ROOT/scripts/tests/verdict-test.sh" \
     "$ROOT/scripts/tests/resume-state-test.sh" \
+    "$ROOT/scripts/tests/walk-end-test.sh" \
     "$ROOT/scripts/lib/resume-state.py" \
     "$ROOT/scripts/lib/verdict.py" \
     "$ROOT/scripts/lib/run-timeout.py" \
@@ -157,6 +158,12 @@ do_check() {
   else
     echo "resume state: FAIL"; rc=1
     "$ROOT/scripts/tests/resume-state-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/walk-end-test.sh" >/dev/null 2>&1; then
+    echo "walk end: OK (exit 0 only when every goal is done)"
+  else
+    echo "walk end: FAIL"; rc=1
+    "$ROOT/scripts/tests/walk-end-test.sh" || true
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \

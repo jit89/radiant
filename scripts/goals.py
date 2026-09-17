@@ -15,6 +15,7 @@ Usage (from the target repo):
   goals.py [GOALS.md] show <id>
   goals.py [GOALS.md] body <id>
   goals.py [GOALS.md] blockers <id>     # unfinished blocked_by, "id (status)"
+  goals.py [GOALS.md] remaining         # every goal not done, and why
   goals.py [GOALS.md] meta
   goals.py [GOALS.md] status-only-id <id> <other.md>   # whole file, not just the fence
   goals.py [GOALS.md] todos
@@ -486,6 +487,22 @@ def cmd_blockers(path, data, extra, **_):
     return 0
 
 
+def cmd_remaining(path, data, **_):
+    """One line per goal that is not done: its status and open blockers."""
+    for g in data["goals"]:
+        st = g.get("status")
+        if st == "done":
+            continue
+        open_ = open_blockers(data, g["id"])
+        if open_ and st == "blocked":
+            print(f"{g['id']}: blocked by {', '.join(open_)}")
+        elif open_:
+            print(f"{g['id']}: {st}, blocked by {', '.join(open_)}")
+        else:
+            print(f"{g['id']}: {st}")
+    return 0
+
+
 def cmd_body(path, text, extra, **_):
     if len(extra) != 1:
         raise SystemExit("body <id>")
@@ -540,6 +557,7 @@ def main(argv: list[str]) -> int:
             "show",
             "body",
             "blockers",
+            "remaining",
             "meta",
             "status-only-id",
             "todos",
@@ -560,6 +578,7 @@ def main(argv: list[str]) -> int:
         "show": cmd_show,
         "body": cmd_body,
         "blockers": cmd_blockers,
+        "remaining": cmd_remaining,
         "meta": cmd_meta,
         "status-only-id": cmd_status_only_id,
         "todos": cmd_todos,

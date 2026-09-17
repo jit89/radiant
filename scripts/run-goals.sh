@@ -96,6 +96,39 @@ on_signal() {
 trap 'on_signal INT 130' INT
 trap 'on_signal TERM 143' TERM
 
+# Nothing left to run but goals are not all done — bounced, or blocked behind
+# one that can't finish. Not a success: stop like a wake, keep the walk id
+# (the restart after the fix is the same job).
+walk_stuck() {
+  local remaining="$1" dir stop
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/run-goals-stuck-XXXXXX")"
+  chmod 700 "$dir"
+  stop="$dir/stop.md"
+  cat >"$stop" <<EOF
+# Stop: walk
+
+- reason: walk-stuck
+- detail: nothing left to run; $(wc -l <<<"$remaining" | tr -d ' ') goal(s) not done
+- utc: $(utc)
+- unstick bounced: the Architect fixes the goal's spec or oracle and commits, then
+  $GOALS_PY GOALS.md set <id> ready   (commit GOALS.md) and rerun run-goals
+- unstick blocked: finish the blocker, or drop the edge from blocked_by in GOALS.md and commit
+
+## Not done
+$(sed 's/^/- /' <<<"$remaining")
+
+## graph
+$("$GOALS_PY" GOALS.md graph)
+EOF
+  echo "=== walk-stuck ==="
+  journal_line "## $(utc) — ORCHESTRATOR walk-stuck $(paste -sd ';' - <<<"$remaining")"
+  events_append --event wake --severity error --reason walk-stuck \
+    --summary "walk-stuck: $(paste -sd ';' - <<<"$remaining")"
+  commit_journal "chore: orchestrator walk-stuck"
+  echo "STOP_FILE: $stop"
+  exit 1
+}
+
 print_status() {
   echo "=== graph ==="
   "$GOALS_PY" GOALS.md graph
@@ -107,6 +140,8 @@ while :; do
   print_status
   id="$("$GOALS_PY" GOALS.md frontier | head -n1)"
   if [[ -z "$id" || "$id" == "(empty)" ]]; then
+    remaining="$("$GOALS_PY" GOALS.md remaining)"
+    [[ -z "$remaining" ]] || walk_stuck "$remaining"
     echo "=== walk-end ==="
     journal_line "## $(utc) — ORCHESTRATOR walk-end"
     events_append --event walk_end --severity info --summary "walk-end"
