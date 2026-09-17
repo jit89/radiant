@@ -12,6 +12,10 @@ trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" EVENTS_CACHE="$TMP/cache" STUBS="$TMP/stubs"
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
 export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
+# No background auto-maintenance: a detached repack still writing .git/objects
+# races the next scenario's rm -rf of the repo.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=gc.auto GIT_CONFIG_VALUE_1=0
 export DEEPSEEK_API_KEY=stub-not-a-key
 unset ANTHROPIC_API_KEY
 mkdir -p "$HOME"

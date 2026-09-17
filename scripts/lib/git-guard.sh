@@ -42,16 +42,21 @@ import hashlib, os, stat, sys
 
 out, dirs = sys.argv[1], sys.argv[2:]
 NAMES = ("config", "config.worktree", "hooks", "info")
+# Written by git itself: repack (run by background auto-maintenance after
+# commits) regenerates info/refs, a ref list for dumb HTTP that nothing runs.
+GENERATED = ("info/refs",)
 rows = []
 
-def add(path):
+def add(path, rel):
+    if rel in GENERATED:
+        return
     st = os.lstat(path)
     if stat.S_ISLNK(st.st_mode):
         rows.append(f"{path}\tlink\t-\t{os.readlink(path)}")
     elif stat.S_ISDIR(st.st_mode):
         rows.append(f"{path}\tdir\t{oct(st.st_mode & 0o7777)}\t-")
         for name in sorted(os.listdir(path)):
-            add(os.path.join(path, name))
+            add(os.path.join(path, name), f"{rel}/{name}")
     else:
         with open(path, "rb") as f:
             digest = hashlib.sha256(f.read()).hexdigest()
@@ -61,7 +66,7 @@ for d in dirs:
     for name in NAMES:
         p = os.path.join(d, name)
         if os.path.lexists(p):
-            add(p)
+            add(p, name)
 
 with open(out, "w") as f:
     f.write("".join(r + "\n" for r in sorted(rows)))

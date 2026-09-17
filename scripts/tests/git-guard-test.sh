@@ -11,6 +11,10 @@ trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" EVENTS_CACHE="$TMP/cache"
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
 export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
+# No background auto-maintenance: a detached repack still writing .git/objects
+# races the next scenario's rm -rf of the repo.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=gc.auto GIT_CONFIG_VALUE_1=0
 unset ANTHROPIC_API_KEY
 mkdir -p "$HOME"
 MARK="$TMP/fired"
@@ -41,6 +45,7 @@ plant_fsmonitor() {
 
 # --- lib -------------------------------------------------------------------
 (
+  fails=0  # counted here, added to the parent's total below
   # shellcheck disable=SC1091
   source "$HERE/lib/git-guard.sh"
   mkdir -p "$TMP/lib" && cd "$TMP/lib" && command git init -q
@@ -54,6 +59,13 @@ plant_fsmonitor() {
   echo x >a && git add a && git commit -qm legit
   git_meta_verify "$S" "$TMP/m2.txt" && r=0 || r=1
   check "an ordinary commit is not tampering" "0" "$r"
+
+  # Background auto-maintenance repacks after commits and rewrites
+  # info/refs (a generated ref list for dumb HTTP; nothing executes it).
+  command git repack -q -d
+  printf 'deadbeef\trefs/heads/x\n' >>.git/info/refs
+  git_meta_verify "$S" "$TMP/m2b.txt" && r=0 || r=1
+  check "git-generated info/refs is not tampering" "0" "$r"
 
   plant_hook .git
   git_meta_verify "$S" "$TMP/m3.txt" && r=0 || r=1
@@ -85,12 +97,14 @@ plant_fsmonitor() {
   chmod +x .git/hooks/pre-commit
   echo y >b && git add b && git status --porcelain >/dev/null && git commit -qm t
   check "wrapper runs no hook or fsmonitor" "0" "$(fired)"
-  echo 0 >"$TMP/lib-fails"
+  echo "$fails" >"$TMP/lib-fails"
 ) || echo 1 >"$TMP/lib-fails"
-[[ "$(cat "$TMP/lib-fails" 2>/dev/null)" == 0 ]] || fails=$((fails + 1))
+# The subshell's own count; a crash before the end counts as one failure.
+fails=$((fails + $(cat "$TMP/lib-fails" 2>/dev/null || echo 1)))
 rm -f "$MARK"
 
 (
+  fails=0  # counted here, added to the parent's total below
   # shellcheck disable=SC1091
   source "$HERE/lib/git-guard.sh"
   mkdir -p "$TMP/wt-main" && cd "$TMP/wt-main" && command git init -q
@@ -104,9 +118,9 @@ rm -f "$MARK"
   plant_hook "$TMP/wt-main/.git"
   git_meta_verify "$S" "$TMP/w1.txt" && r=0 || r=1
   check "hook in common gitdir detected" "1" "$r"
-  echo 0 >"$TMP/wt-fails"
+  echo "$fails" >"$TMP/wt-fails"
 ) || echo 1 >"$TMP/wt-fails"
-[[ "$(cat "$TMP/wt-fails" 2>/dev/null)" == 0 ]] || fails=$((fails + 1))
+fails=$((fails + $(cat "$TMP/wt-fails" 2>/dev/null || echo 1)))
 
 # --- run-goal.sh -----------------------------------------------------------
 HOUSE="$TMP/house"
