@@ -72,6 +72,8 @@ The case table in the body *is* the oracle.
 
 `blocked_by` and `conflicts_with` in the markdown body must match the YAML. The YAML wins if they drift.
 
+Each goal has exactly one `## <id> — <title>` section: the id, then a space or end of line (`## g1-store:` does not count). `goals.py validate` rejects duplicates, and an `oracle: inline` goal with no section — its case table is the oracle.
+
 ## Slice rules
 
 - Vertical: a narrow complete path (schema + API + tests, or the equivalent), demoable or verifiable alone. Not a horizontal layer ("just the types").
