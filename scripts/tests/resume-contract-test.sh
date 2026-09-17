@@ -105,7 +105,10 @@ git restore --source=HEAD --worktree -- '$path'"
   check "$name: worktree looks clean" "" "$(git -C "$TMP/repo" diff --name-only HEAD -- "$path")"
   check "$name: gate" "gate" "$reason"
   check "$name: nothing dispatched" "1" "$calls"
-  check "$name: named as staged" "yes" "$(has "staged: $path")"
+  check "$name: named as staged" "yes" "$(has "staged in the index, so the worktree can look clean: $path")"
+  # The worktree matches HEAD but not the index, which git status reports as
+  # both staged and unstaged; the categories say which is which.
+  check "$name: unstaged named too" "yes" "$(has "unstaged, index against worktree: $path")"
   check "$name: index left alone" "$path" \
     "$(git -C "$TMP/repo" diff --cached --name-only HEAD -- "$path")"
 }
@@ -121,6 +124,26 @@ check "staged GOALS.md body edit: nothing dispatched" "1" "$calls"
 # GOALS.md is checked even earlier, by the orchestration-file preflight.
 check "staged GOALS.md named" "yes" "$(has 'GOALS.md: has staged changes')"
 
+# Each git state is reported on its own, with its own remedy (F4-04).
+scenario '' "$WEAKEN"
+check "unstaged only: named unstaged" "yes" "$(has 'unstaged, index against worktree: tests/acceptance/g1-store.sh')"
+check "unstaged only: not called staged" "yes" \
+  "$([[ "$detail" != *"staged in the index"* ]] && echo yes || echo "no: $detail")"
+check "unstaged only: not called untracked" "yes" \
+  "$([[ "$detail" != *"new untracked files"* ]] && echo yes || echo "no: $detail")"
+
+scenario '' 'printf "true\n" >tests/acceptance/g3-new.sh'
+check "untracked only: named untracked" "yes" "$(has 'new untracked files: tests/acceptance/g3-new.sh')"
+check "untracked only: nothing else" "yes" \
+  "$([[ "$detail" != *"staged in the index"* && "$detail" != *"unstaged, index"* ]] && echo yes || echo "no: $detail")"
+
+scenario '' 'printf "true\n" >tests/acceptance/g1-store.sh
+git add -- tests/acceptance/g1-store.sh
+printf "false\n" >tests/acceptance/g1-store.sh'
+check "staged and different unstaged: both named" "yes" \
+  "$([[ "$detail" == *"staged in the index"*"tests/acceptance/g1-store.sh"* &&
+        "$detail" == *"unstaged, index against worktree: tests/acceptance/g1-store.sh"* ]] && echo yes || echo "no: $detail")"
+
 # An ignored file under tests/acceptance is contract, not artifact (F3-02).
 scenario '' 'printf "tests/acceptance/extra.sh\n" >>.gitignore
 git add .gitignore && git commit -qm "chore: ignore a helper"
@@ -128,17 +151,17 @@ printf "true\n" >tests/acceptance/extra.sh'
 check "ignored acceptance addition: gate" "gate" "$reason"
 check "ignored acceptance addition: nothing dispatched" "1" "$calls"
 check "ignored addition named separately" "yes" \
-  "$(has 'ignored-but-under-contract: tests/acceptance/extra.sh')"
+  "$(has 'ignored but under a contract path, so absent from the review diff: tests/acceptance/extra.sh')"
 
 scenario "$WEAKEN; git add tests/acceptance/g1-store.sh" ''
 check "staged oracle edit: gate" "gate" "$reason"
 check "staged oracle edit: nothing dispatched" "1" "$calls"
-check "staged edit listed as uncommitted" "yes" "$(has '; uncommitted: tests/acceptance/g1-store.sh')"
+check "staged edit listed as staged" "yes" "$(has 'staged in the index, so the worktree can look clean: tests/acceptance/g1-store.sh')"
 
 scenario "$WEAKEN; git add tests/acceptance/g1-store.sh; git commit -qm 'wip: tidy test'" ''
 check "committed oracle edit: gate" "gate" "$reason"
 check "committed oracle edit: nothing dispatched" "1" "$calls"
-check "committed edit listed as committed" "yes" "$(has '— committed: tests/acceptance/g1-store.sh')"
+check "committed edit listed as committed" "yes" "$(has 'committed: tests/acceptance/g1-store.sh')"
 check "gate offers bounce" "yes" "$(has "set g1-store bounced")"
 check "names the commit that edited the oracle" "yes" \
   "$(has "$(git log --format=%h -1 --grep='wip: tidy test')")"

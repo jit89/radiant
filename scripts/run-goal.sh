@@ -298,14 +298,14 @@ verify_git_meta() {
 
 # Contract drift since BASE_SHA: the plan, this goal's file oracle,
 # tests/acceptance/, and all of GOALS.md except this goal's status. Sets
-# CONTRACT_PATHS and one-line lists CONTRACT_COMMITTED (changed by commits
-# after BASE_SHA, which are listed in CONTRACT_COMMITS), CONTRACT_STAGED
-# (HEAD → index), CONTRACT_UNCOMMITTED (unstaged or untracked) and
-# CONTRACT_IGNORED (untracked but matching .gitignore — an artifact anywhere
-# else, tampering here). Each state is reported on its own: staging an edit
-# and restoring the worktree copy hides it from a worktree-only comparison,
-# and a later commit still publishes what the index holds. Needs BASE_SHA,
-# PLAN_PATH and ORACLE from goals-base.md, and RUN_DIR.
+# CONTRACT_PATHS and one-line lists, one per git state, each with its own
+# remedy (contract_report): CONTRACT_COMMITTED (commits after BASE_SHA, listed
+# in CONTRACT_COMMITS), CONTRACT_STAGED (HEAD → index), CONTRACT_UNSTAGED
+# (index → worktree), CONTRACT_UNTRACKED, and CONTRACT_IGNORED (untracked but
+# matching .gitignore — an artifact anywhere else, tampering here). Staging an
+# edit and restoring the worktree copy hides it from a worktree-only
+# comparison, and a later commit still publishes what the index holds. Needs
+# BASE_SHA, PLAN_PATH and ORACLE from goals-base.md, and RUN_DIR.
 contract_drift() {
   local drift goals_commit=0
   CONTRACT_PATHS=(tests/acceptance "$PLAN_PATH")
@@ -314,8 +314,10 @@ contract_drift() {
   fi
   CONTRACT_COMMITTED="$(git diff --name-only "$BASE_SHA" HEAD -- "${CONTRACT_PATHS[@]}" || true)"
   CONTRACT_STAGED="$(git diff --cached --name-only HEAD -- "${CONTRACT_PATHS[@]}" || true)"
-  CONTRACT_UNCOMMITTED="$(git diff --name-only HEAD -- "${CONTRACT_PATHS[@]}" || true)
-$(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
+  # Index against worktree, not HEAD against worktree: a change that is only
+  # staged must not also be reported as an edit sitting in the worktree.
+  CONTRACT_UNSTAGED="$(git diff --name-only -- "${CONTRACT_PATHS[@]}" || true)"
+  CONTRACT_UNTRACKED="$(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
   # .gitignore makes a file an artifact outside the contract; inside it, an
   # ignored file is invisible to the diff the reviewer reads, so it is drift.
   CONTRACT_IGNORED="$(git ls-files --others --ignored --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
@@ -334,11 +336,12 @@ $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
     goals_commit=1
   fi
   if ! drift="$("$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
-    CONTRACT_UNCOMMITTED="${CONTRACT_UNCOMMITTED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
+    CONTRACT_UNSTAGED="${CONTRACT_UNSTAGED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
   fi
   CONTRACT_COMMITTED="$(sed '/^$/d' <<<"$CONTRACT_COMMITTED" | sort -u | paste -sd ',' -)"
   CONTRACT_STAGED="$(sed '/^$/d' <<<"$CONTRACT_STAGED" | sort -u | paste -sd ',' -)"
-  CONTRACT_UNCOMMITTED="$(sed '/^$/d' <<<"$CONTRACT_UNCOMMITTED" | sort -u | paste -sd ',' -)"
+  CONTRACT_UNSTAGED="$(sed '/^$/d' <<<"$CONTRACT_UNSTAGED" | sort -u | paste -sd ',' -)"
+  CONTRACT_UNTRACKED="$(sed '/^$/d' <<<"$CONTRACT_UNTRACKED" | sort -u | paste -sd ',' -)"
   CONTRACT_IGNORED="$(sed '/^$/d' <<<"$CONTRACT_IGNORED" | sort -u | paste -sd ',' -)"
   CONTRACT_COMMITS=""
   if [[ -n "$CONTRACT_COMMITTED" ]]; then
@@ -346,6 +349,29 @@ $(git ls-files --others --exclude-standard -- "${CONTRACT_PATHS[@]}" || true)"
     [[ "$goals_commit" -eq 0 ]] || log_paths+=(GOALS.md)
     CONTRACT_COMMITS="$(git log --format=%h "$BASE_SHA"..HEAD -- "${log_paths[@]}" | paste -sd ' ' -)"
   fi
+}
+
+# True when any category of contract drift has something in it.
+contract_any() {
+  [[ -n "${CONTRACT_COMMITTED}${CONTRACT_STAGED}${CONTRACT_UNSTAGED}${CONTRACT_UNTRACKED}${CONTRACT_IGNORED}" ]]
+}
+
+# Every category that has something, each with the command that undoes it.
+# One place: a new category is a line here, not a new string to concatenate
+# into four branches.
+contract_report() {
+  local out=""
+  [[ -z "$CONTRACT_COMMITTED" ]] ||
+    out="${out}committed: ${CONTRACT_COMMITTED} (revert commits: ${CONTRACT_COMMITS:-none}); "
+  [[ -z "$CONTRACT_STAGED" ]] ||
+    out="${out}staged in the index, so the worktree can look clean: ${CONTRACT_STAGED} (git restore --staged -- <paths>); "
+  [[ -z "$CONTRACT_UNSTAGED" ]] ||
+    out="${out}unstaged, index against worktree: ${CONTRACT_UNSTAGED} (git restore -- <paths> to take the index copy, git restore --source=HEAD -- <paths> to drop both); "
+  [[ -z "$CONTRACT_UNTRACKED" ]] ||
+    out="${out}new untracked files: ${CONTRACT_UNTRACKED} (delete them); "
+  [[ -z "$CONTRACT_IGNORED" ]] ||
+    out="${out}ignored but under a contract path, so absent from the review diff: ${CONTRACT_IGNORED} (delete it, or take the path out of .gitignore); "
+  printf '%s' "${out%; }"
 }
 
 # `env -u` arguments for every exported variable named like a credential — a
@@ -604,8 +630,8 @@ chmod 400 "$PLAN_FROZEN"
 # before a paid dispatch hands the implementer the changed oracle.
 if [[ "$RESUME" -eq 1 ]]; then
   contract_drift
-  if [[ -n "$CONTRACT_COMMITTED$CONTRACT_STAGED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]]; then
-    die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — committed: ${CONTRACT_COMMITTED:-none} (commits: ${CONTRACT_COMMITS:-none}); staged: ${CONTRACT_STAGED:-none}; uncommitted: ${CONTRACT_UNCOMMITTED:-none}; ignored-but-under-contract: ${CONTRACT_IGNORED:-none}. Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
+  if contract_any; then
+    die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — $(contract_report). Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
   fi
 fi
 
@@ -701,22 +727,25 @@ while :; do
 
   contract_drift
   if [[ -n "$CONTRACT_COMMITTED" ]]; then
-    wake "contract-tamper-committed" "committed: $CONTRACT_COMMITTED — revert commits: $CONTRACT_COMMITS"
+    wake "contract-tamper-committed" "$(contract_report)"
   fi
   if [[ -n "$CONTRACT_STAGED" ]]; then
     # Not restored: the index is the user's to keep or drop, and overwriting
     # it would destroy work the refusal is asking them to look at.
-    wake "contract-tamper-staged" "staged in the index (the worktree copy may look clean): $CONTRACT_STAGED. Inspect with git diff --cached HEAD, then git restore --staged those paths."
+    wake "contract-tamper-staged" "$(contract_report)"
   fi
   if [[ -n "$CONTRACT_IGNORED" ]]; then
-    wake "contract-tamper-ignored" "under a contract path but matching .gitignore, so absent from the review diff: $CONTRACT_IGNORED. Remove it, or take the path out of .gitignore."
+    wake "contract-tamper-ignored" "$(contract_report)"
   fi
-  if [[ -n "$CONTRACT_UNCOMMITTED" ]]; then
+  if [[ -n "$CONTRACT_UNSTAGED$CONTRACT_UNTRACKED" ]]; then
+    # Rendered before the restore below rewrites what it describes. Not
+    # `local`: this runs in the main loop, not in a function.
+    contract_msg="$(contract_report)"
     # Per path: one pathspec absent at BASE_SHA must not block the others.
     for p in "${CONTRACT_PATHS[@]}"; do
       git checkout "$BASE_SHA" -- "$p" 2>/dev/null || true
     done
-    wake "contract-tamper-worktree" "uncommitted: $CONTRACT_UNCOMMITTED"
+    wake "contract-tamper-worktree" "$contract_msg"
   fi
 
   unexpected=()
@@ -784,8 +813,7 @@ while :; do
     changed="$({ grep -v '^?? ' <<<"$changed" || true; } | cut -c4- | sed '/^$/d' | sort -u | paste -sd ',' -)"
     [[ -z "$changed" ]] || moved+=("tracked changes: $changed")
     [[ -z "$created" ]] || moved+=("new files not in .gitignore: $created (declare build output in .gitignore; anything else is unreviewed code)")
-    [[ -z "$CONTRACT_COMMITTED$CONTRACT_STAGED$CONTRACT_UNCOMMITTED$CONTRACT_IGNORED" ]] ||
-      moved+=("contract: ${CONTRACT_COMMITTED}${CONTRACT_STAGED:+,staged:}${CONTRACT_STAGED}${CONTRACT_UNCOMMITTED:+,}${CONTRACT_UNCOMMITTED}${CONTRACT_IGNORED:+,ignored:}${CONTRACT_IGNORED}")
+    contract_any && moved+=("contract — $(contract_report)")
     if ((${#moved[@]})); then
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
     fi
