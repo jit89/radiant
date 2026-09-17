@@ -119,7 +119,7 @@ stub() {
     "$1" "$TMP/stubs" "$2" >"$HOUSE/scripts/$1"
   chmod +x "$HOUSE/scripts/$1"
 }
-# Stubs print every result field: a missing one trips kv under pipefail.
+# Stubs print the full result block, as the real launchers do.
 stub claude-goal-review.sh 'printf "%s\n" "CLAUDE_REVIEW_RESULT: error" \
   "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null"; exit 1'
 DS_OK="printf '%s\\n' 'DEEPSEEK_RESULT: ok' 'THREAD_ID: t1' 'RETURN_HANDOFF: -' \

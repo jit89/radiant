@@ -59,6 +59,7 @@ do_install() {
     "$ROOT/scripts/tests/orch-commit-test.sh" \
     "$ROOT/scripts/tests/git-guard-test.sh" \
     "$ROOT/scripts/tests/signal-test.sh" \
+    "$ROOT/scripts/tests/result-parse-test.sh" \
     "$ROOT/scripts/lib/run-timeout.py" \
     "$ROOT/scripts/lib/agent-result.py"
   echo "launchers: grok-review.sh claude-goal-review.sh deepseek-code.sh goals.py"
@@ -106,6 +107,12 @@ do_check() {
   else
     echo "signals: FAIL"; rc=1
     "$ROOT/scripts/tests/signal-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/result-parse-test.sh" >/dev/null 2>&1; then
+    echo "launcher results: OK (missing/timeout classified)"
+  else
+    echo "launcher results: FAIL"; rc=1
+    "$ROOT/scripts/tests/result-parse-test.sh" || true
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \

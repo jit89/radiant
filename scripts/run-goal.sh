@@ -207,10 +207,23 @@ succeed() {
   exit 0
 }
 
+# Value of the last "KEY: value" line in FILE, or empty. Never fails: a
+# missing line is for the caller to classify, and under pipefail a no-match
+# grep would otherwise abort the script as reason=trap before it can.
 kv() {
   local file="$1" key="$2"
   [[ -f "$file" ]] || return 0
-  grep -E "^${key}:" "$file" | tail -n1 | sed -E "s/^${key}:[[:space:]]*//"
+  { grep -E "^${key}:" "$file" || true; } | tail -n1 | sed -E "s/^${key}:[[:space:]]*//"
+}
+
+# kv, but keep the current value of VAR when the file has none — a launcher
+# that died before printing its id must not erase the one to resume.
+kv_keep() {
+  local var="$1" val
+  val="$(kv "$2" "$3")"
+  if [[ -n "$val" ]]; then
+    printf -v "$var" '%s' "$val"
+  fi
 }
 
 is_non_command_proof() {
@@ -463,16 +476,23 @@ while :; do
   PHASE="assess r${ROUND}"
   verify_git_meta "during implementer r${ROUND}"
   LAST_DEEPSEEK="$(kv "$DS_OUT" DEEPSEEK_RESULT)"
-  THREAD_ID="$(kv "$DS_OUT" THREAD_ID)"
+  kv_keep THREAD_ID "$DS_OUT" THREAD_ID
   RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
   DEEPSEEK_LOG="$(kv "$DS_OUT" LOG)"
   DEEPSEEK_ERR="$(kv "$DS_OUT" stderr)"
   [[ -s "$DS_OUT.wrap" ]] && cat "$DS_OUT.wrap" >&2 || true
 
+  # Only DEEPSEEK_RESULT is required; the other lines are diagnostics.
+  if [[ "$ds_rc" -eq 124 ]]; then
+    wake "implementer-timeout" "no result after ${IMPL_SECS}s (DEEPSEEK_TIMEOUT). stderr: $DS_OUT.wrap"
+  fi
   if [[ "$ds_rc" -eq 75 || "$LAST_DEEPSEEK" == rate_limited* ]]; then
     wake "rate_limited" "DEEPSEEK_RESULT=$LAST_DEEPSEEK"
   fi
-  if [[ "$ds_rc" -ne 0 || "$LAST_DEEPSEEK" == error* ]]; then
+  if [[ -z "$LAST_DEEPSEEK" ]]; then
+    wake "implementer-error" "no DEEPSEEK_RESULT line (rc=$ds_rc). stderr: $DS_OUT.wrap"
+  fi
+  if [[ "$ds_rc" -ne 0 || "$LAST_DEEPSEEK" != ok ]]; then
     wake "implementer-error" "rc=$ds_rc DEEPSEEK_RESULT=$LAST_DEEPSEEK"
   fi
 
@@ -594,12 +614,22 @@ EOF
   PHASE="route r${ROUND}"
   [[ -s "$RV_OUT.wrap" ]] && cat "$RV_OUT.wrap" >&2 || true
   LAST_CLAUDE="$(kv "$RV_OUT" CLAUDE_REVIEW_RESULT)"
-  SESSION_ID="$(kv "$RV_OUT" SESSION_ID)"
+  kv_keep SESSION_ID "$RV_OUT" SESSION_ID
   VERDICT_FILE="$(kv "$RV_OUT" VERDICT_FILE)"
-  cp -f "$VERDICT_FILE" "$ART_DIR/verdict-r${ROUND}.md" 2>/dev/null || true
+  if [[ -n "$VERDICT_FILE" ]]; then
+    cp -f "$VERDICT_FILE" "$ART_DIR/verdict-r${ROUND}.md" 2>/dev/null || true
+  fi
 
+  if [[ "$rv_rc" -eq 124 ]]; then
+    LAST_VERDICT="MISSING"
+    wake "reviewer-timeout" "no result after ${REVIEW_SECS}s (CLAUDE_REVIEW_TIMEOUT). stderr: $RV_OUT.wrap"
+  fi
   if [[ "$rv_rc" -eq 75 || "$LAST_CLAUDE" == rate_limited* ]]; then
     wake "reviewer-rate-limited" "$LAST_CLAUDE"
+  fi
+  if [[ -z "$LAST_CLAUDE" ]]; then
+    LAST_VERDICT="MISSING"
+    wake "reviewer-error" "no CLAUDE_REVIEW_RESULT line (rc=$rv_rc). stderr: $RV_OUT.wrap"
   fi
   if [[ "$LAST_CLAUDE" != "ok" ]]; then
     LAST_VERDICT="MISSING"
