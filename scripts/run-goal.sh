@@ -510,22 +510,24 @@ while :; do
     committed_touch="$(git diff --name-only "$BASE_SHA" HEAD -- "${contract_paths[@]}" || true)"
     worktree_touch="$(git diff --name-only HEAD -- "${contract_paths[@]}" || true)"
   fi
-  if [[ "$ORACLE" == "inline" ]]; then
-    "$GOALS_PY" "$RUN_DIR/goals-base.md" body "$GOAL_ID" >"$RUN_DIR/body-base.md" || true
-    if "$GOALS_PY" GOALS.md body "$GOAL_ID" >"$RUN_DIR/body-now.md" 2>/dev/null; then
-      if ! cmp -s "$RUN_DIR/body-base.md" "$RUN_DIR/body-now.md"; then
-        worktree_touch="${worktree_touch}"$'\n'"GOALS.md (inline body)"
-      fi
-    fi
+  # GOALS.md is contract end to end — every goal's body, not only this one's
+  # fence — and only this goal's status may move. HEAD never carries that
+  # status (it is committed on done/bounced), so HEAD must match exactly.
+  git show HEAD:GOALS.md >"$RUN_DIR/goals-head.md"
+  if ! drift="$("$GOALS_PY" "$RUN_DIR/goals-head.md" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
+    committed_touch="${committed_touch}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
   fi
-  if ! "$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" >/dev/null; then
-    worktree_touch="${worktree_touch}"$'\n'"GOALS.md (fence beyond this id status)"
+  if ! drift="$("$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
+    worktree_touch="${worktree_touch}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
   fi
+  # One line each: the stop file's detail field is a single line.
+  committed_touch="$(sed '/^$/d' <<<"$committed_touch" | paste -sd ',' -)"
+  worktree_touch="$(sed '/^$/d' <<<"$worktree_touch" | paste -sd ',' -)"
 
-  if [[ -n "$(echo "$committed_touch" | sed '/^$/d')" ]]; then
+  if [[ -n "$committed_touch" ]]; then
     wake "contract-tamper-committed" "revert: git revert $(git rev-parse HEAD)  (touched: $committed_touch)"
   fi
-  if [[ -n "$(echo "$worktree_touch" | sed '/^$/d')" ]]; then
+  if [[ -n "$worktree_touch" ]]; then
     if ((${#contract_paths[@]})); then
       git checkout "$BASE_SHA" -- "${contract_paths[@]}" || true
       git restore --staged "${contract_paths[@]}" || true

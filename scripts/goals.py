@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Read and update the YAML fence in GOALS.md.
 
-Phase 5's source of truth. The markdown bodies are for humans; this
-tool only touches the ```yaml block. Status writes edit that block
-in place and leave the rest of the file alone.
+Phase 5's source of truth. Writes only touch the ```yaml block: status
+writes edit it in place and leave the rest of the file alone. The
+markdown bodies are still contract (case tables, seams), so
+status-only-id compares the whole file.
 
 Usage (from the target repo):
   goals.py [GOALS.md] validate
@@ -14,7 +15,7 @@ Usage (from the target repo):
   goals.py [GOALS.md] show <id>
   goals.py [GOALS.md] body <id>
   goals.py [GOALS.md] meta
-  goals.py [GOALS.md] status-only-id <id> <other.md>
+  goals.py [GOALS.md] status-only-id <id> <other.md>   # whole file, not just the fence
   goals.py [GOALS.md] todos
 """
 
@@ -221,6 +222,40 @@ def fences_status_only(a: dict, b: dict, gid: str) -> list[str]:
         if da != db:
             errs.append(f"{i}: fence fields differ beyond allowed status")
     return errs
+
+
+def status_only_drift(text: str, data: dict, other_text: str, gid: str) -> list[str]:
+    """Empty if text is other_text with at most gid's status changed.
+
+    The whole file is the contract: fence and markdown bodies (case tables,
+    seams, out-of-scope) alike. Fence fields are compared parsed, for precise
+    messages. Then gid's status is carried onto other_text with the same
+    in-place rewrite `set` uses, and the files must match exactly.
+    """
+    _, other_start, other_end = extract_fence(other_text)
+    other_data = parse_yaml_subset(other_text[other_start:other_end])
+    errs = fences_status_only(data, other_data, gid)
+    if errs:
+        return errs
+    status = by_id(data)[gid].get("status")
+    blob = rewrite_goal_status(other_text[other_start:other_end], gid, status)
+    expected = other_text[:other_start] + blob + other_text[other_end:]
+    if expected == text:
+        return []
+    now, was = text.splitlines(), expected.splitlines()
+    i = next(
+        (n for n, (x, y) in enumerate(zip(now, was)) if x != y),
+        min(len(now), len(was)),
+    )
+    _, start, end = extract_fence(text)
+    fence_first = text.count("\n", 0, start)
+    fence_last = text.count("\n", 0, end)
+    if fence_first <= i <= fence_last:
+        where = "the yaml fence (formatting)"
+    else:
+        heads = [line for line in now[:i + 1] if line.startswith("## ")]
+        where = heads[-1] if heads else "the preamble"
+    return [f"markdown differs from line {i + 1}, under {where}"]
 
 
 def validate(data: dict) -> list[str]:
@@ -430,7 +465,7 @@ def cmd_meta(data, **_):
     return 0
 
 
-def cmd_status_only_id(path, data, extra, **_):
+def cmd_status_only_id(path, data, text, extra, **_):
     if len(extra) != 2:
         raise SystemExit("status-only-id <id> <other.md>")
     gid, other = extra
@@ -439,8 +474,7 @@ def cmd_status_only_id(path, data, extra, **_):
     op = Path(other)
     if not op.is_file():
         raise SystemExit(f"not found: {op}")
-    _, other_data, _, _ = load(op)
-    errs = fences_status_only(data, other_data, gid)
+    errs = status_only_drift(text, data, op.read_text(), gid)
     if errs:
         print("DRIFT")
         for e in errs:
