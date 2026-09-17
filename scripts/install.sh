@@ -56,6 +56,7 @@ do_install() {
     "$ROOT/scripts/logs.sh" \
     "$ROOT/scripts/install.sh" \
     "$ROOT/scripts/tests/findings-test.sh" \
+    "$ROOT/scripts/tests/orch-commit-test.sh" \
     "$ROOT/scripts/lib/agent-result.py"
   echo "launchers: grok-review.sh claude-goal-review.sh deepseek-code.sh goals.py"
 }
@@ -84,6 +85,12 @@ do_check() {
   else
     echo "findings parser: FAIL"; rc=1
     "$ROOT/scripts/tests/findings-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/orch-commit-test.sh" >/dev/null 2>&1; then
+    echo "orchestrator commits: OK (narrow)"
+  else
+    echo "orchestrator commits: FAIL"; rc=1
+    "$ROOT/scripts/tests/orch-commit-test.sh" || true
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \

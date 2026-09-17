@@ -34,10 +34,11 @@ journal_line() {
 
 commit_goals() {
   git add -- GOALS.md
-  if git diff --cached --quiet; then
+  if git diff --cached --quiet -- GOALS.md; then
     return 0
   fi
-  git commit -m "chore: orchestrator refresh" || {
+  # Pathspec commit: anything else the user staged stays staged, uncommitted.
+  git commit -m "chore: orchestrator refresh" -- GOALS.md || {
     echo "failed to commit GOALS.md after refresh" >&2
     exit 1
   }
@@ -49,10 +50,10 @@ commit_journal() {
   local msg="${1:-chore: orchestrator journal}"
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 0
   git add -- "$JOURNAL"
-  if git diff --cached --quiet; then
+  if git diff --cached --quiet -- "$JOURNAL"; then
     return 0
   fi
-  git commit -m "$msg" || {
+  git commit -m "$msg" -- "$JOURNAL" || {
     echo "failed to commit journal" >&2
     exit 1
   }

@@ -218,10 +218,11 @@ orch_commit() {
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] && files+=("$JOURNAL")
   ((${#files[@]})) || return 0
   git add -- "${files[@]}"
-  if git diff --cached --quiet; then
+  if git diff --cached --quiet -- "${files[@]}"; then
     return 0
   fi
-  git commit -m "$msg" || wake "commit-failed" "$msg"
+  # Pathspec commit: anything else the user staged stays staged, uncommitted.
+  git commit -m "$msg" -- "${files[@]}" || wake "commit-failed" "$msg"
 }
 
 journal_line() {
