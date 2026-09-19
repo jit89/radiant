@@ -356,6 +356,18 @@ contract_any() {
   [[ -n "${CONTRACT_COMMITTED}${CONTRACT_STAGED}${CONTRACT_UNSTAGED}${CONTRACT_UNTRACKED}${CONTRACT_IGNORED}" ]]
 }
 
+# When every ignored contract path is Python bytecode, say so: the usual cause is
+# a test run outside the host's PYTHONDONTWRITEBYTECODE (an Architect's own run,
+# or a tool that ignores the variable), not a planted file (D-09).
+contract_ignored_hint() {
+  local p
+  [[ -n "$CONTRACT_IGNORED" ]] || return 0
+  while IFS= read -r p; do
+    [[ "$p" == */__pycache__/*.pyc ]] || return 0
+  done < <(tr ',' '\n' <<<"$CONTRACT_IGNORED")
+  printf '%s' " — all Python bytecode caches: a test run without PYTHONDONTWRITEBYTECODE=1 (e.g. the Architect's own pytest before dispatch) wrote them; delete the __pycache__ directories and resume"
+}
+
 # Every category that has something, each with the command that undoes it.
 # One place: a new category is a line here, not a new string to concatenate
 # into four branches.
@@ -370,7 +382,7 @@ contract_report() {
   [[ -z "$CONTRACT_UNTRACKED" ]] ||
     out="${out}new untracked files: ${CONTRACT_UNTRACKED} (delete them); "
   [[ -z "$CONTRACT_IGNORED" ]] ||
-    out="${out}ignored but under a contract path, so absent from the review diff: ${CONTRACT_IGNORED} (delete it, or take the path out of .gitignore); "
+    out="${out}ignored but under a contract path, so absent from the review diff: ${CONTRACT_IGNORED} (delete it, or take the path out of .gitignore)$(contract_ignored_hint); "
   printf '%s' "${out%; }"
 }
 
@@ -790,8 +802,11 @@ while :; do
     tree_snapshot >"$RUN_DIR/tree-before-proof.txt"
     unsets=()
     while IFS= read -r u; do unsets+=("$u"); done < <(proof_env_unsets)
+    # PYTHONDONTWRITEBYTECODE: a Python proof would otherwise write .pyc files
+    # under tests/acceptance/, which the ignored-file contract rule (rightly)
+    # calls tampering — every Python target would wake on its own test run (D-09).
     run_step "$PROOF_SECS" "$PROOF_FILE" "$PROOF_FILE" \
-      env "${unsets[@]+"${unsets[@]}"}" bash -c "$PROOF"
+      env "${unsets[@]+"${unsets[@]}"}" PYTHONDONTWRITEBYTECODE=1 bash -c "$PROOF"
     PROOF_EXIT=$?
     set -e
     PHASE="assess r${ROUND}"

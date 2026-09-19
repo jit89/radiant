@@ -71,7 +71,7 @@ The case table in the body *is* the oracle.
 - `blocked_by` — ids that must be **done** before this goal can start. A true gate: B is a lie until A exists.
 - `conflicts_with` — ids that are not gates but share an area hard enough that Phase 5 must not merge them in parallel. Same-`area` is not automatic conflict; only declare it when a parallel merge would actually collide.
 - `area` — coarse module lock (`mailer/inbound`, not a file path). File paths go stale.
-- `proof` — exact command that counts as done. Architect runs it, not the implementer's word. It must leave the repo as it found it: every file it writes (caches, reports, coverage) must match `.gitignore`, or the goal stops as `proof-tamper`. `.gitignore` does not excuse a path under `tests/acceptance/` or the plan: an ignored file there is tampering, because the reviewer's diff would never show it.
+- `proof` — exact command that counts as done. Architect runs it, not the implementer's word. It must leave the repo as it found it: every file it writes (caches, reports, coverage) must match `.gitignore`, or the goal stops as `proof-tamper`. `.gitignore` does not excuse a path under `tests/acceptance/` or the plan: an ignored file there is tampering, because the reviewer's diff would never show it. Python bytecode is the common case: the host runs the implementer and the proof with `PYTHONDONTWRITEBYTECODE=1`, so run your own Phase 3 checks the same way (or delete `tests/acceptance/**/__pycache__` before committing), or the first goal wakes `contract-tamper-ignored`.
 - `oracle` — path of the Architect-authored acceptance file, or `inline`.
 - `status` — `ready` (no unfinished blockers) or `blocked` when first
   written. Phase 4 sets `in_progress`, then `done` or `bounced`.

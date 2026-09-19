@@ -625,6 +625,71 @@ This is a narrower, evidenced instance of D-04: the oracle set has no gate, and
 the *pre-existing* oracles a plan invalidates are not even in the Architect's
 checklist.
 
+### D-09 — The ignored-file tamper rule fires on every Python target's own test run
+
+**Status: fixed 2026-09-19** (items 1, 3, 4 below; item 2 not taken). The fix:
+- `run-goal.sh` runs the proof with `PYTHONDONTWRITEBYTECODE=1`;
+- `deepseek-code.sh` exports it before Codex starts, so the shell tool inherits it;
+- `contract_report` adds a cause hint when every ignored contract path is a
+  `__pycache__/*.pyc`;
+- `GOAL-FORMAT.md`'s proof rule tells the Architect to run Phase 3 checks the same
+  way.
+
+Regression tests:
+- `proof-test.sh`: the environment check and a real Python proof importing from
+  `tests/acceptance/`. Both are red without the fix.
+- `resume-contract-test.sh`: the hint appears for bytecode only, and not when a
+  real file is mixed in.
+
+Item 2 (the host deleting caches before a snapshot) was not taken: the host must
+not delete files under a contract path it is guarding. The hint names the remedy
+instead.
+
+**Source:** observed in a live walk: `~/prompt-tools` Week 5, g1-scope-fields,
+2026-09-19. The wake was `contract-tamper-ignored`; the journal is
+`docs/journal/week5-openrouter-sandbox.md`.
+**Locations:** `scripts/run-goal.sh:737-739` (the wake) and the `CONTRACT_IGNORED`
+computation in `contract_drift`; introduced by `5036104` ("an ignored file under a
+contract path is tampering, not an artifact").
+
+The rule is right: a planted `.pyc` beside an oracle can shadow the test it was
+compiled from. Python checks only the source's mtime and size, and an implementer
+controls both. But **nothing stops the host's own actors writing exactly those
+files.** Any `pytest` run over `tests/acceptance/` writes the assertion-rewrite cache
+into `tests/acceptance/__pycache__/` (for example
+`test_g1_scope_fields.cpython-314-pytest-8.4.2.pyc`), and so does a plain import of a
+helper module there. That run can be:
+
+- the implementer, following the TDD loop the brief asks for;
+- the host's proof, which must "leave the repo as it found it", and whose
+  `.gitignore` exemption explicitly does not cover `tests/acceptance/`.
+
+So **every goal of a Python target wakes**, after a correct implementation and
+before review. In the observed walk, DeepSeek had finished (`DEEPSEEK_RESULT: ok`),
+the oracle was 35/35 green, and Opus never ran. Week 4 walked clean only because it
+predated `5036104`.
+
+**Target-side workaround applied** in `~/prompt-tools` (`a9f7cdf`):
+`tests/conftest.py` sets `sys.dont_write_bytecode = True`. pytest loads it before
+any test module, including a single-file run. It works, but every Python target
+needs to know to add it, and nothing tells them.
+
+**Fix:**
+
+1. **Launch the implementer and the proof with `PYTHONDONTWRITEBYTECODE=1`** (in
+   `deepseek-code.sh`'s environment and the proof's environment). This covers both
+   pytest's rewrite cache and plain imports. Keep the ignored-file rule exactly as
+   it is.
+2. **Clear the contract paths' `__pycache__` before snapshotting `BASE_SHA`'s
+   ignored set**, so an Architect's own Phase 3 test runs cannot trip the first
+   goal either.
+3. **Name the cause in the wake detail.** When every ignored path is a
+   `__pycache__/*.pyc`, add "bytecode cache; see PYTHONDONTWRITEBYTECODE" next to
+   the path list, so the Architect does not have to reconstruct the diagnosis.
+4. **Say it in `to-goals`/GOAL-FORMAT's proof rules**, beside the existing
+   `.gitignore` sentence: a Python target must not write bytecode under
+   `tests/acceptance/` during tests.
+
 ## Recommended remediation sequence
 
 1. **Close host execution boundaries:** remove model access to Git metadata,
@@ -661,12 +726,13 @@ checklist.
 | Acceptance file unchanged but test undiscovered | Refuse DONE |
 | Two concurrent repositories with same goal ID | No artifact/config collision |
 | Goal IDs sharing a prefix | Exact body returned |
+| Implementer and proof run `pytest` on a Python target's acceptance files | No `__pycache__` under `tests/acceptance/`; no `contract-tamper-ignored` wake |
 | Plan changes a count pinned by an earlier goal's acceptance file | Edit applied by the Architect before dispatch; implementer diff touches no `tests/acceptance/` path |
 
 ## Review totals
 
 - 16 implementation/security/correctness findings: 8 P1 and 8 P2.
-- 8 design and reasoning weaknesses (D-08 added from a live walk, not the code review).
+- 9 design and reasoning weaknesses (D-08 and D-09 added from live walks, not the code review).
 - 11 implementation findings have an executable safe reproduction or direct
   behavioral demonstration in this document; potentially harmful exploit paths
   are documented for inspection without executing them.

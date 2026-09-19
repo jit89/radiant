@@ -153,6 +153,21 @@ check "ignored acceptance addition: nothing dispatched" "1" "$calls"
 check "ignored addition named separately" "yes" \
   "$(has 'ignored but under a contract path, so absent from the review diff: tests/acceptance/extra.sh')"
 
+# Only bytecode caches under the contract: still refused, but the report names the
+# usual cause so nobody reconstructs it (D-09). Mixed with a real file: no hint.
+scenario '' 'printf "__pycache__/\n" >>.gitignore
+git add .gitignore && git commit -qm "chore: ignore caches"
+mkdir -p tests/acceptance/__pycache__ && printf x >tests/acceptance/__pycache__/helper.cpython-314.pyc'
+check "bytecode only: gate" "gate" "$reason"
+check "bytecode only: hint names the cause" "yes" "$(has 'all Python bytecode caches')"
+
+scenario '' 'printf "__pycache__/\ntests/acceptance/extra.sh\n" >>.gitignore
+git add .gitignore && git commit -qm "chore: ignore caches and a helper"
+mkdir -p tests/acceptance/__pycache__ && printf x >tests/acceptance/__pycache__/helper.cpython-314.pyc
+printf "true\n" >tests/acceptance/extra.sh'
+check "bytecode plus a real file: no bytecode hint" "yes" \
+  "$([[ "$detail" != *"all Python bytecode caches"* && "$detail" == *"tests/acceptance/extra.sh"* ]] && echo yes || echo "no: $detail")"
+
 scenario "$WEAKEN; git add tests/acceptance/g1-store.sh" ''
 check "staged oracle edit: gate" "gate" "$reason"
 check "staged oracle edit: nothing dispatched" "1" "$calls"

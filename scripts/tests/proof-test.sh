@@ -56,6 +56,7 @@ s|oracle: inline|oracle: tests/acceptance/g1-store.sh|
 }' "$HERE/../GOALS.example.md" >GOALS.md
   printf '# Plan\n' >PLAN.md
   printf '%s\n' "$1" >tests/acceptance/g1-store.sh
+  [[ -z "${HELPER:-}" ]] || printf '%s\n' "$HELPER" >tests/acceptance/helper.py
   printf '.gitignore\n%s' "${IGNORE:-}" >.gitignore
   printf '# Journal: example\n' >docs/journal/example.md
   git add -A && git commit -q -m base
@@ -91,6 +92,8 @@ check "env: ordinary variables kept" "present" "$(seen PLAIN_SETTING)"
 check "env: PATH kept" "present" "$(seen PATH)"
 check "env: KEY inside a word is not a credential" "present" "$(seen KEYBOARD_LAYOUT)"
 check "env: git's GIT_CONFIG_KEY_n kept" "present" "$(seen GIT_CONFIG_KEY_0)"
+check "env: bytecode writes off (D-09)" "yes" \
+  "$(grep -qx 'PYTHONDONTWRITEBYTECODE=1' "$OUTSIDE/env" && echo yes || echo no)"
 unset ANTHROPIC_API_KEY MY_SERVICE_TOKEN DB_PASSWORD PLAIN_SETTING KEYBOARD_LAYOUT
 
 # 3. Proof code that commits.
@@ -151,7 +154,16 @@ IGNORE=$'tests/acceptance/junk/\n' \
   proof 'mkdir -p tests/acceptance/junk && printf "x\n" >tests/acceptance/junk/x.sh'
 check "ignored acceptance directory: proof-tamper" "proof-tamper" "$reason"
 
-# 12. Red proof still red.
+# 12. A Python proof that imports a module under tests/acceptance/ must not leave
+#     bytecode there: an ignored .pyc under the contract is tamper (case 11), so
+#     without PYTHONDONTWRITEBYTECODE every Python target would wake (D-09).
+IGNORE=$'__pycache__/\n' HELPER='X = 1' \
+  proof 'python3 -c "import sys; sys.path.insert(0, \"tests/acceptance\"); import helper"'
+check "python proof: not tamper" "reviewer-error" "$reason"
+check "python proof: no bytecode under the contract" "" \
+  "$(find tests/acceptance -name '*.pyc' 2>/dev/null)"
+
+# 13. Red proof still red.
 proof 'exit 3'
 check "red: proof-red" "proof-red" "$reason"
 

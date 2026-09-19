@@ -119,6 +119,11 @@ fi
 
 mkdir -p "$CODEX_HOME_DIR"
 export CODEX_HOME="$CODEX_HOME_DIR"
+# The implementer's own test runs must not write .pyc files under
+# tests/acceptance/: run-goal.sh treats any ignored file there as tampering, and
+# pytest's rewrite cache is exactly that (D-09). Codex's shell tool inherits the
+# launcher's environment (shell_environment_policy defaults to inherit = "all").
+export PYTHONDONTWRITEBYTECODE=1
 
 # config.toml is rewritten per invocation (model, effort, and this repo's
 # gitdir), but CODEX_HOME is shared so `--resume THREAD_ID` can find the
