@@ -637,7 +637,14 @@ Consequences observed:
 3. **Goal bodies say "already applied — do not edit", never "owned",** for anything
    under `tests/acceptance/`. Only edits outside that directory (unit tests, config)
    are listed as the implementer's.
-4. **Require a satisfiability note per pre-applied edit.** Where code exists that
+4. **Require a satisfiability note per pre-applied edit — and for the new oracle
+   itself.** As written this covers only swept edits, which is the narrower half: a
+   goal's *own* oracle is the file most likely to be wrong, because nothing has ever
+   run against it. In one Week 6 goal the scratch run caught two defects in a single
+   new oracle — an invented seam, and a differential that cancelled the term it
+   measured — both after that oracle had been read twice. Closed in
+   `skills/to-goals/GOAL-FORMAT.md`, "Prove the oracle is satisfiable before
+   committing it". Where code exists that
    can satisfy it, run it against a scratch fix. Where it cannot exist yet, record
    what was measured (for example the loaded inventory) and that the rest is
    inferred.

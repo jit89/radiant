@@ -94,6 +94,30 @@ The Architect authors the oracle. The implementer makes it pass and does not edi
 
 Each case is an example: concrete input → concrete output, plus the edges the plan named. Assertions are exact values, not "does not throw".
 
+### Prove the oracle is satisfiable before committing it
+
+Red is not enough: a case can be red because the feature is missing, or because the case is
+wrong. Before committing, apply a **scratch implementation**, watch the oracle go green, then
+revert it. Journal what the scratch was. This applies to the goal's **new** oracle, not only
+to swept edits — that is where these are usually found:
+
+- **An invented symbol.** A seam that does not exist. Grep every name the oracle imports.
+- **A pin on a private signature.** Calling a helper with today's arguments freezes a shape
+  the implementer must change to do the work. Pin what reaches the wire or the store.
+- **A tautology.** Both sides of `==` derived from the same helper restates a definition —
+  `broke() + nonce_on(ch) == on_channel(ch)` is `(A - B) + B == A`. One side must come from
+  a run.
+- **A differential that cancels its own term.** If the quantity under test is present in
+  both arms, the case cannot fail for its own reason.
+- **A maths claim asserted rather than run.** `rot13` and `reverse` commute, so an "order
+  matters" case on that pair can never fail.
+- **A claim nowhere pinned.** Where the plan says "the shipped X is Y", something under
+  `tests/acceptance/` must read X.
+
+Evidence: in one Week 6 goal the scratch run caught two of these in a single new oracle —
+an invented seam, and a differential that cancelled the term it measured — both after the
+oracle had been read twice.
+
 ### The whole directory is the Architect's
 
 The host guards all of `tests/acceptance/`, not only a goal's own oracle: a change to any file there during a goal's run — an earlier goal's, an earlier week's — stops that goal as tampering, and a resume refuses one made while the goal was paused. So every edit under `tests/acceptance/` is the Architect's, applied in Phase 3 before dispatch and listed under **Acceptance edits (applied, read-only)**. **Edits owned** holds only paths outside the directory; `goals.py validate` rejects a `tests/acceptance/` path there.

@@ -62,6 +62,12 @@ The implementer will be forbidden to edit these. A weak oracle (vague
 assertions, missing plan cases) is a Phase 3 failure, not a Phase 4
 problem.
 
+**Prove the new oracle satisfiable before committing it**, the same way
+step 4 below requires for a swept edit: apply a scratch implementation,
+watch it go green, revert, and journal the scratch. Red alone does not
+distinguish a missing feature from a wrong case — see GOAL-FORMAT.md,
+"Prove the oracle is satisfiable", for the failure classes this catches.
+
 Then **sweep** the acceptance files that already exist. The host guards
 the whole `tests/acceptance/` directory, so every edit the plan owes
 there is yours, now (GOAL-FORMAT.md, Oracle rules):
