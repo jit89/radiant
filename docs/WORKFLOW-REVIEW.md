@@ -545,6 +545,29 @@ oracle afterward. A sound plan can become incomplete tests with no independent
 mapping from requirements to cases. Add a review that traces every goal
 requirement and risk to concrete positive and negative cases before dispatch.
 
+**Evidence and a concrete proposal (prompt-tools Week 6, 2026-09-20).** Ten
+goals, and the Architect's oracles broke more rounds than the implementations
+did. Two cheap steps found every defect that review missed, and both belong in
+the workflow rather than in one project's habits:
+
+1. **A close-out whole-suite run against complete data, diffed by test id.**
+   Per-goal proofs cannot catch a defect that only appears when one goal's data
+   meets another goal's oracle. Week 6's worst contract defect was invisible to
+   every per-goal review *and* to the goal's own green oracle; it surfaced only
+   when the 192-scenario library met the trust gate. Compare failing sets **by
+   test id**, never by count — the count was identical before and after.
+2. **A bounded mutation pass over whatever decides the product's numbers**
+   (~20 mutants, minutes). A green suite says nothing about whether it *can*
+   fail. This found a report that printed `3/20` while computing its interval
+   from 3/25, and an assertion that was `(A - B) + B == A`.
+
+A third lesson is not a gate but a scheduling rule: **a defect in how the tool
+measures reality is unreachable by review.** Week 6's comprehension probe was
+sound on paper, passed its own oracle, and scored 3/8 against a real target. A
+small real-target smoke early in a week is worth more than any amount of
+offline review of the same code. See `CLAUDE.md`, Phase 3, for the oracle
+failure classes this produced.
+
 ### D-05 — Silence turns assumptions into contractual facts
 
 `skills/crucible/SKILL.md:56-67` says unmarked assumptions are confirmed.
