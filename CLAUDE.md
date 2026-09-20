@@ -189,6 +189,14 @@ need not) — loose text, another goal's record, or an ARCHITECT note left
 uncommitted stops it (`reason: journal-tamper`, or the gate on a resume), so
 commit your own notes before dispatching.
 
+**Carried inputs go in every slice that depends on them, not only the one that will
+fix them.** A hazard gets written down by whoever discovers it — usually the current
+slice, or the one taking the fix. The slice that actually *breaks* without it is often
+much later, and it reads its own block. Recording it once, in the fixing slice's block,
+loses it entirely if that fix slips. Name the later slice explicitly and say what
+happens if the fix has not landed by then. The crucible's recon sweeps for this from
+the other side, and the two together are what make a carried input survive.
+
 The host also writes one `ORCHESTRATOR wake <id> r<n> reason=<reason>`
 line (no stop-file dump, no Opus findings) and a JSONL index in
 `~/.cache/claude-coding-workflow/logs/`. After a wake, query with

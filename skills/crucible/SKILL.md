@@ -29,7 +29,12 @@ Before asking the user a single question, determine the terrain.
 
 1. Explore architecture, relevant modules, patterns the plan must fit, current schema/auth/infra as applicable.
 2. Load living docs: `CONTEXT.md` (or `CONTEXT-MAP.md`) and `docs/adr/`. If they exist, Phase 1 runs **docs-aware**.
-3. If the task involves tech the repo can't answer, open the research gate.
+3. **Sweep the whole roadmap for inputs addressed to this slice, not just this slice's
+   own block.** A hazard is usually written down by the slice that *discovers* it or the
+   one that *fixes* it, which is rarely the slice that *breaks* without it — so grep every
+   later block for this slice's name before trusting that its own block is complete.
+   Carried inputs are cheap to write in one place and expensive to miss.
+4. If the task involves tech the repo can't answer, open the research gate.
 
 ### Greenfield
 
