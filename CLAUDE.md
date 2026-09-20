@@ -91,6 +91,30 @@ file is the rulebook — do not fork it.**
 User quiz on granularity and edges before anything hits disk. No Opus
 pass on the DAG. No dispatch.
 
+**Oracle failure classes — check each before committing a red oracle.**
+Across Weeks 2-6 the Architect's oracles have broken more rounds than the
+implementations have. These are the shapes they break in:
+
+- **An invented symbol.** A seam that does not exist (`runner._messages_for`).
+  Grep every name the oracle imports before you commit it.
+- **A pin on a private signature.** Calling a helper with today's arguments
+  freezes a shape the implementer must change to do the work. Pin what goes
+  **on the wire** or into the store, not how a private function is called.
+- **A tautology.** Both sides of `==` derived from the same helper restates a
+  definition: `mock_agent_broke() + nonce_on(tool_output) == on_channel(...)`
+  is `(A - B) + B == A`. At least one side must come from a run.
+- **A differential that cancels its own term.** If the quantity under test is
+  present in both arms, the case cannot fail for its own reason.
+- **A claim nowhere pinned.** Where the plan says "the shipped X is Y",
+  something under `tests/acceptance/` must read X. Three Week 6 defects were
+  this: an unbounded Exit target, a reachability pair, `found_in_view`.
+- **A maths claim asserted, not run.** `rot13` and `reverse` commute, so an
+  "order matters" case on that pair can never fail. Brute-force it.
+
+**Prove satisfiability before committing.** Apply a scratch implementation,
+watch the oracle go green, then revert it. That step — not review — is what
+catches the classes above, and it is cheap.
+
 ### Phase 4 — Implement + review
 
 From the target repo: `scripts/run-goal.sh <id>`. The **script** is
