@@ -26,11 +26,25 @@
 #   PROOF_OUTPUT: <path>     # Architect-run proof, packed as ground truth
 #
 # Optional env: CLAUDE_REVIEW_MODEL / CLAUDE_REVIEW_EFFORT /
-# DRY_RUN / OUT). Result lines:
-#   CLAUDE_REVIEW_RESULT: ok | rate_limited | error | dry_run
+# CLAUDE_REVIEW_FALLBACK_MODEL / DRY_RUN / OUT). Result lines:
+#   CLAUDE_REVIEW_RESULT: ok | rate_limited | flagged | error | dry_run
 #   SESSION_ID: <uuid>
 #   VERDICT: DONE | FIX | BLOCKED | MISSING
 #   VERDICT_FILE: <path>
+#   CLAUDE_REVIEW_MODEL: <the model that produced this result>
+#   CLAUDE_REVIEW_FALLBACK: <from> -> <to> (...)   only when the fallback ran
+#
+# SAFETY FLAGS. If the reviewer's safeguards flag the review (a classifier false
+# positive on the security content of a diff is the usual cause) the turn ends with
+# no verdict. The script then retries ONCE on CLAUDE_REVIEW_FALLBACK_MODEL (default
+# claude-opus-4-8; empty or "none" turns the retry off). It is the same reviewer role
+# on a different model, so it is never silent: CLAUDE_REVIEW_MODEL and
+# CLAUDE_REVIEW_FALLBACK name it, and run-goal.sh journals both. If the retry is
+# flagged too, or the fallback is off, the result is `flagged`, the verdict MISSING
+# and the exit code 76 — fail closed, never a guessed DONE. Only the safeguards
+# notice and stop_reason "refusal" count (lib/flagged-refusal.py); a Usage Policy
+# refusal is not retried. A fresh review retries on a new session; a --resume round
+# keeps its session so the review conversation survives the switch.
 #
 # Architect: run from the target repo. Timeout 10 minutes (600000 ms).
 
@@ -42,6 +56,9 @@ source "$HERE/lib/dotenv.sh"
 HOUSE="$(cd "$HERE/.." && pwd)"
 MODEL="${CLAUDE_REVIEW_MODEL:-claude-opus-5}"
 EFFORT="${CLAUDE_REVIEW_EFFORT:-high}"
+# `-` not `:-`: an explicitly empty value must disable the fallback, not restore it.
+FALLBACK_MODEL="${CLAUDE_REVIEW_FALLBACK_MODEL-claude-opus-4-8}"
+[[ "$FALLBACK_MODEL" == "none" ]] && FALLBACK_MODEL=""
 SMOKE=0
 RESUME_ID=""
 BRIEF=""
@@ -92,50 +109,81 @@ verdict_of() {
   python3 "$HERE/lib/verdict.py" "$1" DONE FIX BLOCKED
 }
 
+# True when the turn was stopped by a safety flag rather than by a verdict.
+flagged_refusal() {
+  python3 "$HERE/lib/flagged-refusal.py" "$1" "$2" >/dev/null 2>&1
+}
+
 run_claude() {
-  local prompt="$1"
-  local session_flag=(--session-id "$SESSION_ID")
-  if [[ -n "$RESUME_ID" ]]; then
-    session_flag=(--resume "$RESUME_ID")
-    SESSION_ID="$RESUME_ID"
-  fi
+  local prompt="$1" model="$MODEL" fell_back="" raw rc
 
-  local add_flags=()
-  local d
-  for d in "${ADD_DIRS[@]+"${ADD_DIRS[@]}"}"; do
-    [[ -d "$d" ]] || continue
-    add_flags+=(--add-dir "$d")
+  while :; do
+    local session_flag=(--session-id "$SESSION_ID")
+    if [[ -n "$RESUME_ID" ]]; then
+      session_flag=(--resume "$RESUME_ID")
+      SESSION_ID="$RESUME_ID"
+    fi
+
+    local add_flags=()
+    local d
+    for d in "${ADD_DIRS[@]+"${ADD_DIRS[@]}"}"; do
+      [[ -d "$d" ]] || continue
+      add_flags+=(--add-dir "$d")
+    done
+
+    local cmd=(
+      "$CLAUDE_BIN" -p "$prompt"
+      --model "$model"
+      --effort "$EFFORT"
+      --output-format json
+      --permission-mode plan
+      --tools Read,Glob,Grep
+      --safe-mode
+      "${add_flags[@]+"${add_flags[@]}"}"
+      "${session_flag[@]}"
+    )
+
+    if [[ "${CLAUDE_REVIEW_DRY_RUN:-0}" == "1" ]]; then
+      echo "CLAUDE_REVIEW_RESULT: dry_run"
+      echo "SESSION_ID: ${SESSION_ID}"
+      echo "VERDICT: MISSING"
+      echo "VERDICT_FILE: (dry run — no file)"
+      printf 'CMD:'
+      printf ' %q' "${cmd[@]}"
+      printf '\n'
+      exit 0
+    fi
+
+    raw="$(mktemp -t claude-goal-raw-XXXXXX.json)"
+    set +e
+    "${cmd[@]}" >"$raw" 2>"${raw}.err"
+    rc=$?
+    set -e
+
+    # Checked before the exit code: a flagged turn may exit non-zero, and must not
+    # be reported as a generic error or as a rate limit.
+    if flagged_refusal "$raw" "${raw}.err"; then
+      if [[ -z "$fell_back" && -n "$FALLBACK_MODEL" && "$FALLBACK_MODEL" != "$model" ]]; then
+        echo "claude-goal-review: ${model} flagged this review; retrying once on ${FALLBACK_MODEL}" >&2
+        fell_back="$model"
+        model="$FALLBACK_MODEL"
+        # Model names are [a-z0-9.-], so they are safe inside a sed pattern.
+        prompt="$(printf '%s' "$prompt" | sed "s/(model: ${fell_back})/(model: ${model})/")"
+        [[ -n "$RESUME_ID" ]] || SESSION_ID="$(new_session_id)"
+        continue
+      fi
+      echo "CLAUDE_REVIEW_RESULT: flagged (${model})"
+      echo "SESSION_ID: ${SESSION_ID}"
+      echo "VERDICT: MISSING"
+      echo "VERDICT_FILE: ${raw}"
+      echo "CLAUDE_REVIEW_MODEL: ${model}"
+      if [[ -n "$fell_back" ]]; then
+        echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (both flagged)"
+      fi
+      exit 76
+    fi
+    break
   done
-
-  local cmd=(
-    "$CLAUDE_BIN" -p "$prompt"
-    --model "$MODEL"
-    --effort "$EFFORT"
-    --output-format json
-    --permission-mode plan
-    --tools Read,Glob,Grep
-    --safe-mode
-    "${add_flags[@]+"${add_flags[@]}"}"
-    "${session_flag[@]}"
-  )
-
-  if [[ "${CLAUDE_REVIEW_DRY_RUN:-0}" == "1" ]]; then
-    echo "CLAUDE_REVIEW_RESULT: dry_run"
-    echo "SESSION_ID: ${SESSION_ID}"
-    echo "VERDICT: MISSING"
-    echo "VERDICT_FILE: (dry run — no file)"
-    printf 'CMD:'
-    printf ' %q' "${cmd[@]}"
-    printf '\n'
-    exit 0
-  fi
-
-  local raw rc
-  raw="$(mktemp -t claude-goal-raw-XXXXXX.json)"
-  set +e
-  "${cmd[@]}" >"$raw" 2>"${raw}.err"
-  rc=$?
-  set -e
 
   if is_transport_rate_limit "$rc" "${raw}.err" "$raw"; then
     echo "CLAUDE_REVIEW_RESULT: rate_limited (exit ${rc})"
@@ -171,6 +219,10 @@ run_claude() {
   echo "SESSION_ID: ${SESSION_ID}"
   echo "VERDICT: $(verdict_of "$OUT")"
   echo "VERDICT_FILE: ${OUT}"
+  echo "CLAUDE_REVIEW_MODEL: ${model}"
+  if [[ -n "$fell_back" ]]; then
+    echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag)"
+  fi
 }
 
 if [[ "$SMOKE" -eq 1 ]]; then

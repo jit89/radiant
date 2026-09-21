@@ -68,6 +68,8 @@ do_install() {
     "$ROOT/scripts/tests/resume-state-test.sh" \
     "$ROOT/scripts/tests/walk-end-test.sh" \
     "$ROOT/scripts/tests/proof-test.sh" \
+    "$ROOT/scripts/tests/review-fallback-test.sh" \
+    "$ROOT/scripts/lib/flagged-refusal.py" \
     "$ROOT/scripts/lib/resume-state.py" \
     "$ROOT/scripts/lib/verdict.py" \
     "$ROOT/scripts/lib/run-timeout.py" \

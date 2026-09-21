@@ -890,6 +890,10 @@ EOF
   if [[ "$rv_rc" -eq 75 || "$LAST_CLAUDE" == rate_limited* ]]; then
     wake "reviewer-rate-limited" "$LAST_CLAUDE"
   fi
+  if [[ "$rv_rc" -eq 76 || "$LAST_CLAUDE" == flagged* ]]; then
+    LAST_VERDICT="MISSING"
+    wake "reviewer-flagged" "$LAST_CLAUDE — the reviewer's safeguards flagged this review and no fallback cleared it (CLAUDE_REVIEW_FALLBACK_MODEL is off, or was flagged too). Nothing was judged. Review: $VERDICT_FILE"
+  fi
   if [[ -z "$LAST_CLAUDE" ]]; then
     LAST_VERDICT="MISSING"
     wake "reviewer-error" "no CLAUDE_REVIEW_RESULT line (rc=$rv_rc). stderr: $RV_OUT.wrap"
@@ -899,16 +903,23 @@ EOF
     wake "reviewer-error" "CLAUDE_REVIEW_RESULT=$LAST_CLAUDE rc=$rv_rc"
   fi
   LAST_VERDICT="$(kv "$RV_OUT" VERDICT)"
+  # Which model judged. The workflow names Opus 5 as the reviewer, so a fallback
+  # to another model must be visible in the journal and in `logs.sh warnings`.
+  REVIEW_MODEL="$(kv "$RV_OUT" CLAUDE_REVIEW_MODEL)"
+  REVIEW_FALLBACK="$(kv "$RV_OUT" CLAUDE_REVIEW_FALLBACK)"
+  review_note="MODEL=${REVIEW_MODEL:--}"
+  [[ -z "$REVIEW_FALLBACK" ]] || review_note+=" FALLBACK=(${REVIEW_FALLBACK})"
 
-  journal_line "## $(utc) — ORCHESTRATOR review ${GOAL_ID} r${ROUND} VERDICT=${LAST_VERDICT}"
+  journal_line "## $(utc) — ORCHESTRATOR review ${GOAL_ID} r${ROUND} VERDICT=${LAST_VERDICT} ${review_note}"
   review_sev=info
   case "$LAST_VERDICT" in
     FIX) review_sev=warning ;;
     BLOCKED|MISSING) review_sev=error ;;
   esac
+  [[ -z "$REVIEW_FALLBACK" || "$review_sev" != info ]] || review_sev=warning
   events_append --event review --severity "$review_sev" --goal "$GOAL_ID" --round "$ROUND" \
     --verdict "$LAST_VERDICT" --base-sha "$BASE_SHA" \
-    --summary "review ${GOAL_ID} r${ROUND} VERDICT=${LAST_VERDICT}"
+    --summary "review ${GOAL_ID} r${ROUND} VERDICT=${LAST_VERDICT} ${review_note}"
 
   case "$LAST_VERDICT" in
     DONE)
