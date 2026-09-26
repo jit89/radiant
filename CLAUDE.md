@@ -13,7 +13,7 @@ in-session (do not dispatch DeepSeek at the house).
 | Role | Model | Responsibilities |
 |------|-------|------------------|
 | **Architect** | Claude Code (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
-| **Attacker** | Grok (`grok-4.6`) | Headless, read-only. Attacks a locked plan. A different model on purpose — the Architect cannot attack its own plan. Advises; does not command. |
+| **Attacker** | Grok (`grok-4.7`) | Headless, read-only. Attacks a locked plan. A different model on purpose — the Architect cannot attack its own plan. Advises; does not command. |
 | **Implementer** | DeepSeek V4 Flash (`deepseek-v4-flash`) in the Codex CLI harness | Cheap long TDD loops against one goal. Sibling process. |
 | **Goal reviewer** | Claude Opus 5 (`claude-opus-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
 

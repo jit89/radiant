@@ -17,7 +17,7 @@ the plan-attacker prompt.
 | Role | Who | Status |
 |------|-----|--------|
 | Architect | Claude Code (main session) | shipped |
-| Attacker | Grok `grok-4.6`, headless, read-only, plan only | shipped |
+| Attacker | Grok `grok-4.7`, headless, read-only, plan only | shipped |
 | Implementer | DeepSeek V4 Flash via Codex CLI | shipped |
 | Goal reviewer | Claude Opus 5, headless, reviewer prompt | shipped |
 
@@ -123,7 +123,7 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 
 | Env | Default | Meaning |
 |-----|---------|---------|
-| `GROK_REVIEW_MODEL` | `grok-4.6` | Plan attacker |
+| `GROK_REVIEW_MODEL` | `grok-4.7` | Plan attacker |
 | `GROK_REVIEW_EFFORT` | `high` | Grok `--reasoning-effort` |
 | `GROK_REVIEW_DRY_RUN=1` | off | Print Grok command only |
 | `GROK_BIN` | auto | Grok binary path |

@@ -20,7 +20,7 @@
 # Required: Grok CLI on PATH (or GROK_BIN / ~/.grok/bin/grok), signed in
 # with `grok login`.
 # Optional env:
-#   GROK_REVIEW_MODEL     default: grok-4.6
+#   GROK_REVIEW_MODEL     default: grok-4.7
 #   GROK_REVIEW_EFFORT    default: high
 #   GROK_REVIEW_DRY_RUN=1 print the command, skip the API call
 #   GROK_REVIEW_OUT       override the verdict file path
@@ -40,7 +40,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/lib/dotenv.sh"
 HOUSE="$(cd "$HERE/.." && pwd)"
 
-MODEL="${GROK_REVIEW_MODEL:-grok-4.6}"
+MODEL="${GROK_REVIEW_MODEL:-grok-4.7}"
 EFFORT="${GROK_REVIEW_EFFORT:-high}"
 SMOKE=0
 RESUME_ID=""

@@ -157,7 +157,7 @@ separate headless session with no access to your reasoning — only the file.
 ### Prerequisites (verify once, fast)
 
 - `~/claude-coding-workflow/scripts/grok-review.sh` is executable and `grok` is signed in.
-- Echo the resolved model before Round 1 (`GROK_REVIEW_MODEL`, default `grok-4.6`). If the user objects, stop.
+- Echo the resolved model before Round 1 (`GROK_REVIEW_MODEL`, default `grok-4.7`). If the user objects, stop.
 - Run from the target repo root (where `PLAN.md` lives).
 
 ### Tunables
