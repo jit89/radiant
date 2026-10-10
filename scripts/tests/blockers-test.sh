@@ -47,8 +47,8 @@ stub() {
     >"$HOUSE/scripts/$1"
   chmod +x "$HOUSE/scripts/$1"
 }
-stub deepseek-code.sh 'echo impl >impl.txt && git add impl.txt && git commit -qm "wip: impl"
-printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"'
+stub claude-implement.sh 'echo impl >impl.txt && git add impl.txt && git commit -qm "wip: impl"
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 stub claude-goal-review.sh 'printf "%s\n" "CLAUDE_REVIEW_RESULT: error (exit 1)" \
   "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null"; exit 1'
 
@@ -69,7 +69,7 @@ run_goal() {
   stop="$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)"
   reason="$(sed -n 's/^- reason: //p' "$stop" 2>/dev/null || true)"
   detail="$(sed -n 's/^- detail: //p' "$stop" 2>/dev/null || true)"
-  dispatched="$(cat "$STUBS" 2>/dev/null | grep -c deepseek-code.sh || true)"
+  dispatched="$(cat "$STUBS" 2>/dev/null | grep -c claude-implement.sh || true)"
 }
 names() { [[ "$detail" == *"$1"* ]] && echo yes || echo "no: $detail"; }
 

@@ -226,7 +226,8 @@ while :; do
   fi
 
   journal_line "## $(utc) — ORCHESTRATOR walk ${id}"
-  events_append --event walk --severity info --goal "$id" --summary "walk ${id}"
+  events_append --event walk --severity info --goal "$id" --summary "walk ${id}" \
+    --payload "{$(events_pid_json)}"
   commit_journal "chore: orchestrator walk ${id}"
   echo "=== walk ${id} ==="
   STOP_PTR="$(mktemp "${TMPDIR:-/tmp}/run-goals-stop-XXXXXX")"

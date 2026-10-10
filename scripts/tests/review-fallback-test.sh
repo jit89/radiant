@@ -49,8 +49,8 @@ exit 0
 STUB
 chmod +x "$FAKE"
 
-FLAG_TEXT='{"type":"result","is_error":true,"result":"claude-opus-5'"'"'s safeguards flagged this message. This sometimes happens with safe, normal conversations.","session_id":"s-flag"}'
-FLAG_CYBER='{"type":"result","is_error":true,"result":"claude-opus-5 has safety measures that flagged this message for a cybersecurity topic.","session_id":"s-flag"}'
+FLAG_TEXT='{"type":"result","is_error":true,"result":"claude-opus-5-5'"'"'s safeguards flagged this message. This sometimes happens with safe, normal conversations.","session_id":"s-flag"}'
+FLAG_CYBER='{"type":"result","is_error":true,"result":"claude-opus-5-5 has safety measures that flagged this message for a cybersecurity topic.","session_id":"s-flag"}'
 FLAG_STOP='{"type":"result","stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber"},"result":"","session_id":"s-ref"}'
 GOOD='{"type":"result","is_error":false,"result":"Reviewed the diff.\nVERDICT: DONE","session_id":"s-ok"}'
 QUOTES='{"type":"result","is_error":false,"result":"The diff teaches the script to match the phrase safeguards flagged this message and retry.\nVERDICT: DONE","session_id":"s-ok"}'
@@ -84,9 +84,9 @@ check "exits 0" 0 "$RC"
 check "result ok" yes "$(has 'CLAUDE_REVIEW_RESULT: ok' "$OUT")"
 check "verdict comes from the fallback" yes "$(has 'VERDICT: DONE' "$OUT")"
 check "the judging model is named" yes "$(has 'CLAUDE_REVIEW_MODEL: claude-opus-4-8' "$OUT")"
-check "the switch is named" yes "$(has 'CLAUDE_REVIEW_FALLBACK: claude-opus-5 -> claude-opus-4-8 (safety flag)' "$OUT")"
+check "the switch is named" yes "$(has 'CLAUDE_REVIEW_FALLBACK: claude-opus-5-5 -> claude-opus-4-8 (safety flag)' "$OUT")"
 check "two calls" 2 "$(calls)"
-check "call 1 on the primary" claude-opus-5 "$(call_field 1 model)"
+check "call 1 on the primary" claude-opus-5-5 "$(call_field 1 model)"
 check "call 2 on the fallback" claude-opus-4-8 "$(call_field 2 model)"
 check "a fresh review retries on a NEW session" yes \
   "$([[ -n "$(call_field 1 sid)" && "$(call_field 1 sid)" != "$(call_field 2 sid)" ]] && echo yes || echo no)"
@@ -129,13 +129,13 @@ check "call 2 on the fallback" claude-opus-4-8 "$(call_field 2 model)"
 echo "== 7. it must NOT fire when it should not =="
 reset "$QUOTES"; run -- "$TMP/brief.md"
 check "a review that quotes the flag wording: one call" 1 "$(calls)"
-check "  ...judged by the primary" yes "$(has 'CLAUDE_REVIEW_MODEL: claude-opus-5' "$OUT")"
+check "  ...judged by the primary" yes "$(has 'CLAUDE_REVIEW_MODEL: claude-opus-5-5' "$OUT")"
 check "  ...no fallback line" yes "$(lacks 'CLAUDE_REVIEW_FALLBACK' "$OUT")"
 reset "$POLICY"; run -- "$TMP/brief.md"
 check "a Usage Policy refusal is NOT routed around: one call" 1 "$(calls)"
 check "  ...no fallback line" yes "$(lacks 'CLAUDE_REVIEW_FALLBACK' "$OUT")"
 reset "$GOOD"; run -- "$TMP/brief.md"
-check "an ordinary review: one call, primary model" "1 claude-opus-5" "$(calls) $(call_field 1 model)"
+check "an ordinary review: one call, primary model" "1 claude-opus-5-5" "$(calls) $(call_field 1 model)"
 
 echo "== 8. dry run and an explicit primary model =="
 reset; run CLAUDE_REVIEW_DRY_RUN=1 -- "$TMP/brief.md"

@@ -63,7 +63,7 @@ stub() {
     >"$HOUSE/scripts/$1"
   chmod +x "$HOUSE/scripts/$1"
 }
-stub deepseek-code.sh 'exit 1'
+stub claude-implement.sh 'exit 1'
 stub claude-goal-review.sh 'exit 1'
 stub grok-review.sh 'exit 1'
 

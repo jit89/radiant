@@ -46,7 +46,7 @@ stub() {
 }
 NAPPER='echo "$0 started" >>"$STUBS"; sleep "$NAP"; echo "$0 finished" >>"$STUBS"'
 DS_OK='echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
-printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1" "RETURN_HANDOFF: -" "LOG: -" "stderr: -"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1" "RETURN_HANDOFF: -" "LOG: -" "stderr: -"'
 
 # Start CMD in its own session, wait for READY in $STUBS, deliver SIG to the
 # process (pid) or its group (group), print "<exit code> <seconds to exit>".
@@ -113,10 +113,10 @@ journaled() {
 }
 
 # 1. TERM to run-goal.sh alone while the implementer runs.
-stub deepseek-code.sh "$NAPPER"
+stub claude-implement.sh "$NAPPER"
 stub claude-goal-review.sh 'exit 1'
 make_repo
-drive pid SIGTERM deepseek-code.sh "$HOUSE/scripts/run-goal.sh" g1-store
+drive pid SIGTERM claude-implement.sh "$HOUSE/scripts/run-goal.sh" g1-store
 check "goal TERM: exit 143" "143" "$rc"
 check "goal TERM: stops promptly" "yes" "$(fast)"
 check "goal TERM: stop reason" "interrupted" "$reason"
@@ -128,7 +128,7 @@ check "goal TERM: implementer never finished" "0" \
   "$(grep -c finished "$STUBS" || true)"
 
 # 2. Ctrl-C (INT to the whole group) while the reviewer runs.
-stub deepseek-code.sh "$DS_OK"
+stub claude-implement.sh "$DS_OK"
 stub claude-goal-review.sh "$NAPPER"
 make_repo
 drive group SIGINT claude-goal-review.sh "$HOUSE/scripts/run-goal.sh" g1-store
@@ -155,9 +155,9 @@ check "proof TERM: detail names proof" "yes" \
 check "proof TERM: proof killed" "0" "$(survivors)"
 
 # 4. TERM to the walker alone: child stopped, walk ends, no next dispatch.
-stub deepseek-code.sh "$NAPPER"
+stub claude-implement.sh "$NAPPER"
 make_repo
-drive pid SIGTERM deepseek-code.sh "$HOUSE/scripts/run-goals.sh"
+drive pid SIGTERM claude-implement.sh "$HOUSE/scripts/run-goals.sh"
 check "walk TERM: exit 143" "143" "$rc"
 check "walk TERM: stops promptly" "yes" "$(fast)"
 check "walk TERM: child stop file reprinted" "interrupted" "$reason"
@@ -166,7 +166,7 @@ check "walk TERM: no further dispatch" "1" "$(grep -c started "$STUBS" || true)"
 
 # 5. Ctrl-C to the walker's whole group.
 make_repo
-drive group SIGINT deepseek-code.sh "$HOUSE/scripts/run-goals.sh"
+drive group SIGINT claude-implement.sh "$HOUSE/scripts/run-goals.sh"
 check "walk Ctrl-C: exit 130" "130" "$rc"
 check "walk Ctrl-C: stops promptly" "yes" "$(fast)"
 check "walk Ctrl-C: child stop file reprinted" "interrupted" "$reason"

@@ -44,18 +44,18 @@ chmod +x "$HOUSE/scripts/claude-goal-review.sh"
 
 # The implementer stub runs $TAMPER (if set) on its first call, commits some
 # work, then crashes. Every later call just succeeds. Each call is counted.
-cat >"$HOUSE/scripts/deepseek-code.sh" <<'SH'
+cat >"$HOUSE/scripts/claude-implement.sh" <<'SH'
 #!/usr/bin/env bash
 echo call >>"$STUBS"
 echo "$RANDOM" >>impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
 if [[ "$(wc -l <"$STUBS")" -eq 1 ]]; then
   eval "${TAMPER:-}"
-  echo "DEEPSEEK_RESULT: error (exit 1)"
+  echo "IMPLEMENTER_RESULT: error (exit 1)"
   exit 1
 fi
-printf '%s\n' "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"
+printf '%s\n' "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"
 SH
-chmod +x "$HOUSE/scripts/deepseek-code.sh"
+chmod +x "$HOUSE/scripts/claude-implement.sh"
 
 # scenario <tamper run inside implementer run 1> <tamper run between runs>
 # Sets reason1, reason, detail, calls.

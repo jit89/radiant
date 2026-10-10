@@ -8,9 +8,9 @@ Do not skip `--check`. Done when the verify block at the bottom is all OK.
 This repo (`~/claude-coding-workflow`) has **no git remote**. It must be copied
 as a directory (include `.git` and `.env`). `.env` is gitignored.
 
-Hardcoded `/Users/jit/...` paths live in the watch skill and rules. Restore
-under the same home if you can. If `$HOME` is not `/Users/jit`, rewrite those
-paths in step 6.
+The watch skill and rules may hold absolute home paths from the old machine
+(e.g. `/Users/<old-user>/...`). If this machine's `$HOME` differs, rewrite
+them in step 6.
 
 ## What you are installing
 
@@ -20,7 +20,7 @@ paths in step 6.
 | Watch harness | `~/claude-video-opt/` | skill `watch-video` |
 | Watch skill body | `~/.grok/skills/watch-video/SKILL.md` | `/watch-video` |
 | Watch auto-trigger | `~/.grok/rules/video-urls.md` | paste a video URL |
-| Borrowed skills | `~/.agents/skills/` (mostly links into `~/mattpocock-skills`) | wayfinder, tdd, … |
+| Borrowed skills | `~/mattpocock-skills/` (pinned clone) | `~/.claude/skills/{wayfinder,tdd,…}` → **symlinks** (`install.sh`) |
 
 Bundled xAI skills (`~/.grok/bundled/`) come with the Grok CLI. Do not copy them.
 
@@ -38,7 +38,7 @@ command -v codex || ls -d "$HOME"/.nvm/versions/node/*/bin/codex
 
 Missing Grok CLI → install Grok, then `grok login`.
 Missing Claude → install Claude Code, then `claude login`.
-Missing Codex → install Codex CLI ≥ 0.144.
+Missing Codex → optional now: only the legacy `IMPLEMENTER=codex` launcher needs Codex CLI ≥ 0.144.
 Missing ffmpeg/yt-dlp → `brew install ffmpeg yt-dlp`.
 
 ## 1. Confirm the trees exist
@@ -73,7 +73,7 @@ chmod 600 "$HOME/claude-coding-workflow/.env" "$HOME/.config/watch/.env" 2>/dev/
 ```
 
 `--check` must print `goals.py: OK`, `mock-walk: OK`, `events.py: OK`,
-`logs.sh: OK`, `run-goal wake: OK`. `claude:` and `codex:` should not be
+`logs.sh: OK`, `run-goal wake: OK`, `implementer: OK`. `claude:` should not be
 `MISSING`. Borrowed-skill warnings are step 4.
 
 Expect four symlinks:
@@ -97,21 +97,27 @@ mkdir -p "$HOME/Downloads/Reports"
 Optional: `python3 "$HOME/claude-video-opt/scripts/setup.py" --check`
 (exit 0 silent = ffmpeg/yt-dlp + a Whisper key, or captions-only is fine).
 
-## 4. Borrowed skills (`~/.agents/skills`)
+## 4. Borrowed skills (pinned `~/mattpocock-skills`)
 
-House `install.sh --check` wants these names present:
+Borrowed skills come from [mattpocock/skills](https://github.com/mattpocock/skills),
+cloned once and pinned to the commit `scripts/install.sh` names
+(`MATTPOCOCK_SKILLS_PIN`). Not the self-updating plugin: an upstream rename
+(for example `CONTEXT.md` → `GLOSSARY.md`) would land silently.
 
-`wayfinder` `prototype` `research` `caveman` `tdd` `handoff`
-`diagnosing-bugs` `improve-codebase-architecture`
+```bash
+git clone https://github.com/mattpocock/skills "$HOME/mattpocock-skills"
+git -C "$HOME/mattpocock-skills" checkout "$(sed -n 's/^MATTPOCOCK_SKILLS_PIN=//p' "$HOME/claude-coding-workflow/scripts/install.sh")"
+"$HOME/claude-coding-workflow/scripts/install.sh"
+```
 
-Most are symlinks into `~/mattpocock-skills`. Restore that repo (or
-`git clone https://github.com/mattpocock/skills "$HOME/mattpocock-skills"`)
-then recreate the links the old machine had, **or** run that repo’s own
-installer if you use it.
+`install.sh` symlinks each borrowed skill from the clone into `~/.claude/skills`:
 
-Local (non-link) dirs that lived under `~/.agents/skills` on the old
-machine: `caveman`, `find-skills`, `llm-council`. Copy those directories
-if they were in the backup.
+`wayfinder` `prototype` `research` `tdd` `handoff` `diagnosing-bugs`
+`improve-codebase-architecture`, plus the skills those call:
+`grilling` `domain-modeling` `codebase-design` `setup-matt-pocock-skills`
+
+A real directory already at one of those names is left alone (with a warning).
+Override the clone location with `MATTPOCOCK_SKILLS_DIR`.
 
 Re-run:
 
@@ -119,8 +125,10 @@ Re-run:
 "$HOME/claude-coding-workflow/scripts/install.sh" --check
 ```
 
-`borrowed skills: present` is the target. Missing names are a warning; the
-house still runs, but `/crucible` research/prototype/tdd/wayfinder will not.
+Targets: `borrowed <name>: present` for every name and
+`mattpocock-skills pin: OK`. A missing name is a warning; the house still
+runs, but `/crucible` research/prototype/tdd/wayfinder will not. `DRIFT`
+prints the `git checkout` that restores the pin.
 
 ## 5. Optional extras from the old `~/.grok/skills`
 
@@ -134,13 +142,14 @@ Copy that folder if you use `/linkedin-post`. Not required for the house.
 `~/.grok/auth.json` — run `grok login` on this machine.
 Do not copy `~/.grok/bundled/` or `~/.grok/sessions/`.
 
-## 6. Rewrite hardcoded `/Users/jit` if this home is different
+## 6. Rewrite old-home absolute paths if this home is different
 
 ```bash
 echo "HOME=$HOME"
+grep -rln '/Users/' "$HOME/.grok/skills/watch-video/SKILL.md" "$HOME/.grok/rules/video-urls.md" "$HOME/.claude/CLAUDE.md" 2>/dev/null
 ```
 
-If that is not `/Users/jit`, replace `/Users/jit` with `$HOME` in:
+Replace any old `/Users/<old-user>` prefix with this machine's `$HOME` in:
 
 - `~/.grok/skills/watch-video/SKILL.md`
 - `~/.grok/rules/video-urls.md`
@@ -156,8 +165,8 @@ compatibility. Grok-only: `~/.grok/rules/video-urls.md` is enough.
 Ask the user to:
 
 1. `grok login`
-2. `claude login` (Opus 5 attacker + goal reviewer)
-3. Confirm Codex can run (ChatGPT login if that CLI requires it)
+2. `claude login` (Opus 5.5 goal reviewer)
+3. Optional, legacy `IMPLEMENTER=codex` only: confirm Codex can run
 4. Confirm `DEEPSEEK_API_KEY` is in house `.env` and/or `~/.config/watch/.env`
 
 Do not ask them to paste a key into chat.
@@ -217,7 +226,8 @@ the user asks.
 | `house.env:MISSING` | Copy `.env`; set `DEEPSEEK_API_KEY` |
 | `claude: MISSING` / `codex: MISSING` | Install + login; re-run `--check` |
 | Skills listed but `crucible` is a dangling symlink | House path wrong; `install.sh` again from the real repo |
-| `borrowed skills missing` | Restore `~/mattpocock-skills` + `~/.agents/skills` |
+| `borrowed <name>: MISSING` | Clone + pin `~/mattpocock-skills` (step 4), re-run `install.sh` |
+| `mattpocock-skills pin: DRIFT` | Run the `git checkout` it prints |
 | Watch skill present, harness 403 on YouTube | `download.py` already prefers android/ios player clients; not a setup miss |
 | `DEEPSEEK_API_KEY: MISSING` in step 8 | Key not in watch `.env` or house `.env` |
 | `/watch-video` does not fire on a pasted URL | Missing `~/.grok/rules/video-urls.md` |

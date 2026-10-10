@@ -35,7 +35,7 @@ cp -R "$HERE/." "$HOUSE/scripts/"
 # Call N of a stub does line N of $CALLS/<name>.plan. Each call is logged as
 # "<name> <args>" in $CALLS/log, and the implementer's handoff (last arg) is
 # kept as $CALLS/handoff-<N>.md.
-cat >"$HOUSE/scripts/deepseek-code.sh" <<'SH'
+cat >"$HOUSE/scripts/claude-implement.sh" <<'SH'
 #!/usr/bin/env bash
 n=$(( $(grep -c '^ds ' "$CALLS/log" 2>/dev/null || true) + 1 ))
 echo "ds $*" >>"$CALLS/log"
@@ -43,11 +43,11 @@ cp "${!#}" "$CALLS/handoff-$n.md"
 case "$(sed -n "${n}p" "$CALLS/ds.plan")" in
   ok)
     echo "$n" >>impl.txt && git add impl.txt && git commit -qm "wip: impl $n"
-    printf '%s\n' "DEEPSEEK_RESULT: ok" "THREAD_ID: t1" ;;
+    printf '%s\n' "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1" ;;
   rate)
-    printf '%s\n' "DEEPSEEK_RESULT: rate_limited (exit 75)" "THREAD_ID: t1"
+    printf '%s\n' "IMPLEMENTER_RESULT: rate_limited (exit 75)" "THREAD_ID: t1"
     exit 75 ;;
-  *) echo "DEEPSEEK_RESULT: error (no plan for call $n)"; exit 1 ;;
+  *) echo "IMPLEMENTER_RESULT: error (no plan for call $n)"; exit 1 ;;
 esac
 SH
 cat >"$HOUSE/scripts/claude-goal-review.sh" <<'SH'

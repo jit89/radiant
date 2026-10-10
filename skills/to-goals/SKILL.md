@@ -22,7 +22,7 @@ Done when the gate passes or you have refused.
 
 ## 2. Read
 
-Read `PLAN.md`, `PLAN-REVIEW-LOG.md`, `CONTEXT.md`, `docs/adr/`, and
+Read `PLAN.md`, `PLAN-REVIEW-LOG.md`, `GLOSSARY.md` (legacy `CONTEXT.md`), `docs/adr/`, and
 the seams the interrogation already locked. Use the project's glossary.
 Do not re-interview product decisions. A decision that looks wrong is a
 crucible defect — bounce up, do not "fix" it in the DAG.
@@ -33,7 +33,7 @@ Done when every plan section and named ADR has been read.
 
 Draft the DAG **in chat**, not on disk: each `id`, `blocked_by`,
 `conflicts_with`, `area`, one-line deliverable, `proof`. Apply every
-slice rule in GOAL-FORMAT.md (vertical, DeepSeek-sized, independence
+slice rule in GOAL-FORMAT.md (vertical, implementer-sized, independence
 test, ~8 cap, expand–contract).
 
 Ask:

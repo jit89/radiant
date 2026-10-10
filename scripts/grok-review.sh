@@ -194,11 +194,11 @@ OUT="${GROK_REVIEW_OUT:-${TMPDIR:-/tmp}/grok-review-${SESSION_ID}-$(date -u +%Y%
 
 if [[ -n "$RESUME_ID" ]]; then
   read -r -d '' PROMPT <<EOF || true
-I revised the plan. Re-review the file at ${PLAN_ABS} (and CONTEXT.md / docs/adr / any repo files you need; you are read-only). Check whether your prior findings are addressed and flag anything new. Same rules as before. Do NOT modify any files. End your reply with EXACTLY one line: VERDICT: APPROVED or VERDICT: REVISE.
+I revised the plan. Re-review the file at ${PLAN_ABS} (and GLOSSARY.md or CONTEXT.md / docs/adr / any repo files you need; you are read-only). Check whether your prior findings are addressed and flag anything new. Same rules as before. Do NOT modify any files. End your reply with EXACTLY one line: VERDICT: APPROVED or VERDICT: REVISE.
 EOF
 else
   read -r -d '' PROMPT <<EOF || true
-You are an adversarial reviewer for an implementation plan written by a different model. Be skeptical and specific — your job is to find what breaks, not to be agreeable. Do not defer to the plan's confidence. Read the plan at ${PLAN_ABS} (and CONTEXT.md / ADRs for domain language, if present) and any repo files you need (you are read-only). Identify concrete flaws: security holes, race conditions, missing edge cases, schema conflicts, wrong assumptions, observability gaps, simpler alternatives. For each, give a one-line fix. Do NOT modify any files. End your reply with EXACTLY one line: VERDICT: APPROVED if the plan is sound enough to implement, or VERDICT: REVISE if it still has material problems.
+You are an adversarial reviewer for an implementation plan written by a different model. Be skeptical and specific — your job is to find what breaks, not to be agreeable. Do not defer to the plan's confidence. Read the plan at ${PLAN_ABS} (and GLOSSARY.md or CONTEXT.md / ADRs for domain language, if present) and any repo files you need (you are read-only). Identify concrete flaws: security holes, race conditions, missing edge cases, schema conflicts, wrong assumptions, observability gaps, simpler alternatives. For each, give a one-line fix. Do NOT modify any files. End your reply with EXACTLY one line: VERDICT: APPROVED if the plan is sound enough to implement, or VERDICT: REVISE if it still has material problems.
 EOF
 fi
 

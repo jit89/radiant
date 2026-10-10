@@ -52,7 +52,7 @@ check "claude: menu echoed back" "MISSING" \
   "$(claude $'- VERDICT: DONE — goal is met\n- VERDICT: FIX — problems\n- VERDICT: BLOCKED — spec wrong')"
 check "claude: bold label" "DONE" "$(claude $'fine\n**VERDICT:** DONE')"
 check "claude: plan token" "MISSING" "$(claude $'fine\nVERDICT: APPROVED')"
-check "claude: smoke reply" "DONE" "$(claude $'PONG claude-opus-5\nVERDICT: DONE')"
+check "claude: smoke reply" "DONE" "$(claude $'PONG claude-opus-5-5\nVERDICT: DONE')"
 
 # --- brief vs prompt (F-05) -------------------------------------------------
 export HOME="$TMP/home" EVENTS_CACHE="$TMP/cache"
@@ -67,7 +67,7 @@ cp -R "$HERE/." "$TMP/house/scripts/"
 # Implementer stub keeps the handoff; reviewer stub keeps the brief (last arg).
 printf '%s\n' '#!/usr/bin/env bash' "cp \"\${!#}\" $TMP/handoff.md" \
   'echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"' \
-  'printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"' >"$TMP/house/scripts/deepseek-code.sh"
+  'printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"' >"$TMP/house/scripts/claude-implement.sh"
 printf '%s\n' '#!/usr/bin/env bash' "cp \"\${!#}\" $TMP/brief.md" 'exit 1' \
   >"$TMP/house/scripts/claude-goal-review.sh"
 chmod +x "$TMP/house/scripts/"*.sh

@@ -193,7 +193,7 @@ stub() {
 # Stubs print the full result block, as the real launchers do.
 stub claude-goal-review.sh 'printf "%s\n" "CLAUDE_REVIEW_RESULT: error" \
   "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null"; exit 1'
-DS_OK="printf '%s\\n' 'DEEPSEEK_RESULT: ok' 'THREAD_ID: t1' 'RETURN_HANDOFF: -' \
+DS_OK="printf '%s\\n' 'IMPLEMENTER_RESULT: ok' 'THREAD_ID: t1' 'RETURN_HANDOFF: -' \
   'LOG: -' 'stderr: -'"
 
 make_repo() {
@@ -215,7 +215,7 @@ run_goal() {
 
 # Implementer commits work, then plants a hook and an fsmonitor (last, so the
 # marker counts only host-side firings), reports ok.
-stub deepseek-code.sh "
+stub claude-implement.sh "
 echo impl >impl.txt && command git add impl.txt
 command git commit -qm 'wip(g1-store): impl'
 printf '#!/bin/sh\necho hook >>$MARK\n' >.git/hooks/pre-commit
@@ -242,7 +242,7 @@ check "resume dispatched nothing" "0" "$(grep -c reached "$TMP/stubs" || true)"
 check "still no planted program ran" "0" "$(fired)"
 
 # Honest implementer: commits only. Must reach review (no false positive).
-stub deepseek-code.sh "
+stub claude-implement.sh "
 echo impl >impl.txt && command git add impl.txt
 command git commit -qm 'wip(g1-store): impl'
 $DS_OK"
@@ -375,7 +375,7 @@ command git config filter.evil.clean $TMP/filter.sh
 echo more >>docs/journal/example.md"
 
 # Walker: the goal stops on tampering; the rerun walker commits nothing.
-stub deepseek-code.sh "$PLANT_FILTER
+stub claude-implement.sh "$PLANT_FILTER
 $DS_OK"
 make_repo
 "$HOUSE/scripts/run-goals.sh" >"$TMP/out" 2>&1 && rc=0 || rc=$?
@@ -396,7 +396,7 @@ check "walk: filter never ran on the host" "0" "$(fired)"
 
 # Signal: TERM arrives while the implementer still runs, after it planted.
 NAP="43.$$"
-stub deepseek-code.sh "$PLANT_FILTER
+stub claude-implement.sh "$PLANT_FILTER
 echo planted >>$TMP/stubs
 sleep $NAP"
 make_repo

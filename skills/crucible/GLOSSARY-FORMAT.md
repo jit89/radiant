@@ -1,6 +1,6 @@
-# CONTEXT.md — glossary format
+# GLOSSARY.md — glossary format
 
-`CONTEXT.md` is a glossary and nothing else: the project's chosen
+`GLOSSARY.md` is a glossary and nothing else: the project's chosen
 words, one definition each. No implementation details, no specs, no
 scratch notes.
 
@@ -35,10 +35,14 @@ Not: "invoice", "installment"
 
 ## Repos with more than one domain
 
-Signal with a root `CONTEXT-MAP.md` that lists each context, its
+Signal with a root `GLOSSARY-MAP.md` that lists each context, its
 folder, and how they talk (events consumed, shared identifiers). Each
-context keeps its own `CONTEXT.md`.
+context keeps its own `GLOSSARY.md`.
 
-Resolution: `CONTEXT-MAP.md` present → pick the context matching the
-current work (ask if ambiguous); root `CONTEXT.md` only → single
-context; neither → create a root `CONTEXT.md` lazily.
+Resolution: `GLOSSARY-MAP.md` present → pick the context matching the
+current work (ask if ambiguous); root `GLOSSARY.md` only → single
+context; neither → create a root `GLOSSARY.md` lazily.
+
+Legacy: a repo that still has `CONTEXT.md` / `CONTEXT-MAP.md` (the
+old name) is read the same way. Rename it with `git mv` when you next
+edit it; the borrowed skills only look for `GLOSSARY.md`.

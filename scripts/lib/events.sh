@@ -2,6 +2,16 @@
 # JSONL event helpers. JOURNAL must be set. HERE must be scripts/.
 # Append is best-effort. Journal git commits stay fail-closed in the caller.
 
+# `"pid":N,"pid_start":"<ps lstart>"` for an event payload: which process wrote
+# the event, and when that process started. `events.py status` counts a goal as
+# running only while a process with that pid AND that start time is alive, so a
+# pid the OS has since reused for something else never reads as the walk.
+events_pid_json() {
+  local start
+  start="$(ps -o lstart= -p "$$" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//' || true)"
+  printf '"pid":%d,"pid_start":"%s"' "$$" "$start"
+}
+
 events_init() {
   # Do not touch WALK_ID / EVENTS_MINTED — append is called after a mint
   # and the caller still needs those flags to fail-close the journal commit.

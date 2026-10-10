@@ -28,7 +28,7 @@ Before asking the user a single question, determine the terrain.
 ### Brownfield
 
 1. Explore architecture, relevant modules, patterns the plan must fit, current schema/auth/infra as applicable.
-2. Load living docs: `CONTEXT.md` (or `CONTEXT-MAP.md`) and `docs/adr/`. If they exist, Phase 1 runs **docs-aware**.
+2. Load living docs: `GLOSSARY.md` (or `GLOSSARY-MAP.md`; legacy `CONTEXT.md` / `CONTEXT-MAP.md`) and `docs/adr/`. If they exist, Phase 1 runs **docs-aware**.
 3. **Sweep the whole roadmap for inputs addressed to this slice, not just this slice's
    own block.** A hazard is usually written down by the slice that *discovers* it or the
    one that *fixes* it, which is rarely the slice that *breaks* without it — so grep every
@@ -104,13 +104,13 @@ Recommendations with a one-line rationale each. Veto by exception; silence = acc
 
 The user can say **"accept all remaining recommendations"**. Lock every open decision at its recommended answer, log them as such, proceed. Offer it explicitly if the load-bearing tier exceeds ~8 questions.
 
-### Docs-aware (auto-on when Phase 0 found CONTEXT.md/ADRs; offer once on greenfield)
+### Docs-aware (auto-on when Phase 0 found GLOSSARY.md/ADRs; offer once on greenfield)
 
 - Enforce the glossary — wording collision → stop, quote both meanings, make them pick.
 - Pin down loose words with a proposed canonical replacement before continuing.
 - Probe blurred concepts with a concrete edge case.
 - Check claims against the code; a mismatch is a question.
-- Maintain `CONTEXT.md` as terms settle (format: [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md)). Glossary only.
+- Maintain `GLOSSARY.md` as terms settle (format: [GLOSSARY-FORMAT.md](./GLOSSARY-FORMAT.md)). Glossary only. A legacy `CONTEXT.md` is `git mv`'d to `GLOSSARY.md` the first time you edit it.
 - Offer an ADR only past the three-part test (format: [ADR-FORMAT.md](./ADR-FORMAT.md)).
 
 ### Lock the plan
@@ -188,7 +188,10 @@ Read `SESSION_ID:` and `VERDICT_FILE:`. Confirm `GROK_REVIEW_RESULT: ok`. Any ot
 ~/claude-coding-workflow/scripts/grok-review.sh --resume "$SESSION_ID" PLAN.md
 ```
 
-Every invocation is a foreground shell call with timeout **600000** ms.
+Run every invocation with the Bash tool's `run_in_background: true`: a first
+round can take ~20 minutes, past the 10-minute foreground ceiling. The harness
+re-invokes you when it exits; do not poll. Then read the `GROK_REVIEW_RESULT:`,
+`SESSION_ID:` and `VERDICT_FILE:` lines from its output file.
 
 ### Each round, after the script returns
 
@@ -214,7 +217,7 @@ Append a journal END with the outcome.
 - You are the final arbiter on every REVISE. Don't cave to everything; don't ignore it. Log the reason either way — rejecting a critique without a logged reason is how a plan rots.
 - Code only after user sign-off. Implementation is `/to-goals` then `/run-goal`.
 - `LOG_FILE` is the deliverable. Keep the whole argument.
-- `CONTEXT.md` stays a glossary.
+- `GLOSSARY.md` stays a glossary.
 - If the attacker cannot run, stop. Do not self-review as a substitute — a plan you attack yourself has not been attacked.
 
 ## What NOT to do

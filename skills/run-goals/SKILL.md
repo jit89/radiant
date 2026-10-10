@@ -24,7 +24,7 @@ From the **target** repo:
 
 The slash command **is** the confirm. Do not ask "start the walk?".
 
-Foreground timeout: long enough for every remaining goal (N × ~40 minutes, more if fix rounds).
+Run it with the Bash tool's `run_in_background: true`: a walk takes N × ~40 minutes, far past the 10-minute ceiling on a foreground call. The harness re-invokes you when the walk exits: do not poll or sleep. Then read the tail of its output file for the exit status and the last `STOP_FILE:` line.
 
 Do not re-enter between goals to repaint todos. The badge stays stale until the walk exits.
 
@@ -33,6 +33,8 @@ Do not re-enter between goals to repaint todos. The badge stays stale until the 
 Re-run `goals.py todos` and `TodoWrite` again so the list matches HEAD.
 
 - **0** — every goal is `done`. Report the graph. Stop.
-- **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. `reason: walk-stuck` means nothing is left to run but goals are bounced or blocked behind one; the stop file lists each and why. `reason: orchestration-files-dirty` / `orchestration-files-changed` means GOALS.md or the journal held edits the workflow did not make; nothing was committed — ask the user to commit or restore them. `scripts/logs.sh errors --last 20` (or `since walk`) for the machine index; do not invent SQL. Do not start the next goal yourself. Do not swap implementer.
+- **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. `reason: walk-stuck` means nothing is left to run but goals are bounced or blocked behind one; the stop file lists each and why. `reason: orchestration-files-dirty` / `orchestration-files-changed` means GOALS.md or the journal held edits the workflow did not make; nothing was committed — ask the user to commit or restore them. `scripts/logs.sh errors --last 20` (or `since walk`) for the machine index; do not invent SQL. Do not start the next goal yourself. Do not swap implementer by hand.
+
+- **A wake the Architect (this session) diagnosed by hand:** ask whether a measurable check would have caught it. If so, the Architect adds that check before resuming, and journals it. A defect in the house: a test under `scripts/tests/` (house work is in-session). A defect in the target: an acceptance case under `tests/acceptance/`, committed before resuming and listed under the goal's **Acceptance edits** (a new goal if this one is done) — never a file in the target's `tests/regression/`, which is the implementer's.
 
 `scripts/run-goals.sh` calls `scripts/run-goal.sh` as a subprocess and keys on exit code only.

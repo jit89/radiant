@@ -33,14 +33,14 @@ HOUSE="$TMP/house"
 mkdir -p "$HOUSE/scripts"
 cp -R "$HERE/." "$HOUSE/scripts/"
 # Implementer: save the plan its handoff names, run $OUTSIDE/act, commit work.
-cat >"$HOUSE/scripts/deepseek-code.sh" <<'SH'
+cat >"$HOUSE/scripts/claude-implement.sh" <<'SH'
 #!/usr/bin/env bash
 hand="${!#}"
 plan="$(sed -n 's/^- PLAN (signed, frozen at BASE_SHA): `\([^`]*\)`.*/\1/p' "$hand")"
 cp "$plan" "$OUTSIDE/impl-plan" 2>/dev/null || echo "(no plan: $plan)" >"$OUTSIDE/impl-plan"
 bash "$OUTSIDE/act"
 echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
-printf '%s\n' "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"
+printf '%s\n' "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"
 SH
 # Reviewer: save the plan its brief names, then fail (the run stops there).
 cat >"$HOUSE/scripts/claude-goal-review.sh" <<'SH'

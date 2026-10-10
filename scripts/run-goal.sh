@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # run-goal.sh — host Orchestrator for one GOALS.md id.
-# DeepSeek implements, this script assesses, Opus reviews, this script routes.
-# Models never read each other's raw output.
+# The implementer (Haiku 5.5, DeepSeek on a refusal) implements, this script
+# assesses, Opus reviews, this script routes. Models never read each other's
+# raw output.
 #
 # Usage (from the target repo):
 #   run-goal.sh <goal-id>
@@ -27,11 +28,22 @@ source "$HERE/lib/git-guard.sh"
 source "$HERE/lib/orch-files.sh"
 
 GOALS_PY="$HERE/goals.py"
-DEEPSEEK="$HERE/deepseek-code.sh"
+# IMPLEMENTER=claude (default): claude-implement.sh, Haiku 5.5 with a DeepSeek
+# fallback on a refusal, both in the Claude Code harness. IMPLEMENTER=codex: the
+# legacy DeepSeek-in-Codex launcher, kept until the new one has shipped goals.
+IMPLEMENTER="${IMPLEMENTER:-claude}"
+case "$IMPLEMENTER" in
+  claude) IMPL_LAUNCHER="$HERE/claude-implement.sh" IMPL_KEY=IMPLEMENTER_RESULT ;;
+  codex) IMPL_LAUNCHER="$HERE/deepseek-code.sh" IMPL_KEY=DEEPSEEK_RESULT ;;
+  *)
+    echo "IMPLEMENTER must be claude or codex, not '$IMPLEMENTER'" >&2
+    exit 2
+    ;;
+esac
 REVIEWER="$HERE/claude-goal-review.sh"
 
 MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
-IMPL_SECS="${DEEPSEEK_TIMEOUT:-1200}"
+IMPL_SECS="${IMPLEMENTER_TIMEOUT:-${DEEPSEEK_TIMEOUT:-1200}}"
 REVIEW_SECS="${CLAUDE_REVIEW_TIMEOUT:-600}"
 PROOF_SECS="${PROOF_TIMEOUT:-600}"
 
@@ -49,15 +61,19 @@ THREAD_ID=""
 SESSION_ID=""
 ROUND=0
 STOP_WRITTEN=0
-LAST_DEEPSEEK=""
+LAST_IMPL=""
+IMPL_MODEL=""
+IMPL_FALLBACK=""
+IMPL_STATUS=""
 LAST_VERDICT=""
 LAST_CLAUDE=""
 VERDICT_FILE=""
 PROOF_FILE=""
 PROOF_EXIT=""
 RETURN_HANDOFF=""
-DEEPSEEK_LOG=""
-DEEPSEEK_ERR=""
+IMPL_LOG=""
+IMPL_ERR=""
+CLAUDE_META_SAVED=""
 FIX_HASH=""
 FIX_COUNT_N=0
 PHASE="gate"
@@ -158,7 +174,9 @@ write_stop() {
 - detail: ${detail}
 - utc: $(utc)
 - fix_count / round: ${ROUND}
-- DEEPSEEK_RESULT: ${LAST_DEEPSEEK:-}
+- ${IMPL_KEY}: ${LAST_IMPL:-}
+- IMPLEMENTER_STATUS: ${IMPL_STATUS:-}
+- IMPLEMENTER_MODEL: ${IMPL_MODEL:-}${IMPL_FALLBACK:+ (fallback: ${IMPL_FALLBACK})}
 - CLAUDE_REVIEW_RESULT: ${LAST_CLAUDE:-}
 - VERDICT: ${LAST_VERDICT:-}
 - VERDICT_FILE: ${VERDICT_FILE:-}
@@ -169,8 +187,8 @@ write_stop() {
 - proof: ${PROOF_FILE:-}
 - proof_exit: ${PROOF_EXIT:-}
 - RETURN_HANDOFF: ${RETURN_HANDOFF:-}
-- LOG: ${DEEPSEEK_LOG:-}
-- stderr: ${DEEPSEEK_ERR:-}
+- LOG: ${IMPL_LOG:-}
+- stderr: ${IMPL_ERR:-}
 - artifacts: ${ART_DIR:-}
 - unstick status: $HOUSE/scripts/goals.py GOALS.md set ${GOAL_ID:-id} ready
   or: $HOUSE/scripts/goals.py GOALS.md set ${GOAL_ID:-id} bounced
@@ -227,6 +245,7 @@ succeed() {
   STOP_WRITTEN=1
   STOP_FILE=""
   git_meta_forget
+  [[ -z "$CLAUDE_META_SAVED" ]] || rm -f "$CLAUDE_META_SAVED"
   # Nothing here is needed once the goal lands; verdicts and fix handoffs
   # were already copied to ART_DIR. On a wake we keep RUN_DIR — it is the
   # evidence the stop file points at.
@@ -294,6 +313,26 @@ run_step() {
 verify_git_meta() {
   git_meta_verify "$GIT_META_SAVED" && return 0
   wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— $(git_meta_help)"
+}
+
+claude_meta_snapshot() {
+  python3 "$HERE/lib/claude-meta.py"
+}
+
+# Paths under .claude/ or .mcp.json that differ from the baseline, comma-joined.
+claude_meta_changed() {
+  { diff "$CLAUDE_META_SAVED" <(claude_meta_snapshot) || true; } |
+    sed -n 's/^[<>] \([^	][^	]*\).*/\1/p' | sort -u | paste -sd ',' -
+}
+
+# Wake if .claude/ or .mcp.json moved off the baseline (lib/claude-meta.py says
+# why). Like the .git baseline, it outlives a stop, so a resume is held to it
+# too. Nothing is restored: a planted hook is the person's to look at.
+verify_claude_meta() {
+  local changed
+  changed="$(claude_meta_changed)"
+  [[ -n "$changed" ]] || return 0
+  wake "claude-config-tamper" "changed $1: ${changed} — Claude Code configuration (hooks, MCP servers, settings) that the next session in this repo would load. Inspect it with cat / ls -la before opening Claude Code here and revert what you did not make. If the change is yours, re-baseline: rm $CLAUDE_META_SAVED"
 }
 
 # Contract drift since BASE_SHA: the plan, this goal's file oracle,
@@ -412,7 +451,7 @@ proof_env_unsets() {
 tree_snapshot() {
   git rev-parse HEAD
   git status --porcelain --untracked-files=all
-  local guarded=(tests/acceptance)
+  local guarded=(tests/acceptance .claude .mcp.json)
   [[ -z "${ORACLE:-}" || "$ORACLE" == inline ]] || guarded+=("$ORACLE")
   [[ -z "${PLAN_PATH:-}" ]] || guarded+=("$PLAN_PATH")
   { git status --porcelain --ignored=matching -- "${guarded[@]}" || true; } |
@@ -480,6 +519,32 @@ load_resume_state() {
   [[ -n "$BASE_SHA" ]]
 }
 
+# One record per implementer pass: who produced it and what it cost. A fallback
+# to DeepSeek must be visible in the journal and in `logs.sh warnings`, as a
+# reviewer fallback is. COST_USD is the launcher's client-side estimate, and on
+# a resumed thread the conversation's running total, not this pass alone.
+journal_implemented() {
+  local out="$1" status="$IMPL_STATUS" cost tokens sev=info payload
+  cost="$(kv "$out" IMPLEMENTER_COST_USD)"
+  tokens="$(kv "$out" IMPLEMENTER_TOKENS)"
+  journal_line "## $(utc) — ORCHESTRATOR implemented ${GOAL_ID} r${ROUND} STATUS=${status:--} MODEL=${IMPL_MODEL:--}${IMPL_FALLBACK:+ FALLBACK=(${IMPL_FALLBACK})} COST_USD=${cost:--}"
+  [[ -z "$IMPL_FALLBACK" ]] || sev=warning
+  payload="$(python3 -c 'import json,sys; print(json.dumps(dict(zip(("status","model","fallback","cost_usd","tokens","thread"), sys.argv[1:]))))' \
+    "${status:-}" "${IMPL_MODEL:-}" "${IMPL_FALLBACK:-}" "${cost:-}" "${tokens:-}" "${THREAD_ID:-}")"
+  events_append --event implemented --severity "$sev" --goal "$GOAL_ID" --round "$ROUND" \
+    --base-sha "$BASE_SHA" \
+    --summary "implemented ${GOAL_ID} r${ROUND} STATUS=${status:--} MODEL=${IMPL_MODEL:--}${IMPL_FALLBACK:+ FALLBACK=(${IMPL_FALLBACK})}" \
+    --payload "$payload"
+}
+
+# A phase change inside a round, for `events.py status` (the walk footer). The
+# pid lets it tell a running goal from one whose process died without a wake.
+event_phase() {
+  events_append --event phase --severity info --goal "$GOAL_ID" --round "$ROUND" \
+    --base-sha "$BASE_SHA" --summary "phase ${GOAL_ID} r${ROUND} $1" \
+    --payload "$(printf '{"phase":"%s",%s}' "$1" "$(events_pid_json)")"
+}
+
 # Journal the thread/session ids as soon as a launcher returns them, so a
 # resume after any later stop continues the same conversations.
 JOURNALED_IDS=""
@@ -509,6 +574,8 @@ mkdir -p "$ART_DIR"
 # .git baseline, before any git command that can run a program. The saved
 # manifest outlives a stop, so tampering is caught on resume and by the walker.
 git_meta_init || die_gate "cannot locate the gitdir"
+# Per repo and goal: ART_DIR is keyed by the goal id alone.
+CLAUDE_META_SAVED="$ART_DIR/claude-meta-$(printf '%s' "$ROOT" | shasum -a 256 | cut -c1-16).txt"
 verify_git_meta "since the last run in this repo"
 
 [[ -f GOALS.md ]] || die_gate "GOALS.md missing — commit the DAG and oracles first"
@@ -611,7 +678,9 @@ else
   # The contract itself is checked once BASE_SHA is known, below.
 fi
 
-if ! load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env"; then
+# The Claude launcher needs no key here: Haiku uses the Claude login, and the
+# DeepSeek fallback loads its own key (a missing one only disables it).
+if [[ "$IMPLEMENTER" == codex ]] && ! load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env"; then
   die_gate "DEEPSEEK_API_KEY is not set (target .env or $HOUSE/.env). Do not paste it."
 fi
 
@@ -645,6 +714,17 @@ if [[ "$RESUME" -eq 1 ]]; then
   if contract_any; then
     die_gate "contract changed since BASE_SHA ${BASE_SHA:0:12}; nothing dispatched — $(contract_report). Revert it, or if the change is intended hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
   fi
+fi
+
+# The .claude/ baseline every implementer pass is checked against. A fresh run
+# takes it now; a resume is held to the one its stopped run took.
+if [[ "$RESUME" -eq 1 && -f "$CLAUDE_META_SAVED" ]]; then
+  claude_changed="$(claude_meta_changed)"
+  if [[ -n "$claude_changed" ]]; then
+    die_gate "Claude Code configuration changed while $GOAL_ID was paused: ${claude_changed}; nothing dispatched. Inspect it with cat / ls -la and revert what you did not make; if the change is yours, re-baseline: rm $CLAUDE_META_SAVED"
+  fi
+else
+  claude_meta_snapshot >"$CLAUDE_META_SAVED"
 fi
 
 # A resume owing FIX findings continues that fix round with those findings,
@@ -697,41 +777,49 @@ while :; do
   events_append --event dispatch --severity info --goal "$GOAL_ID" --round "$ROUND" \
     --base-sha "$BASE_SHA" \
     --summary "dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA}" \
-    --payload "$(printf '{"thread_id":"%s","session_id":"%s"}' "${THREAD_ID:--}" "${SESSION_ID:--}")"
+    --payload "$(printf '{"thread_id":"%s","session_id":"%s",%s}' "${THREAD_ID:--}" "${SESSION_ID:--}" "$(events_pid_json)")"
 
-  DS_OUT="$RUN_DIR/deepseek-r${ROUND}.out"
+  DS_OUT="$RUN_DIR/implementer-r${ROUND}.out"
   PHASE="implementer r${ROUND}"
   set +e
   if [[ -n "$THREAD_ID" ]]; then
-    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$DEEPSEEK" --resume "$THREAD_ID" "$HAND"
+    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$IMPL_LAUNCHER" --resume "$THREAD_ID" "$HAND"
   else
-    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$DEEPSEEK" "$HAND"
+    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$IMPL_LAUNCHER" "$HAND"
   fi
   ds_rc=$?
   set -e
   PHASE="assess r${ROUND}"
   verify_git_meta "during implementer r${ROUND}"
-  LAST_DEEPSEEK="$(kv "$DS_OUT" DEEPSEEK_RESULT)"
+  LAST_IMPL="$(kv "$DS_OUT" "$IMPL_KEY")"
   kv_keep THREAD_ID "$DS_OUT" THREAD_ID
   journal_ids
   RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
-  DEEPSEEK_LOG="$(kv "$DS_OUT" LOG)"
-  DEEPSEEK_ERR="$(kv "$DS_OUT" stderr)"
+  IMPL_LOG="$(kv "$DS_OUT" LOG)"
+  IMPL_ERR="$(kv "$DS_OUT" stderr)"
+  IMPL_MODEL="$(kv "$DS_OUT" IMPLEMENTER_MODEL)"
+  IMPL_FALLBACK="$(kv "$DS_OUT" IMPLEMENTER_FALLBACK)"
+  IMPL_STATUS="$(kv "$DS_OUT" IMPLEMENTER_STATUS)"
   [[ -s "$DS_OUT.wrap" ]] && cat "$DS_OUT.wrap" >&2 || true
+  verify_claude_meta "during implementer r${ROUND}"
 
-  # Only DEEPSEEK_RESULT is required; the other lines are diagnostics.
+  # Only the result line is required; the other lines are diagnostics.
   if [[ "$ds_rc" -eq 124 ]]; then
-    wake "implementer-timeout" "no result after ${IMPL_SECS}s (DEEPSEEK_TIMEOUT). stderr: $DS_OUT.wrap"
+    wake "implementer-timeout" "no result after ${IMPL_SECS}s (IMPLEMENTER_TIMEOUT). stderr: $DS_OUT.wrap"
   fi
-  if [[ "$ds_rc" -eq 75 || "$LAST_DEEPSEEK" == rate_limited* ]]; then
-    wake "rate_limited" "DEEPSEEK_RESULT=$LAST_DEEPSEEK"
+  if [[ "$ds_rc" -eq 75 || "$LAST_IMPL" == rate_limited* ]]; then
+    wake "rate_limited" "${IMPL_KEY}=$LAST_IMPL"
   fi
-  if [[ -z "$LAST_DEEPSEEK" ]]; then
-    wake "implementer-error" "no DEEPSEEK_RESULT line (rc=$ds_rc). stderr: $DS_OUT.wrap"
+  if [[ "$ds_rc" -eq 76 || "$LAST_IMPL" == declined* || "$LAST_IMPL" == flagged* ]]; then
+    wake "implementer-declined" "${IMPL_KEY}=$LAST_IMPL — the implementer refused or declined this goal and no fallback was left (IMPLEMENTER_FALLBACK, a DeepSeek key). Nothing was assessed. Report: $(kv "$DS_OUT" REPORT)"
   fi
-  if [[ "$ds_rc" -ne 0 || "$LAST_DEEPSEEK" != ok ]]; then
-    wake "implementer-error" "rc=$ds_rc DEEPSEEK_RESULT=$LAST_DEEPSEEK"
+  if [[ -z "$LAST_IMPL" ]]; then
+    wake "implementer-error" "no ${IMPL_KEY} line (rc=$ds_rc). stderr: $DS_OUT.wrap"
   fi
+  if [[ "$ds_rc" -ne 0 || "$LAST_IMPL" != ok ]]; then
+    wake "implementer-error" "rc=$ds_rc ${IMPL_KEY}=$LAST_IMPL"
+  fi
+  journal_implemented "$DS_OUT"
 
   # --- host assess --------------------------------------------------------
   git status --porcelain
@@ -758,6 +846,16 @@ while :; do
       git checkout "$BASE_SHA" -- "$p" 2>/dev/null || true
     done
     wake "contract-tamper-worktree" "$contract_msg"
+  fi
+
+  # The implementer's own word that it hit a blocker (a contract that looks
+  # wrong, behaviour another goal owns, a spec with two readings). After the
+  # contract checks, which keep priority; before the dirty-tree check, since a
+  # blocked pass leaves its red tests uncommitted by design (the stop file lists
+  # them). Nothing is reviewed or proved; the goal stays in_progress for the
+  # Architect to fix the spec or bounce it.
+  if [[ "$IMPL_STATUS" == BLOCKED ]]; then
+    wake "implementer-blocked" "the implementer reported a blocker; its question is in the journal END record and the return handoff: ${RETURN_HANDOFF:-none}. Fix the spec or oracle and resume, or bounce: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
   fi
 
   unexpected=()
@@ -788,6 +886,7 @@ while :; do
     wake "journal-tamper" "$journal_problems — the journal grew by something other than this goal's records. Review those lines, then commit or restore them."
   fi
 
+
   PROOF_FILE="$RUN_DIR/proof-${GOAL_ID}-r${ROUND}.txt"
   if is_non_command_proof "$PROOF"; then
     echo "PROOF: none (no executable proof)" >"$PROOF_FILE"
@@ -799,6 +898,7 @@ while :; do
     # Plain -c, not -lc: the gate must not depend on the user's interactive
     # profile (aliases, PATH edits, version managers) being loaded.
     PHASE="proof r${ROUND}"
+    event_phase proof
     tree_snapshot >"$RUN_DIR/tree-before-proof.txt"
     unsets=()
     while IFS= read -r u; do unsets+=("$u"); done < <(proof_env_unsets)
@@ -833,8 +933,8 @@ while :; do
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
     fi
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
-      if [[ "$LAST_DEEPSEEK" == ok* ]]; then
-        wake "proof-red" "host proof exit $PROOF_EXIT after DEEPSEEK_RESULT=ok"
+      if [[ "$LAST_IMPL" == ok* ]]; then
+        wake "proof-red" "host proof exit $PROOF_EXIT after ${IMPL_KEY}=ok"
       fi
       wake "proof-red" "host proof exit $PROOF_EXIT"
     fi
@@ -862,6 +962,7 @@ EOF
 
   RV_OUT="$RUN_DIR/reviewer-r${ROUND}.out"
   PHASE="review r${ROUND}"
+  event_phase review
   set +e
   # --add-dir $RUN_DIR or the reviewer cannot open BRIEF / DIFF_FILE /
   # PROOF_OUTPUT at all: headless Claude denies reads outside the repo and
@@ -903,7 +1004,7 @@ EOF
     wake "reviewer-error" "CLAUDE_REVIEW_RESULT=$LAST_CLAUDE rc=$rv_rc"
   fi
   LAST_VERDICT="$(kv "$RV_OUT" VERDICT)"
-  # Which model judged. The workflow names Opus 5 as the reviewer, so a fallback
+  # Which model judged. The workflow names Opus 5.5 as the reviewer, so a fallback
   # to another model must be visible in the journal and in `logs.sh warnings`.
   REVIEW_MODEL="$(kv "$RV_OUT" CLAUDE_REVIEW_MODEL)"
   REVIEW_FALLBACK="$(kv "$RV_OUT" CLAUDE_REVIEW_FALLBACK)"

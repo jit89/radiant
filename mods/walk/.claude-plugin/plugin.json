@@ -1,0 +1,9 @@
+{
+  "name": "walk",
+  "version": "0.2.2",
+  "description": "The goal the house workflow is running now as a prompt-footer label, and /walk: every goal of GOALS.md as a live git graph in a pane.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Soumyajit Chatterjee"
+  }
+}

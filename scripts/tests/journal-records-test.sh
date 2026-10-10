@@ -95,7 +95,7 @@ run() {
   stop="$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)"
   reason="$(sed -n 's/^- reason: //p' "$stop" 2>/dev/null || true)"
   reviewed="$(count claude-goal-review)"
-  dispatched="$(count deepseek-code)"
+  dispatched="$(count claude-implement)"
 }
 count() {  # matching stub invocations, 0 when nothing ran at all
   local n
@@ -105,18 +105,18 @@ count() {  # matching stub invocations, 0 when nothing ran at all
 journal_committed() { git log --format= -p -- "$J" | grep -c "$1" || true; }
 
 # The implementer appends its documented records: the run proceeds.
-stub deepseek-code.sh 'printf "\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g1-store\nbeginning\n" >>docs/journal/example.md
+stub claude-implement.sh 'printf "\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g1-store\nbeginning\n" >>docs/journal/example.md
 echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
-printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 make_repo
 run
 check "implementer records reach review" "reviewer-error" "$reason"
 check "implementer records: reviewer called" "1" "$reviewed"
 
 # Loose text appended during the run: stop before review and before any commit.
-stub deepseek-code.sh 'printf "\nUSER PRIVATE NOTE\n" >>docs/journal/example.md
+stub claude-implement.sh 'printf "\nUSER PRIVATE NOTE\n" >>docs/journal/example.md
 echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
-printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 make_repo
 head_before="$(git rev-parse HEAD)"
 run
@@ -126,9 +126,9 @@ check "loose journal text: not committed" "0" "$(journal_committed 'USER PRIVATE
 check "loose journal text: still in the file" "1" "$(grep -c 'USER PRIVATE NOTE' "$J" || true)"
 
 # A record for another goal is not this goal's work either.
-stub deepseek-code.sh 'printf "\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g2-ack\nwrong goal\n" >>docs/journal/example.md
+stub claude-implement.sh 'printf "\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g2-ack\nwrong goal\n" >>docs/journal/example.md
 echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
-printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 make_repo
 run
 check "cross-goal record: journal-tamper" "journal-tamper" "$reason"
@@ -137,7 +137,7 @@ check "cross-goal record: no review" "0" "$reviewed"
 # --- resume (F3-05) ---------------------------------------------------------
 # A crash leaves the journal mid-record. Each documented checkpoint must
 # resume; anything else must refuse before a launcher runs.
-stub deepseek-code.sh 'printf "%s\n" "DEEPSEEK_RESULT: error (stub)"; exit 1'
+stub claude-implement.sh 'printf "%s\n" "IMPLEMENTER_RESULT: error (stub)"; exit 1'
 resume_with() {  # resume_with <name> <appended journal text> <want dispatched>
   make_repo
   local base

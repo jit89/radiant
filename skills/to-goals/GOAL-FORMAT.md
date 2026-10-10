@@ -83,7 +83,7 @@ Each goal has exactly one `## <id> — <title>` section: the id, then a space or
 ## Slice rules
 
 - Vertical: a narrow complete path (schema + API + tests, or the equivalent), demoable or verifiable alone. Not a horizontal layer ("just the types").
-- Sized for **one DeepSeek context window** — tighter than a human ticket.
+- Sized for **one implementer session** — tighter than a human ticket.
 - Independence test: if two goals landed tomorrow in separate worktrees, would either be a lie without the other? If yes, they are not independent — add an edge or merge them.
 - Cap ~8 goals. More than that → merge, or the plan is still too big (bounce to crucible).
 - Wide mechanical change (rename, retype, blast radius that no vertical slice can land green): **expand → migrate batches → contract**. Each step is its own goal; migrate batches `blocked_by` the expand; contract `blocked_by` every migrate batch.

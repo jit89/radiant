@@ -13,7 +13,7 @@ A host script (`scripts/run-goal.sh`, `scripts/run-goals.sh`) that walks one goa
 Not: "Architect", "implementer"
 
 **Host assess**
-The Orchestrator's independent check after DeepSeek exits: git state, proof command run on the host, oracle-untouched, then a host-written `DIFF_FILE` + `PROOF_OUTPUT`. Opus does not start until this passes.
+The Orchestrator's independent check after the implementer exits: git state, proof command run on the host, oracle-untouched, then a host-written `DIFF_FILE` + `PROOF_OUTPUT`. Opus does not start until this passes.
 Not: "the implementer's test log", "return handoff"
 
 **Attacker**
@@ -21,10 +21,10 @@ Headless Grok. Read-only critic of a locked plan, and a different model from the
 Not: "reviewer" (that word is reserved for the goal reviewer)
 
 **Implementer**
-DeepSeek V4 Flash in the Codex CLI harness. Executes one goal under TDD.
+Claude Haiku 5.5 in headless, sandboxed Claude Code (`claude-implement.sh`). Executes one goal under TDD. When Haiku refuses or declines the goal, the same pass reruns once on DeepSeek V4 Flash through the same harness.
 
 **Goal reviewer**
-Headless Claude Opus 5 judging an implementer diff until the goal is done. A separate session with no access to the Architect's conversation; it needs `--add-dir` for the run dir or it cannot read the diff and proof it is judging.
+Headless Claude Opus 5.5 judging an implementer diff until the goal is done. A separate session with no access to the Architect's conversation; it needs `--add-dir` for the run dir or it cannot read the diff and proof it is judging.
 Not: "Attacker" (that role only attacks PLAN.md)
 
 **Goal**
@@ -55,5 +55,9 @@ The visible tree of still-open choices, split into load-bearing and cosmetic.
 One defect the goal reviewer wants fixed, emitted as a `FIX: <path>:<line> — <defect> — <what to change>` line. The path it opens with is the file the implementer must change; naming the oracle there bounces the goal.
 Not: a numbered analysis heading in the reviewer's prose
 
+**Implementer fallback**
+The one model switch the implementer makes: Haiku's safeguards flag the pass, or it ends `IMPLEMENTER_STATUS: DECLINED`, and the launcher reruns it once on DeepSeek in a fresh session, journaled as `FALLBACK=`. Never on a rate limit.
+Not: "retry", "quota fallback"
+
 **Codex home lock**
-The exclusive lock `deepseek-code.sh` holds on the shared `CODEX_HOME` while it rewrites `config.toml` and runs. Makes concurrent runs queue rather than read each other's config.
+The exclusive lock the legacy `deepseek-code.sh` (`IMPLEMENTER=codex`) holds on the shared `CODEX_HOME` while it rewrites `config.toml` and runs. Makes concurrent runs queue rather than read each other's config.

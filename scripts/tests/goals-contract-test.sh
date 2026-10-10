@@ -71,7 +71,7 @@ stub() {
 }
 stub claude-goal-review.sh 'printf "%s\n" "CLAUDE_REVIEW_RESULT: error (exit 1)" \
   "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null"; exit 1'
-OK_LINES='printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"'
+OK_LINES='printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 COMMIT='echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"'
 
 run_goal() {
@@ -91,20 +91,20 @@ run_goal() {
   detail="$(sed -n 's/^- detail: //p' "$stop" 2>/dev/null || true)"
 }
 
-stub deepseek-code.sh "$COMMIT
+stub claude-implement.sh "$COMMIT
 $OK_LINES"
 run_goal
 check "honest implementer reaches review" "reviewer-error" "$reason"
 
 # Uncommitted edit to a later goal's case table.
-stub deepseek-code.sh "$COMMIT
+stub claude-implement.sh "$COMMIT
 sed -i.bak 's/stored | acked/stored | nothing/' GOALS.md && rm GOALS.md.bak
 $OK_LINES"
 run_goal
 check "later goal body, uncommitted: tamper wake" "contract-tamper-worktree" "$reason"
 
 # Committed edit to this goal's own case table (reviewer would read it).
-stub deepseek-code.sh "$COMMIT
+stub claude-implement.sh "$COMMIT
 sed -i.bak 's/| mail  | stored   |/| mail  | ignored  |/' GOALS.md && rm GOALS.md.bak
 git add GOALS.md && git commit -qm 'wip(g1-store): tidy'
 $OK_LINES"
@@ -114,7 +114,7 @@ check "committed tamper names GOALS.md" "yes" \
   "$([[ "$detail" == *GOALS.md* ]] && echo yes || echo "no: $detail")"
 
 # Fresh start with a body already edited in the worktree: refuse at the gate.
-stub deepseek-code.sh "$OK_LINES"
+stub claude-implement.sh "$OK_LINES"
 run_goal "sed -i.bak 's/retries/everything/' GOALS.md && rm GOALS.md.bak"
 check "dirty body at fresh start: gate" "gate" "$reason"
 check "gate names GOALS.md" "yes" \

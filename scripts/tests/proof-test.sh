@@ -39,7 +39,7 @@ mkdir -p "$HOUSE/scripts"
 cp -R "$HERE/." "$HOUSE/scripts/"
 printf '%s\n' '#!/usr/bin/env bash' \
   'echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"' \
-  'printf "%s\n" "DEEPSEEK_RESULT: ok" "THREAD_ID: t1"' >"$HOUSE/scripts/deepseek-code.sh"
+  'printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"' >"$HOUSE/scripts/claude-implement.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'echo reached >"$OUTSIDE/reviewer"' \
   'printf "%s\n" "CLAUDE_REVIEW_RESULT: error (exit 1)" "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null"' \
   'exit 1' >"$HOUSE/scripts/claude-goal-review.sh"

@@ -410,7 +410,7 @@ You are the IMPLEMENTATION agent (model: ${MODEL}, Codex harness). You only impl
 
 1. Read the handoff document: ${HANDOFF_ABS}
 2. Read every artifact it references — the PLAN copy it names, GOALS.md (the named goal only),
-   ADRs (docs/adr/), CONTEXT.md, the journal (docs/journal/<slug>.md), and any
+   ADRs (docs/adr/), GLOSSARY.md (or CONTEXT.md), the journal (docs/journal/<slug>.md), and any
    measurement the goal cites under docs/findings/.
    Treat that PLAN + the goal's case table / oracle as the contract. ADRs bind.
    A finding is evidence, not a contract: it tells you why a decision was made and what

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""verdict.py FILE TOKEN... — print the verdict a model reply ends with, or MISSING.
+"""verdict.py [--key KEY] FILE TOKEN... — print the verdict a model reply ends with, or MISSING.
 
-The one grammar both reviewers' launchers parse. The last non-empty line must
-be `VERDICT: <TOKEN>`, optionally followed by a comment (` — why`, `: why`,
-`.`). Markdown emphasis or backticks and a leading list marker are tolerated.
+The one grammar both reviewers' launchers parse, and the implementer's final
+status line (`--key IMPLEMENTER_STATUS`); KEY defaults to VERDICT. The last
+non-empty line must be `KEY: <TOKEN>`, optionally followed by a comment
+(` — why`, `: why`, `.`). Markdown emphasis or backticks and a leading list
+marker are tolerated.
 
 MISSING when: the last line is anything else (a bare `DONE ...`, a verdict
 quoted mid-sentence, a verdict followed by more text), the token is not one of
@@ -13,10 +15,14 @@ TOKEN..., or another standalone verdict line elsewhere names a different token
 import re
 import sys
 
-path, tokens = sys.argv[1], sys.argv[2:]
+args = sys.argv[1:]
+key = "VERDICT"
+if args[:1] == ["--key"]:
+    key, args = args[1], args[2:]
+path, tokens = args[0], args[1:]
 alt = "|".join(re.escape(t) for t in tokens)
 LINE = re.compile(
-    rf"^VERDICT:\s*({alt})"
+    rf"^{re.escape(key)}:\s*({alt})"
     r"(?:\s*$|\s+[-—–]\s.*$|\s*[—–].*$|[.:](?:\s.*)?$)"
 )
 

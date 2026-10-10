@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # claude-goal-review.sh — one GOAL REVIEW round via headless Claude
-# Opus 5. This is NOT the plan attacker (see grok-review.sh). The
+# Opus 5.5. This is NOT the plan attacker (see grok-review.sh). The
 # reviewer judges an implementer's diff against a goal until DONE.
 #
 # This file owns the reviewer prompt. Do not fork it. Do not reuse the
@@ -54,7 +54,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/dotenv.sh"
 HOUSE="$(cd "$HERE/.." && pwd)"
-MODEL="${CLAUDE_REVIEW_MODEL:-claude-opus-5}"
+MODEL="${CLAUDE_REVIEW_MODEL:-claude-opus-5-5}"
 EFFORT="${CLAUDE_REVIEW_EFFORT:-high}"
 # `-` not `:-`: an explicitly empty value must disable the fallback, not restore it.
 FALLBACK_MODEL="${CLAUDE_REVIEW_FALLBACK_MODEL-claude-opus-4-8}"
@@ -264,7 +264,7 @@ Read the brief at ${BRIEF_ABS}. It names:
 - DIFF_RANGE — informational (the range used to produce DIFF_FILE)
 - PROOF_OUTPUT — actual output of the proof command the Architect already ran. Treat it as ground truth. Do not invent a different test result.
 
-Then read GOALS.md (that goal only), the PLAN file the brief names (the signed plan as of BASE_SHA; judge against it, not the repo's copy), the oracle file if it is not "inline", CONTEXT.md, coding-standards.md if present, and DIFF_FILE. Identify:
+Then read GOALS.md (that goal only), the PLAN file the brief names (the signed plan as of BASE_SHA; judge against it, not the repo's copy), the oracle file if it is not "inline", GLOSSARY.md (or a legacy CONTEXT.md), coding-standards.md if present, and DIFF_FILE. Identify:
 
 1. SPEC — does the diff implement this goal and only this goal?
 2. ORACLE — is the acceptance file unmodified? A touch is CRITICAL.

@@ -17,6 +17,8 @@ Usage (from the target repo):
   events.py append <journal> --event E --severity S --summary TEXT [flags]
   events.py query  <journal> [--errors|--warnings] [--last N] [--since SPEC]
                    [--goal ID] [--walk ID|current] [--json]
+  events.py status [--json]      # the goal running now, from anywhere in the repo
+  events.py graph [--json] [--dir DIR]   # every goal as a git graph (the /walk pane)
   events.py --self-test
 """
 
@@ -39,6 +41,8 @@ EVENTS = (
     "walk",
     "walk_end",
     "dispatch",
+    "implemented",
+    "phase",
     "review",
     "done",
     "fix",
@@ -422,6 +426,416 @@ def cmd_self_test() -> int:
     return 0
 
 
+# What a running goal is doing, by the last event naming it.
+PHASE_OF = {"walk": "start", "dispatch": "implement", "implemented": "proof", "fix": "fix"}
+# Events after which no orchestrator process is working on that goal.
+TERMINAL = {"done", "bounced", "wake", "walk_end"}
+
+
+def find_goals_root(start: Path) -> Path | None:
+    """The nearest directory at or above `start` holding GOALS.md and .git."""
+    for d in [start, *start.parents]:
+        if (d / "GOALS.md").is_file() and (d / ".git").exists():
+            return d
+    return None
+
+
+def proc_start(pid) -> str | None:
+    """When process `pid` started, as `ps -o lstart=` prints it, or None."""
+    import subprocess  # noqa: PLC0415
+
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(int(pid))],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return None
+    out = " ".join(out.split())
+    return out or None
+
+
+def pid_alive(pid, started: str | None = None) -> bool:
+    """True while process `pid` lives and, when `started` is given, is the one
+    that started then: a pid the OS reused for another process reads as gone."""
+    try:
+        os.kill(int(pid), 0)
+    except (ValueError, TypeError, ProcessLookupError):
+        return False
+    except PermissionError:
+        pass
+    if not started:
+        return True
+    return proc_start(pid) == " ".join(started.split())
+
+
+def tail_rows(jsonl: Path, limit: int = 400) -> list[dict]:
+    try:
+        lines = jsonl.read_text(encoding="utf-8").splitlines()[-limit:]
+    except OSError:
+        return []
+    rows = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def phase_of(row: dict) -> str:
+    """What a goal is doing, by the last event naming it."""
+    event = row.get("event")
+    if event == "phase":
+        return (row.get("payload") or {}).get("phase") or "running"
+    if event == "review":
+        return "fix" if row.get("verdict") == "FIX" else "review"
+    return PHASE_OF.get(event, "running")
+
+
+def live_goals(rows: list[dict]) -> dict[str, dict]:
+    """Every goal an orchestrator is running now, newest first: `{round, phase}`.
+
+    A goal runs while the last event naming it is not terminal and the process
+    that wrote it (its payload `pid`, started at `pid_start`) is alive: a goal
+    killed outright leaves no wake, and a row from before pids were recorded
+    never reads as running. Each goal is judged by its own rows, so goals run
+    side by side (a parallel walk) each read as running.
+    """
+    last: dict[str, dict] = {}
+    owner: dict[str, dict] = {}
+    for r in reversed(rows):
+        gid = r.get("goal_id")
+        if not gid:
+            continue
+        last.setdefault(gid, r)
+        payload = r.get("payload")
+        if gid not in owner and isinstance(payload, dict) and payload.get("pid"):
+            owner[gid] = payload
+    live: dict[str, dict] = {}
+    for gid, r in last.items():
+        if r.get("event") in TERMINAL or gid not in owner:
+            continue
+        if pid_alive(owner[gid]["pid"], owner[gid].get("pid_start")):
+            live[gid] = {"round": r.get("round"), "phase": phase_of(r)}
+    return live
+
+
+def walk_status(start: Path) -> dict:
+    """The goal an orchestrator is running now in the repo holding `start`:
+    the newest of `live_goals`, with how many more run beside it (`others`).
+    A GOALS.md that does not parse (one mid-write) raises, so a poller can keep
+    what it showed rather than flash to idle.
+    """
+    idle = {"running": False}
+    root = find_goals_root(start.resolve())
+    if root is None:
+        return idle
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import goals  # noqa: PLC0415 - the DAG reader beside this file
+
+    try:
+        _, data, _, _ = goals.load(root / "GOALS.md")
+    except SystemExit as exc:  # goals.py reports a bad file by exiting
+        raise ValueError(f"GOALS.md: {exc}") from exc
+    journal = data.get("journal") or ""
+    if not journal:
+        return idle
+    statuses = [g.get("status") for g in data.get("goals", [])]
+    done, total = statuses.count("done"), len(statuses)
+    live = live_goals(tail_rows(cache_root() / repo_id(root) / f"{slug_of(Path(journal))}.jsonl"))
+    if not live:
+        return {**idle, "done": done, "total": total}
+    goal, now = next(iter(live.items()))
+    rnd, phase = now["round"], now["phase"]
+    more = f" +{len(live) - 1}" if len(live) > 1 else ""
+    label = f"{goal}{f' r{rnd}' if rnd is not None else ''} \u00b7 {phase}{more} \u00b7 {done}/{total}"
+    return {"running": True, "goal": goal, "round": rnd, "phase": phase, "others": len(live) - 1,
+            "done": done, "total": total, "label": label}
+
+
+# How a goal is drawn in the walk pane, by its state there.
+GLYPH = {"done": "●", "running": "◉", "paused": "◐", "ready": "○",
+         "waiting": "◌", "bounced": "✗"}
+
+
+def lay_out(goals: list[dict]) -> list[dict]:
+    """A goal DAG as git-graph rows, roots first, in GOALS.md order where the
+    edges allow. Each dependency is a lane two cells wide running down from the
+    goal to the one that waits on it: a goal with several dependents forks
+    (`├─┬─╮`), one waiting on several takes the lanes in (`●─┼─╯`).
+
+    A goal's row is `{goal, graph, col, cont}`: `col` the cell of its glyph,
+    `cont` the lanes still running past it (what a detail line under it draws).
+    A fork row is `{graph}` alone. Glyphs are by `state`, else `ready`.
+    """
+    ids = [g["id"] for g in goals]
+    state = {g["id"]: g.get("state", "ready") for g in goals}
+    known = set(ids)
+    deps = {g["id"]: list(dict.fromkeys(d for d in (g.get("blocked_by") or []) if d in known and d != g["id"]))
+            for g in goals}
+    kids: dict[str, list[str]] = {i: [] for i in ids}
+    for i in ids:
+        for d in deps[i]:
+            kids[d].append(i)
+    pos = {i: n for n, i in enumerate(ids)}
+    indeg = {i: len(deps[i]) for i in ids}
+    ready = [i for i in ids if indeg[i] == 0]
+    order: list[str] = []
+    while ready:
+        ready.sort(key=pos.__getitem__)
+        n = ready.pop(0)
+        order.append(n)
+        for c in kids[n]:
+            indeg[c] -= 1
+            if indeg[c] == 0:
+                ready.append(c)
+    placed = set(order)
+    order += [i for i in ids if i not in placed]  # a cycle (validate refuses one): drawn as roots
+    at = {i: n for n, i in enumerate(order)}
+
+    def join(cells: list[str], gaps: list[str]) -> str:
+        return "".join(c + g for c, g in zip(cells, gaps)).rstrip()
+
+    def bridge(cells: list[str], gaps: list[str], col: int, ends: list[int], last: str, mid: str) -> None:
+        far = max(ends)
+        for i in range(col + 1, far + 1):
+            gaps[i - 1] = "─"
+            if i in ends:
+                cells[i] = last if i == far else mid
+            elif cells[i] == "│":
+                cells[i] = "┼"
+            else:
+                cells[i] = "─"
+
+    rows: list[dict] = []
+    lanes: list[str | None] = []  # each lane: the goal its edge runs down to
+    done_ids: set[str] = set()
+    for n in order:
+        before = list(lanes)
+        hits = [i for i, t in enumerate(lanes) if t == n]
+        if hits:
+            col = hits[0]
+        else:
+            col = lanes.index(None) if None in lanes else len(lanes)
+            if col == len(lanes):
+                lanes.append(None)
+        for m in hits:
+            lanes[m] = None
+        done_ids.add(n)
+        forks: list[int] = []
+        later = sorted((k for k in kids[n] if k not in done_ids), key=at.__getitem__)
+        if later:
+            lanes[col] = later[0]
+            for k in later[1:]:
+                free = [i for i in range(col + 1, len(lanes)) if lanes[i] is None]
+                i = free[0] if free else len(lanes)
+                if i == len(lanes):
+                    lanes.append(None)
+                lanes[i] = k
+                forks.append(i)
+        width = max(len(before), col + 1, len(lanes))
+        cells = ["│" if i < len(before) and before[i] is not None else " " for i in range(width)]
+        cells[col] = GLYPH.get(state[n], GLYPH["ready"])
+        gaps = [" "] * width
+        if hits[1:]:
+            bridge(cells, gaps, col, hits[1:], "╯", "┴")
+        live = ["│" if i < len(lanes) and lanes[i] is not None else " " for i in range(width)]
+        # A detail line sits between this row and its fork: the forked lanes start below it.
+        cont = join([" " if i in forks else c for i, c in enumerate(live)], [" "] * width)
+        rows.append({"goal": n, "graph": join(cells, gaps), "col": 2 * col, "cont": cont})
+        if forks:
+            cells = list(live)
+            cells[col] = "├"
+            gaps = [" "] * width
+            bridge(cells, gaps, col, forks, "╮", "┬")
+            rows.append({"graph": join(cells, gaps)})
+        while lanes and lanes[-1] is None:
+            lanes.pop()
+    return rows
+
+
+def short_model(model: str) -> str:
+    for name in ("haiku", "deepseek", "opus", "sonnet"):
+        if name in model:
+            return name
+    return model
+
+
+def goal_stats(rows: list[dict], live: dict | set = frozenset()) -> dict[str, dict]:
+    """Per goal from the event index: its last round, the model of its last
+    implementer pass, whether a fallback ran, the time spent in its runs, and
+    the implementer's cost.
+
+    Time adds each run, `walk`/`dispatch` to a terminal event (to the last row
+    naming the goal when its process died without one; to now while it runs).
+    A pass's `cost_usd` is its thread's running total, so the cost adds the
+    last total of each thread (its payload `thread`; a record from before that
+    was kept starts a new thread where the total drops): an estimate, and the
+    implementer's alone (not the review's).
+    """
+    now = datetime.now(timezone.utc)
+    stats: dict[str, dict] = {}
+    for r in rows:
+        gid = r.get("goal_id")
+        if not gid:
+            continue
+        s = stats.setdefault(gid, {"round": None, "model": None, "fallback": False, "secs": 0.0,
+                                   "_threads": {}, "_since": None, "_last": None})
+        if r.get("round") is not None:
+            s["round"] = r["round"]
+        ev, t = r.get("event"), parse_ts(r.get("ts") or "")
+        if t is not None:
+            s["_last"] = t
+            if ev in ("walk", "dispatch") and s["_since"] is None:
+                s["_since"] = t
+            elif ev in TERMINAL and s["_since"] is not None:
+                s["secs"] += (t - s["_since"]).total_seconds()
+                s["_since"] = None
+        if ev == "implemented":
+            p = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+            if p.get("model"):
+                s["model"] = short_model(str(p["model"]))
+            if p.get("fallback"):
+                s["fallback"] = True
+            try:
+                c = float(p.get("cost_usd"))
+            except (TypeError, ValueError):
+                c = None
+            if c is not None:
+                threads = s["_threads"]
+                key = str(p.get("thread") or "")
+                if not key:  # no thread recorded: the last unnamed one, or a new one where it drops
+                    unnamed = [k for k in threads if k.startswith("#")]
+                    key = unnamed[-1] if unnamed and c >= threads[unnamed[-1]] else f"#{len(unnamed)}"
+                threads[key] = c
+    for gid, s in stats.items():
+        if s["_since"] is not None:
+            end = now if gid in live else s["_last"]
+            s["secs"] += max(0.0, (end - s["_since"]).total_seconds())
+        s["cost"] = round(sum(s["_threads"].values()), 4) if s["_threads"] else None
+        s["secs"] = int(s["secs"]) or None
+        for k in ("_threads", "_since", "_last"):
+            del s[k]
+    return stats
+
+
+def walk_graph(start: Path) -> dict:
+    """The walk pane's model: every goal of the GOALS.md at or above `start`,
+    laid out as git-graph rows, with its state and stats, and what runs now."""
+    root = find_goals_root(start.resolve())
+    if root is None:
+        return {"found": False, "dir": str(start)}
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import goals  # noqa: PLC0415 - the DAG reader beside this file
+
+    try:
+        _, data, _, _ = goals.load(root / "GOALS.md")
+    except SystemExit as exc:  # a GOALS.md mid-write: the pane keeps its last graph
+        raise ValueError(f"GOALS.md: {exc}") from exc
+    journal = data.get("journal") or ""
+    feature = slug_of(Path(journal)) if journal else root.name
+    rows = tail_rows(cache_root() / repo_id(root) / f"{feature}.jsonl", limit=20000) if journal else []
+    # The header and every goal's state from the same read: the newest live goal leads.
+    live = live_goals(rows)
+    running = next(iter(live), None)
+    stats = goal_stats(rows, live)
+    idx = goals.by_id(data)
+    out: dict[str, dict] = {}
+    for g in data.get("goals", []):
+        gid, st = g["id"], g.get("status")
+        waits = [b for b in g.get("blocked_by") or [] if b in idx and goals.unfinished(idx[b].get("status"))]
+        if st == "done":
+            state = "done"
+        elif gid in live:
+            state = "running"
+        elif st == "bounced":
+            state = "bounced"
+        elif st == "in_progress":
+            state = "paused"  # stopped mid-goal: the next walk resumes it first
+        else:
+            state = "waiting" if waits else "ready"
+        s = stats.get(gid, {})
+        out[gid] = {"title": g.get("title") or "", "state": state, "waits": waits,
+                    "round": s.get("round"), "model": s.get("model"), "fallback": bool(s.get("fallback")),
+                    "secs": s.get("secs"), "cost": s.get("cost"),
+                    "phase": live[gid]["phase"] if state == "running" else None}
+    layout = lay_out([{"id": gid, "blocked_by": g.get("blocked_by"), "state": out[gid]["state"]}
+                      for gid, g in ((g["id"], g) for g in data.get("goals", []))])
+    return {"found": True, "dir": str(root), "feature": feature,
+            "done": sum(1 for v in out.values() if v["state"] == "done"), "total": len(out),
+            "running": running, "phase": live[running]["phase"] if running else None,
+            "round": live[running]["round"] if running else None, "others": max(0, len(live) - 1),
+            "width": max((len(r["graph"]) for r in layout), default=0),
+            "rows": layout, "goals": out}
+
+
+def fmt_secs(secs: int | None) -> str:
+    if not secs:
+        return ""
+    h, rem = divmod(int(secs), 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
+
+
+def graph_text(view: dict) -> str:
+    """The pane's wide form as plain text, for a shell."""
+    if not view.get("found"):
+        return f"no GOALS.md at or above {view.get('dir')}"
+    head = f"walk · {view['feature']} · {view['done']}/{view['total']} done"
+    if view.get("running"):
+        rnd = view.get("round")
+        more = f" +{view['others']}" if view.get("others") else ""
+        head += f" · {view['running']}{f' r{rnd}' if rnd is not None else ''} · {view.get('phase')}{more}"
+    width = view["width"]
+    idw = min(18, max((len(g) for g in view["goals"]), default=0))
+    lines = [head]
+    for row in view["rows"]:
+        gid = row.get("goal")
+        if gid is None:
+            lines.append(row["graph"])
+            continue
+        g = view["goals"][gid]
+        if g["state"] in ("done", "running", "paused", "bounced"):
+            bits = [g["state"], f"r{g['round']}" if g["round"] is not None else "",
+                    g["phase"] or g["model"] or "", fmt_secs(g["secs"]),
+                    f"${g['cost']:.2f}" if g["cost"] is not None else ""]
+            detail = " ".join(b for b in bits if b)
+        elif g["state"] == "waiting":
+            detail = "waits " + ",".join(g["waits"])
+        else:
+            detail = "ready"
+        lines.append(f"{row['graph']:<{width}}  {gid:<{idw}}  {g['title'][:28]:<28}  {detail}".rstrip())
+    return "\n".join(lines)
+
+
+def cmd_graph(args: argparse.Namespace) -> int:
+    start = Path(os.path.expanduser(args.dir)) if args.dir else Path.cwd()
+    try:
+        view = walk_graph(start)
+    except (OSError, ValueError, KeyError, TypeError) as exc:  # a goal with no id, a list that is not one
+        print(f"events.py graph: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(view) if args.json else graph_text(view))
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    try:
+        status = walk_status(Path.cwd())
+    except (OSError, ValueError) as exc:
+        print(f"events.py status: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        # ASCII: the reader may run without a UTF-8 locale.
+        print(json.dumps(status))
+    else:
+        print(status.get("label") or "no goal running")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] == "--self-test":
         return cmd_self_test()
@@ -460,7 +874,18 @@ def main(argv: list[str]) -> int:
     q.add_argument("--walk", default="")
     q.add_argument("--json", action="store_true")
 
+    s = sub.add_parser("status")
+    s.add_argument("--json", action="store_true")
+
+    gr = sub.add_parser("graph")
+    gr.add_argument("--json", action="store_true")
+    gr.add_argument("--dir", default="")
+
     args = p.parse_args(argv)
+    if args.cmd == "status":
+        return cmd_status(args)
+    if args.cmd == "graph":
+        return cmd_graph(args)
     if args.cmd == "ensure-walk":
         return cmd_ensure_walk(resolve_journal(args.journal))
     if args.cmd == "end-walk":

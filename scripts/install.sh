@@ -4,7 +4,30 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${CLAUDE_SKILLS_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills}"
-BORROWED=(wayfinder prototype research caveman tdd handoff diagnosing-bugs improve-codebase-architecture)
+# Borrowed from github.com/mattpocock/skills, pinned. grilling, domain-modeling,
+# codebase-design and setup-matt-pocock-skills are not called by the house
+# directly: wayfinder and improve-codebase-architecture call them.
+BORROWED=(wayfinder prototype research tdd handoff diagnosing-bugs improve-codebase-architecture
+  grilling domain-modeling codebase-design setup-matt-pocock-skills)
+MATTPOCOCK_SKILLS_DIR="${MATTPOCOCK_SKILLS_DIR:-$HOME/mattpocock-skills}"
+MATTPOCOCK_SKILLS_PIN=49dd158d1076134a641b33efb035946536778336
+
+# Directory of borrowed skill NAME inside the clone, or nothing.
+borrowed_src() {
+  local b
+  for b in engineering productivity; do
+    if [[ -f "$MATTPOCOCK_SKILLS_DIR/skills/$b/$1/SKILL.md" ]]; then
+      printf '%s' "$MATTPOCOCK_SKILLS_DIR/skills/$b/$1"
+      return 0
+    fi
+  done
+  return 1
+}
+
+clone_hint() {
+  echo "  git clone https://github.com/mattpocock/skills $MATTPOCOCK_SKILLS_DIR"
+  echo "  git -C $MATTPOCOCK_SKILLS_DIR checkout $MATTPOCOCK_SKILLS_PIN"
+}
 
 find_claude() {
   if [[ -n "${CLAUDE_REAL_BIN:-}" && -x "${CLAUDE_REAL_BIN}" ]]; then
@@ -12,6 +35,22 @@ find_claude() {
   fi
   [[ -x "$HOME/.local/bin/claude" ]] && { printf '%s' "$HOME/.local/bin/claude"; return; }
   command -v claude 2>/dev/null || true
+}
+
+# True when the installed walk mod (a copy in the plugin cache) matches
+# mods/walk, the types the engine writes into a loaded mod aside.
+walk_copy_current() {
+  local copy
+  copy="$(python3 - <<'EOF' 2>/dev/null
+import json, os
+p = os.path.expanduser("~/.claude/plugins/installed_plugins.json")
+rows = json.load(open(p)).get("plugins", {}).get("walk@claude-coding-workflow") or []
+print(rows[0]["installPath"] if rows else "")
+EOF
+)"
+  [[ -n "$copy" && -d "$copy" ]] || return 1
+  diff -rq -x types -x .DS_Store "$ROOT/mods/walk" "$copy" >/dev/null 2>&1 &&
+    diff -q "$ROOT/mods/walk/types/index.d.ts" "$copy/types/index.d.ts" >/dev/null 2>&1
 }
 
 find_grok() {
@@ -45,9 +84,57 @@ do_install() {
     ln -sfn "$ROOT/skills/$skill" "$DEST/$skill"
     echo "installed: $DEST/$skill -> $ROOT/skills/$skill"
   done
+  if [[ -d "$MATTPOCOCK_SKILLS_DIR/skills" ]]; then
+    local s src
+    for s in "${BORROWED[@]}"; do
+      if ! src="$(borrowed_src "$s")"; then
+        echo "borrowed: $s not found in $MATTPOCOCK_SKILLS_DIR (wrong pin?)"
+        continue
+      fi
+      # A real directory is someone's own copy: leave it.
+      if [[ -e "$DEST/$s" && ! -L "$DEST/$s" ]]; then
+        echo "borrowed: $DEST/$s is a real directory, left alone"
+        continue
+      fi
+      ln -sfn "$src" "$DEST/$s"
+      echo "borrowed: $DEST/$s -> $src"
+    done
+  else
+    echo "borrowed skills not linked: no clone at $MATTPOCOCK_SKILLS_DIR. Clone and pin it:"
+    clone_hint
+  fi
+  # The walk mod (the running goal in the prompt footer, and the /walk pane),
+  # installed through a local marketplace. `plugin install` copies it into the
+  # plugin cache, so a changed mod is pushed there by `plugin update` (which
+  # needs a new version in mods/walk/.claude-plugin/plugin.json); open sessions
+  # pick it up after a restart.
+  local claude_bin
+  claude_bin="$(find_claude)"
+  if [[ -n "$claude_bin" ]]; then
+    if ! "$claude_bin" plugin marketplace list 2>/dev/null | grep -q 'claude-coding-workflow'; then
+      "$claude_bin" plugin marketplace add "$ROOT" >/dev/null 2>&1 &&
+        echo "marketplace: claude-coding-workflow -> $ROOT" ||
+        echo "marketplace: could not add $ROOT (run: claude plugin marketplace add $ROOT)"
+    fi
+    if ! "$claude_bin" plugin list 2>/dev/null | grep -q 'walk@claude-coding-workflow'; then
+      "$claude_bin" plugin install walk@claude-coding-workflow >/dev/null 2>&1 &&
+        echo "mod: walk installed (restart open sessions)" ||
+        echo "mod: could not install walk (run: claude plugin install walk@claude-coding-workflow)"
+    elif ! walk_copy_current; then
+      "$claude_bin" plugin marketplace update claude-coding-workflow >/dev/null 2>&1 || true
+      "$claude_bin" plugin update walk@claude-coding-workflow >/dev/null 2>&1 || true
+      if walk_copy_current; then
+        echo "mod: walk updated (restart open sessions)"
+      else
+        echo "mod: WARN walk's installed copy differs from mods/walk and was not updated:"
+        echo "     bump the version in mods/walk/.claude-plugin/plugin.json, re-run install.sh"
+      fi
+    fi
+  fi
   chmod +x \
     "$ROOT/scripts/grok-review.sh" \
     "$ROOT/scripts/claude-goal-review.sh" \
+    "$ROOT/scripts/claude-implement.sh" \
     "$ROOT/scripts/deepseek-code.sh" \
     "$ROOT/scripts/run-goal.sh" \
     "$ROOT/scripts/run-goals.sh" \
@@ -69,6 +156,9 @@ do_install() {
     "$ROOT/scripts/tests/walk-end-test.sh" \
     "$ROOT/scripts/tests/proof-test.sh" \
     "$ROOT/scripts/tests/review-fallback-test.sh" \
+    "$ROOT/scripts/tests/implement-test.sh" \
+    "$ROOT/scripts/tests/walk-status-test.sh" \
+    "$ROOT/scripts/lib/claude-meta.py" \
     "$ROOT/scripts/lib/flagged-refusal.py" \
     "$ROOT/scripts/lib/resume-state.py" \
     "$ROOT/scripts/lib/verdict.py" \
@@ -186,6 +276,38 @@ do_check() {
     echo "proof: FAIL"; rc=1
     "$ROOT/scripts/tests/proof-test.sh" || true
   fi
+  if "$ROOT/scripts/tests/implement-test.sh" >/dev/null 2>&1; then
+    echo "implementer: OK (Haiku sandboxed and key-free; one DeepSeek fallback on a refusal or decline, none on a rate limit)"
+  else
+    echo "implementer: FAIL"; rc=1
+    "$ROOT/scripts/tests/implement-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/walk-status-test.sh" >/dev/null 2>&1; then
+    echo "walk status: OK (the running goal from the event index; idle once stopped or its process is gone)"
+  else
+    echo "walk status: FAIL"; rc=1
+    "$ROOT/scripts/tests/walk-status-test.sh" || true
+  fi
+  local cbin
+  cbin="$(find_claude)"
+  if [[ -n "$cbin" ]]; then
+    if "$cbin" plugin test "$ROOT/mods/walk" >/dev/null 2>&1; then
+      echo "walk mod: OK (tests pass)"
+    else
+      echo "walk mod: FAIL"; rc=1
+      "$cbin" plugin test "$ROOT/mods/walk" || true
+    fi
+    if "$cbin" plugin list 2>/dev/null | grep -A4 'walk@claude-coding-workflow' | grep -q 'enabled'; then
+      echo "walk mod: installed and enabled"
+      if walk_copy_current; then
+        echo "walk mod: installed copy matches the repo"
+      else
+        echo "walk mod: WARN installed copy differs from mods/walk (bump its version, re-run install.sh)"
+      fi
+    else
+      echo "walk mod: not installed (re-run install.sh)"
+    fi
+  fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \
       | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d)==3'; then
@@ -295,18 +417,29 @@ do_check() {
   local missing=()
   local s
   for s in "${BORROWED[@]}"; do
-    # Borrowed skills may live in the Claude skill dir (symlinked from
-    # ~/mattpocock-skills by that repo's installer) or in ~/.agents/skills.
-    if [[ ! -e "$DEST/$s" && ! -e "$DEST/$s/SKILL.md" \
-       && ! -e "$HOME/.agents/skills/$s" && ! -e "$HOME/.agents/skills/$s/SKILL.md" ]]; then
+    # -f follows the symlink: a dangling link counts as missing.
+    if [[ -f "$DEST/$s/SKILL.md" ]]; then
+      echo "borrowed $s: present"
+    else
+      echo "borrowed $s: MISSING"
       missing+=("$s")
     fi
   done
   if ((${#missing[@]})); then
-    echo "borrowed skills missing from $DEST and ~/.agents/skills: ${missing[*]}"
+    echo "borrowed skills missing from $DEST: ${missing[*]} (re-run install.sh)"
     echo "  (house still works; /crucible research/prototype/tdd/wayfinder will not)"
+  fi
+  local head
+  if head="$(git -C "$MATTPOCOCK_SKILLS_DIR" rev-parse HEAD 2>/dev/null)"; then
+    if [[ "$head" == "$MATTPOCOCK_SKILLS_PIN" ]]; then
+      echo "mattpocock-skills pin: OK ($MATTPOCOCK_SKILLS_PIN)"
+    else
+      echo "mattpocock-skills pin: DRIFT (HEAD $head, pin $MATTPOCOCK_SKILLS_PIN)"
+      echo "  git -C $MATTPOCOCK_SKILLS_DIR checkout $MATTPOCOCK_SKILLS_PIN"
+    fi
   else
-    echo "borrowed skills: present"
+    echo "mattpocock-skills pin: no clone at $MATTPOCOCK_SKILLS_DIR"
+    clone_hint
   fi
   return "$rc"
 }

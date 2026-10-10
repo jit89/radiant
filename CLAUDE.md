@@ -6,7 +6,7 @@ belong here — put those in `coding-standards.md` at the target root.
 
 This session is the **Architect**. It does not write production feature
 code for a target product. Work on *this* workflow repo itself is
-in-session (do not dispatch DeepSeek at the house).
+in-session (do not dispatch the implementer at the house).
 
 ## Roles
 
@@ -14,8 +14,8 @@ in-session (do not dispatch DeepSeek at the house).
 |------|-------|------------------|
 | **Architect** | Claude Code (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
 | **Attacker** | Grok (`grok-4.7`) | Headless, read-only. Attacks a locked plan. A different model on purpose — the Architect cannot attack its own plan. Advises; does not command. |
-| **Implementer** | DeepSeek V4 Flash (`deepseek-v4-flash`) in the Codex CLI harness | Cheap long TDD loops against one goal. Sibling process. |
-| **Goal reviewer** | Claude Opus 5 (`claude-opus-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
+| **Implementer** | Claude Haiku 5.5 (`claude-haiku-5-5`, effort `xhigh`), headless and sandboxed; DeepSeek V4 Flash (`deepseek-v4-flash`) through the same Claude Code harness when Haiku refuses or declines | Cheap long TDD loops against one goal. Sibling process. |
+| **Goal reviewer** | Claude Opus 5.5 (`claude-opus-5-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
 
 The Architect never silently switches into "just code it" mode. If the
 user asks for a quick fix, confirm whether to run the full workflow or
@@ -29,7 +29,7 @@ do a direct edit.
 | 1 Recon + Interrogate (`crucible`) | shipped |
 | 2 Adversarial harden (Grok) | shipped |
 | 3 Decompose into a goal DAG (`to-goals`) | shipped |
-| 4 Per-goal DeepSeek implement + Opus review (`run-goal`) | shipped |
+| 4 Per-goal implement (Haiku, DeepSeek fallback) + Opus review (`run-goal`) | shipped |
 | 5 Orchestrate the DAG (`run-goals`) | shipped |
 | A Architecture health (periodic) | existing `improve-codebase-architecture` skill |
 
@@ -55,15 +55,13 @@ Run the `crucible` skill. It is the interview for this workflow — do
 not also run `grill-me` / `grill-with-docs` on the same work.
 
 `prototype` and `research` run *during* recon when a question needs
-evidence. Prototypes are disposable. Research cites primary sources.
+evidence. Prototypes are throwaway: never merged, kept at most on a
+`prototype/<name>` branch as evidence. Research cites primary sources.
 
-`CONTEXT.md` is a glossary only. An ADR is written only when a decision
-is (1) expensive to reverse, (2) puzzling without context, and (3) a
-genuine trade-off.
-
-The user may type `caveman` / `/caveman` at any point. Honor it until
-turned off; pause it for security warnings, destructive confirmations,
-and multi-step sequences where clarity matters.
+`GLOSSARY.md` is a glossary only (a legacy `CONTEXT.md` is read the
+same way and renamed with `git mv` on first edit). An ADR is written
+only when a decision is (1) expensive to reverse, (2) puzzling without
+context, and (3) a genuine trade-off.
 
 ### Phase 2 — Adversarial harden
 
@@ -129,7 +127,7 @@ From the target repo: `scripts/run-goals.sh`. Sequential. Keys on
 ### Phase A — Architecture health
 
 Periodic, off the critical path. Only on an accreted codebase with a
-real `CONTEXT.md` / `docs/adr`. `improve-codebase-architecture` reports
+real `GLOSSARY.md` / `docs/adr`. `improve-codebase-architecture` reports
 candidates; a chosen one re-enters at Phase 1.
 
 ## Dispatching the attacker
@@ -147,8 +145,10 @@ Run from the **target repo** (the directory that holds `PLAN.md`):
 Read the `GROK_REVIEW_RESULT:` line. Capture `SESSION_ID:` from round
 1 and reuse it. The critique is in the printed `VERDICT_FILE`.
 
-Foreground timeout: **10 minutes** (600000 ms) per round. The default
-agent tool timeout is too short.
+Run each round with the Bash tool's `run_in_background: true`. A first
+round on a ~240-line plan took ~20 minutes at high reasoning effort, past the
+10-minute ceiling on a foreground call; later rounds are shorter. The harness
+re-invokes this session when the round exits; do not poll it.
 
 ## Dispatching Phase 4 / 5
 
@@ -159,9 +159,22 @@ Run from the **target repo**:
 ~/claude-coding-workflow/scripts/run-goals.sh
 ```
 
-Do not drive `deepseek-code.sh` / `claude-goal-review.sh` from this
-session on the happy path. Isolated Codex home and the implementer
-key load stay inside those launchers. Never ask the user to paste a
+While a goal runs, the `walk` mod (`mods/walk/`, installed by
+`install.sh`) shows it in the prompt footer: `walk <goal> r<n> · <phase> ·
+<done>/<total>`, and `/walk` opens every goal as a live git graph.
+`scripts/events.py status` and `graph` give the same from a shell.
+
+Run both with the Bash tool's `run_in_background: true`. A goal takes
+up to ~40 minutes and a walk N times that, past the 10-minute ceiling
+on a foreground call, so a foreground run gets killed mid-goal. The
+harness re-invokes this session when the script exits; do not poll it.
+Then read the output file's tail for the exit status and `STOP_FILE:`.
+
+Do not drive `claude-implement.sh` / `claude-goal-review.sh` from this
+session on the happy path. The sandbox, the stripped environment and the
+key handling stay inside those launchers. `IMPLEMENTER=codex` selects the
+legacy DeepSeek-in-Codex launcher (`deepseek-code.sh`) until the new one
+has shipped goals. Never ask the user to paste a
 key.
 
 ## When the orchestrator wakes (quota / bounce / dirty tree)
@@ -202,7 +215,7 @@ line (no stop-file dump, no Opus findings) and a JSONL index in
 `~/.cache/claude-coding-workflow/logs/`. After a wake, query with
 `scripts/logs.sh errors` / `warnings` / `last` / `goal <id>` /
 `since 5m|walk`. Do not invent SQL. The markdown journal is still
-source of truth for resume and for DeepSeek.
+source of truth for resume and for the implementer.
 
 ## Skill quick-reference
 
@@ -212,38 +225,47 @@ source of truth for resume and for DeepSeek.
 | `to-goals` | Phase 3 — cut signed-off `PLAN.md` into `GOALS.md` |
 | `run-goal` | Phase 4 — exec `scripts/run-goal.sh`; wake on nonzero |
 | `run-goals` | Phase 5 — exec `scripts/run-goals.sh`; wake on nonzero |
-| `wayfinder` | Phase 0 — borrowed from `~/agentic-coding-workflow` / `~/.agents/skills` |
+| `wayfinder` | Phase 0 — borrowed; needs `setup-matt-pocock-skills` once per repo (local tracker under `.scratch/`) |
 | `prototype` | During recon — borrowed |
 | `research` | During recon or a bounce — borrowed |
-| `caveman` | On user request — borrowed |
 | `tdd` | Phase 4 — borrowed; also inlined in the implementer prompt |
 | `handoff` | Phase 4 — borrowed (paths only, no restated spec) |
 | `diagnosing-bugs` | Hard defect after code exists — borrowed |
 | `improve-codebase-architecture` | Phase A only — borrowed |
+| `grilling` / `domain-modeling` / `codebase-design` | Pulled in by `wayfinder` and `improve-codebase-architecture` — borrowed dependencies, not entry points |
+| `setup-matt-pocock-skills` | Once per target repo, before the first `wayfinder` — borrowed |
 | `grill-me` / `grill-with-docs` | **Not used** — `crucible` replaces them here |
 | `to-tickets` | **Not used** — `to-goals` writes in-repo `GOALS.md` |
 
-House `install.sh` only links crucible / to-goals / run-goal / run-goals
-into `~/.claude/skills`. The borrowed eight come from the Claude skill dir
-or `~/.agents/skills` (mattpocock + local). `install.sh --check` warns when
-they are absent.
+House `install.sh` links crucible / to-goals / run-goal / run-goals and
+the borrowed skills into `~/.claude/skills`. The borrowed skills come from
+a clone of [mattpocock/skills](https://github.com/mattpocock/skills) at
+`~/mattpocock-skills`, pinned to a reviewed commit in `install.sh`; not
+the self-updating plugin, because an upstream rename can silently break
+the house. `install.sh --check` warns when one is missing or the clone
+has drifted from the pin. `research` and `prototype` share names with
+Claude Code built-ins: check `/skills` lists the borrowed copy before
+leaning on the bare name.
 
 ## Hard rules
 
 - The Architect plans and arbitrates. Grok attacks the **plan**
-  (`grok-review.sh`). Opus 5 reviews **code**
-  (`claude-goal-review.sh`). DeepSeek implements. Nobody grades their
-  own work: the Architect's plan is attacked by a different model, and
-  the code Opus judges was written by DeepSeek, not by the Architect.
+  (`grok-review.sh`). Opus 5.5 reviews **code**
+  (`claude-goal-review.sh`). Haiku 5.5 implements (`claude-implement.sh`).
+  Nobody grades their own work: the Architect's plan is attacked by a
+  different model, and the code Opus judges was written by the
+  implementer in its own session, not by the Architect.
 - No production feature code without a hardened, user-signed plan.
 - After Phase 2, `PLAN.md` is the product contract and
   `PLAN-REVIEW-LOG.md` is the argument. After Phase 3, `GOALS.md` plus
   the oracles are what an implementer may run against.
-- `CONTEXT.md` = glossary only. ADRs = sparingly. `coding-standards.md`
+- `GLOSSARY.md` = glossary only. ADRs = sparingly. `coding-standards.md`
   = project-specific principles.
 - Secrets are redacted from every handoff and log.
 - Do not use Codex/ChatGPT, and never your own second opinion, as the
   **plan attacker** — that is the one role this session may not fill.
-  Codex is the implementer harness only. If the attacker or the
-  implementer cannot run, stop and tell the user. Do not switch
-  implementer on quota death.
+  If the attacker or the implementer cannot run, stop and tell the
+  user. The implementer switches model in one case only: Haiku refuses
+  or declines the goal, and the launcher reruns that pass once on
+  DeepSeek and journals it (`IMPLEMENTER_FALLBACK`). Never on a rate
+  limit, an error, or a goal that ran out of fix rounds.
