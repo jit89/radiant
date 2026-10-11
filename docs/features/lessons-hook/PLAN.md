@@ -341,3 +341,194 @@ CLAUDE.md, auto-memory, or any repo.
   `--safe-mode`; the walk's own wake reasons cover them).
 - Auto-approval of any kind.
 - Reading subagent transcripts (`<session>/subagents/`) — main transcript only.
+
+## Addendum A (2026-10-12): review as a checklist, with Recommended
+
+_Requested by the user after item 1 shipped (commit 5905460). Locked with the
+user: recommended lessons start ticked; one scope applies to every approved
+lesson. Everything above stands unless this section changes it._
+
+### Goal
+
+`/lessons` with no arguments, in a session that draws a screen, opens a
+checklist dialog of the pending lessons instead of printing text and
+expecting `approve ID` / `reject ID`. Each lesson can carry **(Recommended)**,
+set by a rule an injected lesson cannot satisfy on its own say-so.
+
+### A1. The dialog (mod)
+
+1. `/lessons` with empty arguments and at least one surface
+   (`$.session.surfaces()` non-empty) reads the pending list as JSON
+   (`lessons.py cli --args=pending --json-list`, new: id, text, scope
+   proposed, count, evidence, `recommended`, `check` reason) and opens a pane
+   with `$.ui.open({ id: 'lessons', title: 'lessons', focus, closeOnEscape,
+   holdToasts })`, a dialog in the engine's sense. The command answers
+   `{ text: 'N pending lessons: review them in the dialog.' }`. With no
+   surface (`claude -p`) or with arguments, the typed verbs work exactly as
+   today, `--typed` gate included.
+2. The pane (`ui.render` on `{ component: 'Pane', requestId: 'lessons' }`)
+   draws, per lesson, a `Button` whose label is `[x]` or `[ ]`, the id, the
+   text, and ` (Recommended)` when recommended, followed by its evidence lines
+   as dim `Text`, each error line prefixed `untrusted tool output:` as in
+   `pending` today, and, when not recommended and the check said why, one line
+   `check: <reason>`. Pressing the button toggles that lesson. All text drawn
+   goes through the same `visible()` filter (no control or format characters).
+3. Below the list: a `Select` for the scope of every approved lesson
+   (`project`, the default, or `global`), and three buttons: **Approve
+   selected**, **Reject unselected**, **Keep for later**. Approve selected
+   approves the ticked lessons at the chosen scope and leaves the rest
+   pending; Reject unselected rejects the unticked ones and leaves the ticked
+   pending (so approving and rejecting are separate, deliberate presses);
+   Keep for later and Esc close the dialog and change nothing.
+4. Initial ticks: exactly the lessons with `recommended: true`.
+5. **Who can approve.** The approve and reject calls run from the buttons'
+   `onPress`/`onSelect` handlers, which the engine runs only on the person's
+   key press or click in the plugin's own environment ("no model turn unless
+   it asks one"); the model has no way to press them. The handler passes
+   `--typed` with the exact ids drawn when the dialog opened
+   (`review --approve ID… --reject ID… --scope S`, a new verb taking explicit
+   ids). An id no longer pending when pressed is skipped and reported.
+6. After a press that approved anything, the mod re-renders the section
+   (`refresh`) and closes the dialog, showing a toast with what changed.
+7. State (the drawn list, ticks, scope) lives in a `$.state` atom declared in
+   `types/index.d.ts`, as walk does, so the pane redraws on each toggle; the
+   module's own variables are not used for it.
+
+### A2. Recommended (lessons.py)
+
+1. **Check call.** After a distil's lessons are validated and before they are
+   stored as pending, each new lesson gets one more Haiku call with **the
+   step-5 argv unchanged** (`distil_argv`: `--safe-mode --restricted
+   --strict-mcp-config --permission-mode dontAsk --no-session-persistence
+   --max-budget-usd 0.05 --model claude-haiku-5-5 --effort high
+   --output-format json --tools ""`, prompt first), stdin `/dev/null`, a fresh
+   empty cwd, the scrubbed env with `CW_LESSONS_CHILD=1`, and the same
+   envelope parser. Only the prompt differs: it holds that lesson's text and
+   its evidence (redacted, error lines labelled untrusted, `<` escaped) and
+   asks for JSON `{"verdict": "correct" | "incorrect" | "unsure",
+   "reason": "<≤120 chars>"}`, read as the first JSON object in the
+   envelope's `result` after unwrapping one fence. **Spend reserve:** under
+   the store lock, before each call (distil, clean distil or check), the call
+   is skipped when today's spend plus 0.05 USD (the per-call cap) would pass
+   `cap_usd_day`; otherwise 0.05 is **added to today's spend before the call**,
+   and when it returns, under the lock, today's spend is adjusted by
+   `total_cost_usd − 0.05` (a failure with no envelope adjusts by `−0.05`);
+   the day's spend is never assigned from one call. So one batch of checks
+   cannot launch past the cap. Tested: a call's return leaves earlier calls'
+   spend intact, and a CLI failure takes back only its own reservation.
+   Today's spend is stored with its local date (`spend: {day, usd}`) and
+   resets only when the date changes. A skipped call, a CLI failure or a
+   malformed reply gives verdict `unsure`, reason `not checked`.
+2. **Rule.** `recommended` is true only when the verdict is `correct` **and
+   every** evidence entry the lesson cites is one of:
+   - a correction (the user's own typed words, A4.1); or
+   - seen in 2 or more distinct transcripts (each queue entry gains
+     `sessions`, the distinct session ids it was seen in, at most 10).
+   There is no "shell-level error" leg: the transcript does not separate a
+   command's own output from the shell's diagnostic, so a program (or a file
+   printed by a failing `cat`) can print `zsh: …` itself. Anything else is
+   shown without the label and starts unticked. The two-transcript leg can
+   still be met by a poisoned file read in two sessions; that is acceptable
+   only because Recommended is advice and the person presses Approve (A4 is
+   the one path without a press, and it accepts corrections only).
+3. Stored on the pending lesson: `recommended`, `verdict`, `check` (the
+   reason, through `visible()`, ≤120 chars). The reason is only drawn for a
+   lesson that is not recommended; it never reaches the system prompt.
+4. The check reason is model text derived from untrusted evidence: it is
+   displayed, labelled `check:`, never executed or rendered into the section.
+5. Lessons already pending when this ships have no verdict: shown without the
+   label, unticked; `lessons.py recheck` (new, typed) runs the check on them.
+
+### A4. Auto-approve: lessons drawn only from the user's own corrections
+
+_Locked with the user (2026-10-12) after the human gate was kept for
+everything else._
+
+1. **What counts as the user's correction** for this path is stricter than
+   step 2's correction rule: a `user` row the person typed at the prompt,
+   string content, not `isMeta`, no `toolUseResult`, not a compaction
+   summary, not starting with a command, notification, teammate or channel
+   tag, holding no pasted block, ≤300 chars, after a tool call, not
+   `isSidechain`, **and** the row's `origin.kind` is `human` and its
+   `promptSource` is `typed`. Measured on this project's transcripts
+   (2026-10-12): 113 typed prompts carry exactly that pair; accepted prompt
+   suggestions (`promptSource: suggestion_accepted`, text the model wrote),
+   SDK turns (`sdk`), task notifications (`origin.kind: task-notification`,
+   `promptSource: system`) and 14 older rows with no `origin` do not. The
+   rule fails closed: any other value or a missing field gives `typed:
+   false`; such a correction can still become a pending lesson, never an
+   auto-approved one. Each correction entry stores `typed: true|false`.
+2. **A clean distil.** When the evidence queue holds eligible corrections
+   with `typed: true`, they are distilled in a **separate** call whose digest
+   holds only those entries (the person's words and the command they
+   followed), no failure entry and no tool output. Only lessons from that
+   call can be auto-approved; the mixed digest goes on as before for
+   everything else. **Order:** the clean call runs and its lessons are
+   stored (auto-approved or pending) before the mixed call; a mixed-call
+   lesson whose signature is already approved only refreshes `last_seen`,
+   and one already pending is dropped as today, so the clean lesson is the
+   one that survives.
+3. **Gates, all required:** every cited evidence entry is a `typed: true`
+   correction from that clean call; the check call (A2.1, fed only that
+   correction) says `correct`; the denylist and the hidden-character
+   refusal pass; scope is **project** whatever Haiku proposed; at most **3**
+   auto-approvals per project per local day (persisted with its date,
+   `auto_today: {day, count}`, reset only when the date changes, read and
+   incremented under the store lock); the `auto` switch is on. A lesson failing any gate goes to pending as usual
+   (and is Recommended when A2.2 says so).
+4. **Visible and undoable:** an auto-approved lesson is stored with
+   `auto: true` and the correction it came from; the next `session.start`
+   (or the running session's next refresh) shows a toast `auto-approved
+   <id> from your correction: /lessons forget <id> to undo`; `/lessons list`
+   marks it `auto`; it expires after 30 days unseen like any lesson.
+   `/lessons auto off|on` (typed, `--typed` gated) switches this path; `off`
+   (all lessons) also stops it.
+5. **Accepted risk:** the person's own words become a standing reminder
+   without a second look; a one-off or heated correction can become a
+   lesson. Bounded by the check call, project scope, 3 a day, the toast and
+   `forget`.
+
+### A3. Tests and review
+
+- lessons-test.sh: the check argv (every cage flag); the check reply parsed
+  from a fenced object; each leg of the rule (correct + every entry seen in
+  2 transcripts → recommended; correct + every entry a correction →
+  recommended; correct + a single-transcript failure, `zsh:` lines included
+  → not; incorrect → not; unsure/CLI failure/cap → not);
+  `sessions` capped at 10; `--json-list` output; `review` approves and
+  rejects only the ids given, skips ids no longer pending, requires
+  `--typed`; `recheck`.
+- register.test.tsx: `/lessons` with no args and a surface opens the dialog;
+  with args or no surface it relays text; the first draw ticks exactly the
+  recommended lessons; a toggle redraws; Approve selected sends `review
+  --approve <ticked> --scope <chosen> --typed` and refreshes; Reject
+  unselected sends only the unticked; Keep for later sends nothing; evidence
+  and `check:` lines are drawn with hidden characters replaced.
+- A4: a typed correction alone yields an auto-approved project lesson and a
+  toast; a correction row with `promptSource` `suggestion_accepted`, `sdk`
+  or `system`, a task-notification origin, no `origin`, or `isSidechain`; a
+  pasted block; or a lesson that also cites a failure
+  goes to pending; Haiku proposing `global` still auto-approves at project;
+  the 4th in a day goes to pending; `auto off` sends all to pending; the
+  clean digest holds no failure entry and no `untrusted_tool_output`.
+- A2: a lesson citing one qualifying and one non-qualifying entry is not
+  recommended; a single-transcript `zsh:` failure is not recommended; the
+  spend reserve skips a check when spend + 0.05 passes the cap.
+- Planted bugs, each shown red: the recommended rule without its second leg;
+  "any" instead of "every" cited entry; the clean digest including failures;
+  auto-approve honouring a `global` proposal; the daily auto cap removed;
+  the check skipped and `correct` assumed; ticks not from `recommended`;
+  approve sending unticked ids; the dialog's approve without `--typed`.
+- A fresh Opus review of this change only; the full suite at `-j 8`.
+
+### A. Risks / out of scope
+
+- The check is a second model reading the same untrusted evidence; an
+  injection could argue for `correct`. The second leg (every entry a
+  correction or seen in 2+ transcripts) stops a lesson resting on one tool
+  output, but a poisoned file read in two sessions can meet it: Recommended
+  is advice, and outside A4 the person still presses Approve.
+- Editing a lesson's text stays a typed verb (`/lessons edit ID TEXT`); the
+  dialog has no text field.
+- A pane needs a terminal; the engine seats a pane the person opened at any
+  width.

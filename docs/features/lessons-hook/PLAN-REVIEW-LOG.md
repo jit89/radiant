@@ -117,3 +117,80 @@ VERDICT: APPROVED
 ### Architect's response
 
 APPROVED. No changes. The two build-time checks Grok names (detach across session.end; which classic events reach a mod) are already in Risks.
+
+## Addendum A (2026-10-12)
+User-requested change after item 1 shipped: /lessons as a checklist dialog with (Recommended). Appended to PLAN.md as "Addendum A"; rounds below resume the plan session.
+
+## Round A1 — Grok
+
+The last review approved the plan. I'll read the revision and check whether anything new broke.Addendum A is the change. I'll check the dialog and the second Haiku check against the engine types.Round 5 still holds for the body of the plan. Addendum A is the new work, and two of its rules will either never mark a lesson recommended, or will pre-tick one the second leg was meant to keep unticked.
+
+1. **The check call is not the distil cage, so the verdict the rule trusts does not come back.** The check is specified as `--safe-mode --restricted --strict-mcp-config --tools "" dontAsk --no-session-persistence` plus `--effort high` and `--max-budget-usd 0.05`. `dontAsk` is a bare token, and the argv leaves out `--model claude-haiku-5-5`, `--permission-mode`, `--output-format json`, and stdin `/dev/null`. The child has already dup'd the log onto fd 0, and the parser is the distil envelope parser. A reply that is not that envelope, or a call the default model will not run inside $0.05, becomes `unsure` / `not checked`, and the recommended tick never lights. Each lesson is another call of up to $0.05 against a $0.25 day, with no reserve between calls. Fix: use the step-5 argv unchanged except `--effort high`, stdin `/dev/null` and `CW_LESSONS_CHILD=1`, and under the store lock skip the call when today's spend plus $0.05 would pass the cap.
+
+2. **`recommended` is true when any one cited entry clears the second leg, and the shell leg is just an error-line prefix.** The rule requires verdict `correct` and "at least one of" two sessions, a correction, or a shell failure. A lesson that cites a real `zsh:` line and a poisoned tool result satisfies that, and the risk note says one tool output cannot supply the leg. The shell leg is defined as the first error line matching `(eval):`, `zsh:`, `bash:`, or `sh:`. The extractor already rewrites `program` to `shell` from that prefix alone, so a program that prints `zsh: …` and exits 1 qualifies in a single session. With verdict `correct`, that lesson starts ticked. Fix: set `recommended` only when every cited evidence entry is a correction, was seen under two transcript ids, or is a Bash failure whose prefix is the shell's own diagnostic and whose program word never ran; a prefix a program printed stays program output and does not qualify.
+
+VERDICT: REVISE
+
+### Architect's response
+
+Both taken.
+
+1. **Check argv.** The check call now uses `distil_argv` unchanged (model, `--permission-mode dontAsk`, `--output-format json`, stdin `/dev/null`, `CW_LESSONS_CHILD=1`, same envelope parser); only the prompt differs. A spend reserve skips a call (distil or check) when today's spend plus the 0.05 USD per-call cap would pass `cap_usd_day`.
+2. **Every entry, no shell leg.** `recommended` needs verdict `correct` and every cited entry to be a correction or seen in 2+ transcripts. The shell leg is removed: the transcript cannot separate a program's output from the shell's diagnostic (found independently by the Architect while answering the user). The remaining two-transcript leg is forgeable by a file read twice; accepted because Recommended is advice and the person presses Approve.
+
+Also added (user request, between rounds): **A4**, auto-approve for lessons drawn only from the user's own typed corrections: a separate corrections-only distil (no tool output in its digest), the check call, project scope only, 3 a day, toast plus `forget`, `/lessons auto off`. Typed-prompt detection is measured in the build and fails closed.
+
+## Round A2 — Grok
+
+I'll re-read the revised addendum and check it against the two findings from the last review.The two earlier addendum findings are fixed in A2.1 and A2.2: the check uses the step-5 argv, stdin `/dev/null`, and `CW_LESSONS_CHILD=1`, and `recommended` requires verdict `correct` on every cited entry, with the shell leg removed. A4 adds a path that writes the system prompt with no press, and that path is not closed.
+
+1. **The test list and the risk bullet still treat a shell error as a recommending leg.** A3 still lists `correct + shell` beside the two positive legs, and the risk note still says the second leg is "sessions, correction, shell" and that one tool output cannot supply it. A2.2 and the later A2 bullet say a single-transcript `zsh:` failure is not recommended, and that two reads of a poisoned file can meet the transcript leg. A suite that follows the first list puts the shell leg back. Fix: drop `correct + shell` from the positive cases and rewrite the risk bullet to match A2.2.
+
+2. **The written shape of a "typed" prompt matches an SDK turn.** String content, not `isMeta`, no `toolUseResult`, no tag prefix, no paste, and ≤300 characters is also how an SDK row is stored (`promptSource: "sdk"`, `turnOrigin: "sdk"`, plain text such as `Reply with exactly: PONG`). A task notification is caught by its tag; an SDK prompt is not. Those rows already carry `origin.kind` and `promptSource`. Fix: set `typed: true` only when `origin.kind` is `human` and `promptSource` is `typed`; `sdk`, `system`, `task-notification`, `suggestion_accepted`, a missing origin, and `isSidechain` stay pending.
+
+3. **The clean call and the mixed call share a signature, and dedupe does not say which one survives.** A4.2 puts the same correction in both digests and keeps one lesson. The store rule drops a new lesson whose signature is already pending, and refreshes `last_seen` when it is already approved. If the mixed call is stored first, the clean lesson is the one dropped and the auto-approval never happens. Fix: apply the clean call first; a later mixed lesson with that signature only refreshes the approved lesson.
+
+4. **Neither daily counter has a date, and the reserve is not taken out of the balance.** `auto_today` and today's spend are persisted numbers. A process that starts a new session can reset `auto_today` and auto-approve three more lessons the same day, or the counter can stick at 3 forever. The spend check skips a call when spend plus 0.05 would pass the cap, without adding 0.05 before the next check in the same batch, so one distil of several lessons can launch every check. Fix: store the local date beside both counters and reset only when it changes; under the lock, add 0.05 to today's spend before each distil or check and reconcile to `total_cost_usd` when the call returns.
+
+VERDICT: REVISE
+
+### Architect's response
+
+All 4 taken.
+
+1. **Stale shell leg.** A3's positive cases and the risk bullet rewritten to match A2.2 (no shell leg; the two-transcript leg's forgeability stated).
+2. **Typed prompts.** Verified on this project's transcripts before taking it: 113 typed prompts carry `origin.kind: human` + `promptSource: typed`; `suggestion_accepted` (13), `sdk` (10), task notifications and 14 origin-less rows do not. `typed: true` now requires exactly that pair (and not `isSidechain`); anything else fails closed.
+3. **Clean call first.** The corrections-only call runs and stores before the mixed call; a later mixed lesson with that signature only refreshes or is dropped.
+4. **Dated counters, reserve deducted.** `spend` and `auto_today` carry their local date and reset only when it changes; 0.05 USD is added to spend before each call and reconciled to `total_cost_usd` after, under the store lock.
+
+## Round A3 — Grok (void)
+
+Round A3 reviewed an unchanged PLAN.md: the Architect's round-A2 edit script stopped at an assert, and the log, journal and round ran anyway. Grok correctly reported the four A2 findings as still open. The edits are now applied with the Edit tool and verified by grep; round A4 reviews them.
+
+## Round A4 — Grok
+
+I'll re-read the addendum and check whether the four open findings are actually in the file this time.The four findings are now in the spec. The shell leg is gone from the positive tests and the risk bullet. `typed: true` requires `origin.kind` `human` and `promptSource` `typed`, and the other origins fail closed. The clean call is stored before the mixed call. `spend` and `auto_today` each carry a local date and reset only when it changes, and 0.05 is added before the call.
+
+One wording in that reserve still zeroes the cap.
+
+**The return path can assign the whole day's spend from a single call.** The new sentence adds 0.05 before the call and, when it returns, says that reservation is "replaced by" `total_cost_usd`, which is 0 when a CLI failure has no envelope. The safe reading swaps the 0.05 for the actual cost and leaves earlier calls alone. The other reading, `spend = total_cost_usd` (or `spend = 0` on a timeout), drops the rest of the day's total. The next check then sees a balance under the cap and launches again. The new test only covers the skip when `spend + 0.05` would pass, so a wiped balance still goes green. Fix: on return, under the lock, add `total_cost_usd − 0.05` to today's spend (a failure with no envelope adds `−0.05`); do not assign the day's spend from that one call.
+
+VERDICT: REVISE
+
+### Architect's response
+
+Taken. The return path now adjusts today's spend by `total_cost_usd − 0.05` (a failure with no envelope by `−0.05`), never assigns it; a test pins that earlier calls' spend survives a return and a CLI failure takes back only its own reservation. Verified in PLAN.md by grep before the next round.
+
+## Round A5 — Grok
+
+I'll re-read the revised plan and check the spend-reconcile wording against the last finding.The spend-reconcile finding is fixed in the file. Before each distil, clean distil, or check, the plan adds 0.05 to today's spend under the store lock, and on return it adjusts that balance by `total_cost_usd − 0.05` (by `−0.05` when a failure has no envelope). The same paragraph says the day's spend is never assigned from one call, and it requires a test that an earlier call's spend survives both a normal return and a CLI failure.
+
+The earlier Addendum A rules are still in the file: the check uses the distil argv, Recommended needs `correct` and every cited entry (typed correction or two transcripts, no shell leg), `typed: true` is only `origin.kind` `human` plus `promptSource` `typed`, the clean distil is stored before the mixed one, and `spend` and `auto_today` each carry a local date.
+
+No new material flaw.
+
+VERDICT: APPROVED
+
+### Architect's response
+
+APPROVED. No changes.

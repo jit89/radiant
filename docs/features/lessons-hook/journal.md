@@ -66,3 +66,24 @@ Opus round 2, scoped to the round-1 fix code: VERDICT FIX, 1 FIX + 9 NOTE, all t
 
 ## 2026-10-11T21:57:07Z — ARCHITECT END
 Item 1 done: committed and installed on the user OK. Full suite 21/21 at -j8 (152 s), events self-test, install.sh --check exit 0 (181 s); 26 planted bugs red; Opus rounds 1 (8 FIX, 1 rejected with a test) and 2 (targeted, 1 FIX + 9 NOTE, all taken). Next: the red-black tree dogfood (C).
+
+## 2026-10-11T22:22:37Z — ARCHITECT addendum A
+User asked for /lessons as a checklist with (Recommended), instead of approve/reject by id. Locked with the user: recommended lessons start ticked; one scope for every approved lesson. Asked why a mod and not the terminal: a mod dialog is drawn in the same terminal; the alternative, the Architect's own question tool, would route the approval through the model, which an injection could steer and the engine cannot attest; the mod's buttons run only on the person's key press. Addendum A appended to PLAN.md (dialog, recommended rule: Haiku check verdict correct AND evidence from 2+ sessions, a correction, or a shell-level error). Next: Grok round on the addendum (resume the plan session).
+
+## 2026-10-11T22:28:28Z — ARCHITECT addendum A r1
+Grok REVISE: 2 findings (check argv not the distil cage, no spend reserve; recommended rule "any" not "every" and the shell leg forgeable). Both taken; shell leg removed. A4 added on the user request: auto-approve lessons drawn only from the user's typed corrections (separate clean distil, check, project scope, 3/day, toast + forget, auto off). Round A2 next.
+
+## 2026-10-11T22:32:18Z — ARCHITECT addendum A r2
+Grok REVISE: 4 findings (stale shell leg in tests/risks; typed-prompt detection must use origin.kind human + promptSource typed; clean call must store first; daily counters undated and reserve not deducted). All taken; #2 verified first on this project's transcripts (113 typed; suggestion_accepted 13, sdk 10, task notifications, 14 origin-less rows excluded). Round A3 next.
+
+## 2026-10-11T22:33:48Z — ARCHITECT addendum A r3 void
+Round A3 void: the round-A2 edits had not reached PLAN.md (a multi-replace script stopped at a failed assert; the log, journal and Grok round ran after it unconditionally). Reapplied with Edit, verified by grep (promptSource 3, correct + shell 0, dated auto_today, **Order:**). Round A4 next.
+
+## 2026-10-11T22:36:19Z — ARCHITECT addendum A r4
+Grok REVISE: 1 finding (reserve return wording could assign the day's spend from one call). Taken: adjust by total_cost_usd - 0.05, tested. Grok confirmed the four A2 fixes are in. Round A5 next.
+
+## 2026-10-11T22:43:40Z — ARCHITECT addendum A r5
+Grok APPROVED Addendum A (rounds A1-A5; A3 void). 8 findings taken, none rejected. Awaiting user sign-off.
+
+## 2026-10-11T22:44:36Z — ARCHITECT addendum A signoff
+User signed off Addendum A (Grok APPROVED rA5). Next: commit addendum + log, then build in-session.
