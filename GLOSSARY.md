@@ -17,7 +17,7 @@ The Orchestrator's independent check after the implementer exits: git state, pro
 Not: "the implementer's test log", "return handoff"
 
 **Attacker**
-Headless Grok. Read-only critic of a locked plan, and a different model from the Architect on purpose. Advises; does not command.
+Headless Grok. Read-only critic of a locked plan (Phase 2) and of the Architect's acceptance oracles (Phase 3, the oracle review), and a different model from the Architect on purpose. Never reviews implementer diffs. Advises; does not command.
 Not: "reviewer" (that word is reserved for the goal reviewer)
 
 **Implementer**
@@ -25,7 +25,7 @@ Claude Haiku 5.5 in headless, sandboxed Claude Code (`claude-implement.sh`). Exe
 
 **Goal reviewer**
 Headless Claude Opus 5.5 judging an implementer diff until the goal is done. A separate session with no access to the Architect's conversation; it needs `--add-dir` for the run dir or it cannot read the diff and proof it is judging.
-Not: "Attacker" (that role only attacks PLAN.md)
+Not: "Attacker" (that role attacks the plan and the oracles, never an implementer diff)
 
 **Goal**
 One shippable vertical slice of a hardened plan. Identity is `g<n>-<slug>`.
@@ -50,6 +50,18 @@ The single batch of things recon resolved without asking. Confirmed or corrected
 
 **Decision map**
 The visible tree of still-open choices, split into load-bearing and cosmetic.
+
+**Oracle review**
+The Phase 3 attack on the Architect's acceptance oracles: `grok-review.sh --oracle`, a fresh Grok session seeded with the plan and its review log, over this DAG's oracle files only. Capped at 3 counted rounds; gates the commit of GOALS.md and the oracles. A finding that is a plan defect starts `PLAN:` and bounces to the crucible.
+Not: "goal review" (Opus, on implementer diffs), "plan attack" (Phase 2)
+
+**Trap stub**
+A stand-in for API the plan adds (in the scratchpad, or in the worktree for one run only), every body a trap with a unique message (`abort()` after a flushed print, `raise NotImplementedError("<feature>-trap")`, `panic!`), so an oracle builds and its `proof` fails for the right reason. Never committed, never shown to Grok or the implementer.
+Not: a mock or a fake (those return values; a trap only proves the call is reached)
+
+**Satisfiability tier**
+How an oracle is shown passable before commit, cheapest first: Tier 1 runs the goal's `proof` against trap stubs and must fail for the right reason; Tier 2 checks computed expected values against a reference or a brute-force model; Tier 3, a full scratch implementation, is a last resort, announced and boxed.
+Not: "scratch run" (that is Tier 3 alone)
 
 **Finding**
 One defect the goal reviewer wants fixed, emitted as a `FIX: <path>:<line> — <defect> — <what to change>` line. The path it opens with is the file the implementer must change; naming the oracle there bounces the goal.

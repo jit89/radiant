@@ -17,7 +17,7 @@ review uses a reviewer prompt, not the plan-attacker prompt.
 | Role | Who | Status |
 |------|-----|--------|
 | Architect | Claude Code (main session) | shipped |
-| Attacker | Grok `grok-4.7`, headless, read-only, plan only | shipped |
+| Attacker | Grok `grok-4.7`, headless, read-only, plans and oracles (never implementer diffs) | shipped |
 | Implementer | Claude Haiku 5.5 (`xhigh`), headless and sandboxed; DeepSeek V4 Flash on a refusal, same harness | shipped |
 | Goal reviewer | Claude Opus 5.5, headless, reviewer prompt | shipped |
 
@@ -35,7 +35,10 @@ runs in another that never sees the Architect's conversation.
 - `skills/run-goals/` — walk the DAG, one `run-goal` at a time.
 - `scripts/goals.py` — read/update the `GOALS.md` YAML fence.
 - `scripts/logs.sh` / `scripts/events.py` — machine event index (JSONL in cache).
-- `scripts/grok-review.sh` — plan attacker. Resume with `--resume`.
+- `scripts/grok-review.sh` — plan attacker (resume with `--resume`), and with
+  `--oracle` the Phase 3 oracle review: a fresh session over this DAG's
+  oracles (`scripts/lib/oracle-files.py` lists them). A turn that does not end
+  normally is reported as an error, never as a review.
 - `scripts/claude-goal-review.sh` — code reviewer. Different prompt.
 - `scripts/claude-implement.sh` — implementer: Haiku 5.5, DeepSeek fallback, sandboxed.
 - `scripts/deepseek-code.sh` — legacy implementer in Codex (`IMPLEMENTER=codex`).

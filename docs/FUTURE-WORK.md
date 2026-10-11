@@ -12,20 +12,43 @@ directly: every item's diff goes to a different model.
 
 Per item: **design** (a crucible with Grok's attack for the substantive items,
 a direct edit for one-liners) → **build** in-session with tests in
-`scripts/tests/` → **review** the diff with Opus (`/code-review` or an Opus
-pass), each finding taken or rejected with a logged reason → **commit** per
-item, when the user is ready to commit.
+`scripts/tests/` → **review** the diff with Opus, each finding taken or
+rejected with a logged reason → **commit** per item, when the user is ready.
+
+How the crucibles and reviews ran for item 5 (repeat for the next items):
+- Plan files in `docs/features/<slug>/` (`PLAN.md`, `PLAN-REVIEW-LOG.md`,
+  `journal.md`), never the repo root (it holds an older feature's PLAN.md).
+  After sign-off, commit the plan and log on their own first.
+- Grok rounds: `scripts/grok-review.sh docs/features/<slug>/PLAN.md`, then
+  `--resume <SESSION_ID>`, always `run_in_background: true` (a first round
+  takes ~20 min). A cancelled turn is now an `error`; log it void and rerun.
+- Opus review of the diff: a fresh, read-only headless session given only the
+  plan and the diff (`git diff HEAD` plus `git diff --no-index /dev/null <f>`
+  for each untracked file), e.g.
+  `claude -p --model claude-opus-5-5 --effort high --permission-mode plan
+  --tools Read,Grep,Glob --add-dir <dir holding the diff> --output-format text
+  "<brief>"`, the brief asking for `FIX: <path>:<line> — <defect> — <change>`
+  lines and a final `VERDICT: DONE|FIX`. Round 2 is another fresh session
+  seeded with round 1's review and the journaled response. Item 5 took two
+  rounds (11, then 2 findings); a third was judged not worth it.
+- After review: plant two or three bugs the new tests guard against and
+  confirm each turns them red; then run every `scripts/tests/*-test.sh`, the
+  events self-test and `scripts/install.sh --check`.
 
 Order (revised after the uregex walk, 2026-10-11):
 1. ~~Item 7.1 (Grok rounds in the background) and item 2.2's one line~~ —
    done: `CLAUDE.md`, `skills/crucible/SKILL.md`, `skills/run-goal{,s}/SKILL.md`.
-2. Item 5 / step 4: oracle review + tiered satisfiability (crucible). Evidence:
-   the g3 FIX round was an oracle gap (a dash after a completed range).
-3. Item 4: temp-file hygiene (crucible, one round).
-4. Item 6 / step 5: the parallel walker (crucible); the one change big
+2. ~~Item 5 / step 4: oracle review + tiered satisfiability~~ — done and
+   committed (crucible, two Opus review rounds, tests green).
+3. **Item 4: temp-file hygiene (crucible, one round) — NEXT.** The uregex walk
+   is over, so clearing today's `$TMPDIR` leftovers is safe once no walk or
+   review is live.
+4. Item 1: the lessons hook (crucible).
+5. Item 3: implementer-prompt audit against the uregex evidence.
+   (User, 2026-10-11: the lessons hook and the prompt audit come before the
+   parallel walker.)
+6. Item 6 / step 5: the parallel walker (crucible); the one change big
    enough that a bootstrap might be reconsidered.
-5. Item 1: the lessons hook (crucible).
-6. Item 3: implementer-prompt audit against the uregex evidence.
 7. Step 3: proof-red becomes a fix round — moved last: the uregex walk had
    zero proof-red wakes (Haiku runs the proof itself before reporting DONE),
    so there is no evidence it is needed yet.
@@ -176,6 +199,13 @@ which call the real scripts and let them write to the real `$TMPDIR`. The
 
 ## 5. Oracle review, then tiered satisfiability instead of a full scratch implementation (2026-10-11)
 
+**Done (2026-10-11):** crucible at `docs/features/oracle-review/` (Grok APPROVED in
+round 5, 29 findings taken; always-fresh sessions), implemented in-session:
+`grok-review.sh --oracle`, `scripts/lib/oracle-files.py`, `skills/to-goals/` §4-5
+and `GOAL-FORMAT.md` tiers, CLAUDE.md, GLOSSARY.md, README; tests in
+`scripts/tests/grok-review-test.sh`. The design below is the input it started
+from; the signed plan supersedes it. Mutation checks moved to item 8.
+
 Raised by the user during uregex Phase 3: the "prove the oracle satisfiable"
 rule made the Architect (the most expensive model) write a ~550-line scratch
 Pike VM, effectively the whole product, which the Haiku implementer then
@@ -285,3 +315,21 @@ index or the walk pane and footer will not see them.
    stop detail no longer starts with a blank entry. Covered by
    `result-parse-test` (hermetic: the run carries its own global git ignore).
    Recorded here so the change is reviewed with the rest when committed.
+3. **A cancelled Grok turn was reported as a review — fixed in-run.** On the
+   oracle-review crucible, round 1 called `run_terminal_command` (outside the
+   read-only set); the refusal ended the turn `stopReason: cancelled` with a
+   255-byte preamble, and `grok-review.sh` printed `GROK_REVIEW_RESULT: ok`.
+   Now any stop but `end_turn` is `error (turn stopped: <reason>)`, both
+   prompts name the only tools, and `scripts/tests/grok-review-test.sh`
+   (fake `grok` recording its real argv) covers it, wired into
+   `install.sh --check`.
+
+## 8. Mutation checks on the implementer's code (2026-10-11)
+
+Deferred from item 5 (they need `run-goal.sh`, which that slice did not touch).
+After a goal's proof is green, plant a few bugs in the implementer's real code,
+aimed at the plan's riskiest rules, and require the goal's oracle to turn red
+on each; a surviving mutation is an oracle gap. On uregex, six planted bugs
+were each caught, but that needed a scratch implementation to plant them in;
+on the real code it needs none. Open: who writes the mutations (host script
+vs reviewer), how many, and whether a survivor wakes or only journals.

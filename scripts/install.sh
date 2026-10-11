@@ -158,7 +158,9 @@ do_install() {
     "$ROOT/scripts/tests/review-fallback-test.sh" \
     "$ROOT/scripts/tests/implement-test.sh" \
     "$ROOT/scripts/tests/walk-status-test.sh" \
+    "$ROOT/scripts/tests/grok-review-test.sh" \
     "$ROOT/scripts/lib/claude-meta.py" \
+    "$ROOT/scripts/lib/oracle-files.py" \
     "$ROOT/scripts/lib/flagged-refusal.py" \
     "$ROOT/scripts/lib/resume-state.py" \
     "$ROOT/scripts/lib/verdict.py" \
@@ -281,6 +283,12 @@ do_check() {
   else
     echo "implementer: FAIL"; rc=1
     "$ROOT/scripts/tests/implement-test.sh" || true
+  fi
+  if "$ROOT/scripts/tests/grok-review-test.sh" >/dev/null 2>&1; then
+    echo "grok review: OK (a turn that did not end normally is an error, never a review)"
+  else
+    echo "grok review: FAIL"; rc=1
+    "$ROOT/scripts/tests/grok-review-test.sh" || true
   fi
   if "$ROOT/scripts/tests/walk-status-test.sh" >/dev/null 2>&1; then
     echo "walk status: OK (the running goal from the event index; idle once stopped or its process is gone)"

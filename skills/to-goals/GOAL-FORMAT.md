@@ -94,14 +94,40 @@ The Architect authors the oracle. The implementer makes it pass and does not edi
 
 Each case is an example: concrete input → concrete output, plus the edges the plan named. Assertions are exact values, not "does not throw".
 
-### Prove the oracle is satisfiable before committing it
+### Prove the oracle is satisfiable before committing it — the tiers
 
 Red is not enough: a case can be red because the feature is missing, or because the case is
-wrong. Before committing, apply a **scratch implementation**, watch the oracle go green, then
-revert it. Journal what the scratch was. This applies to the goal's **new** oracle, not only
-to swept edits — that is where these are usually found:
+wrong. Before committing, prove each oracle with the cheapest evidence that suffices
+(`skills/to-goals/SKILL.md` §4 has the order and the gate), then let Grok review it:
 
-- **An invented symbol.** A seam that does not exist. Grep every name the oracle imports.
+- **Tier 1 — every file oracle and swept edit: run the goal's `proof`.** The API the plan
+  adds is stubbed, every body a trap with a unique message; existing API is the real code.
+  Pass bar: a nonzero exit, and either the trap message in the output (stubbed — the test
+  source must show this goal's assertion after the call) or this goal's new assertion in the
+  failure (existing code). A zero exit, a build or collection error, or any other failure
+  fails Tier 1. A swept file the `proof` skips runs through the same runner, filtered to
+  this goal's case.
+- **Tier 2 — computed expectations:** any expected value the plan does not state verbatim
+  is checked against an existing reference with the same semantics, or a small brute-force
+  model of the spec, in the scratchpad.
+- **Tier 3 — last resort:** a full scratch implementation, only when neither exists; tell
+  the user first, 30-minute box by default, never committed or shown to the implementer.
+
+Where the trap and the failure show up, by language:
+
+| Language | Stub trap | Pass bar in the `proof` output |
+|---|---|---|
+| C / C++ | print the message, `fflush(stdout)`, `fflush(stderr)`, `abort()` (CTest captures through a pipe; an unflushed message is lost) | the message, and CTest's abort/exception line for that test |
+| Python | `raise NotImplementedError("<feature>-trap")` | a traceback ending in that message, or the goal's `AssertionError` |
+| TypeScript | `throw new Error("<feature>-trap")` | the message in the runner's failure for that test |
+| Rust / Go | `panic!("<feature>-trap")` / `panic("<feature>-trap")` | the panic message for that test |
+
+Another language: the analogous trap and run; never a compile-only or collect-only step.
+
+The failure classes these catch, and that the self-review and the oracle review look for:
+
+- **An invented symbol.** A seam that does not exist. Grep every name the oracle imports;
+  Tier 1's build catches it.
 - **A pin on a private signature.** Calling a helper with today's arguments freezes a shape
   the implementer must change to do the work. Pin what reaches the wire or the store.
 - **A tautology.** Both sides of `==` derived from the same helper restates a definition —
@@ -110,13 +136,18 @@ to swept edits — that is where these are usually found:
 - **A differential that cancels its own term.** If the quantity under test is present in
   both arms, the case cannot fail for its own reason.
 - **A maths claim asserted rather than run.** `rot13` and `reverse` commute, so an "order
-  matters" case on that pair can never fail.
+  matters" case on that pair can never fail. Tier 2's brute force runs it.
 - **A claim nowhere pinned.** Where the plan says "the shipped X is Y", something under
   `tests/acceptance/` must read X.
+- **A test that passes against the stub.** A zero exit under Tier 1 means the oracle cannot
+  fail; one that expects the stub's own exception is the usual cause.
 
-Evidence: in one Week 6 goal the scratch run caught two of these in a single new oracle —
-an invented seam, and a differential that cancelled the term it measured — both after the
-oracle had been read twice.
+Evidence: in one Week 6 goal a scratch run caught two of these in a single new oracle — an
+invented seam, and a differential that cancelled the term it measured — both after the
+oracle had been read twice. On uregex a ~550-line scratch caught only two harness defects
+(a header failing `-Werror`; CTest `WILL_FAIL` not covering a signal abort), both of which a
+Tier 1 run of the `proof` catches; the walk's one FIX round was an oracle gap, which the
+oracle review targets.
 
 ### The whole directory is the Architect's
 

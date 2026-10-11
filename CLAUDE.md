@@ -13,7 +13,7 @@ in-session (do not dispatch the implementer at the house).
 | Role | Model | Responsibilities |
 |------|-------|------------------|
 | **Architect** | Claude Code (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
-| **Attacker** | Grok (`grok-4.7`) | Headless, read-only. Attacks a locked plan. A different model on purpose — the Architect cannot attack its own plan. Advises; does not command. |
+| **Attacker** | Grok (`grok-4.7`) | Headless, read-only. Attacks a locked plan (Phase 2) and the Architect's acceptance oracles (Phase 3). A different model on purpose — the Architect cannot attack its own plan or oracles. Never reviews implementer diffs. Advises; does not command. |
 | **Implementer** | Claude Haiku 5.5 (`claude-haiku-5-5`, effort `xhigh`), headless and sandboxed; DeepSeek V4 Flash (`deepseek-v4-flash`) through the same Claude Code harness when Haiku refuses or declines | Cheap long TDD loops against one goal. Sibling process. |
 | **Goal reviewer** | Claude Opus 5.5 (`claude-opus-5-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
 
@@ -109,15 +109,22 @@ implementations have. These are the shapes they break in:
 - **A maths claim asserted, not run.** `rot13` and `reverse` commute, so an
   "order matters" case on that pair can never fail. Brute-force it.
 
-**Prove satisfiability before committing.** Apply a scratch implementation,
-watch the oracle go green, then revert it. That step — not review — is what
-catches the classes above, and it is cheap.
+**Prove satisfiability, then have the oracles attacked, before committing.**
+Cheapest evidence first (`skills/to-goals/SKILL.md` §4 is the procedure):
+Tier 1 runs each goal's `proof` against trap stubs of the new API and must
+fail for the right reason; Tier 2 checks computed expected values against a
+reference or a brute-force model; Tier 3, a full scratch implementation, is a
+last resort, announced and boxed. Then a self-review with that evidence, and
+the **oracle review**: `grok-review.sh --oracle` in a fresh session, capped at
+3 rounds, gating the commit. On uregex a ~550-line scratch caught only two
+harness defects that a Tier 1 run catches; the walk's one FIX round was an
+oracle gap, which the review targets.
 
 ### Phase 4 — Implement + review
 
 From the target repo: `scripts/run-goal.sh <id>`. The **script** is
-the hop (assess, proof, Opus, FIX loop). Grok only runs it and, on
-a nonzero exit, reads `STOP_FILE:`. Do not restate the hop here.
+the hop (assess, proof, Opus, FIX loop). The Architect only runs it and,
+on a nonzero exit, reads `STOP_FILE:`. Do not restate the hop here.
 
 ### Phase 5 — Orchestrate
 
@@ -144,6 +151,18 @@ Run from the **target repo** (the directory that holds `PLAN.md`):
 
 Read the `GROK_REVIEW_RESULT:` line. Capture `SESSION_ID:` from round
 1 and reuse it. The critique is in the printed `VERDICT_FILE`.
+
+The Phase 3 oracle review is the same launcher with `--oracle`, from the
+target repo with `GOALS.md` drafted (`skills/to-goals/SKILL.md` §4):
+
+```bash
+~/claude-coding-workflow/scripts/grok-review.sh --oracle <path/to/PLAN.md>
+~/claude-coding-workflow/scripts/grok-review.sh --oracle --resume "$ORACLE_SESSION_ID" <path/to/PLAN.md>
+```
+
+Round 1 is always a fresh session; never pass it the plan-attack
+`SESSION_ID`. After a `PLAN:` bounce and a re-signed plan, start a new
+oracle session rather than resuming the old one.
 
 Run each round with the Bash tool's `run_in_background: true`. A first
 round on a ~240-line plan took ~20 minutes at high reasoning effort, past the
@@ -222,7 +241,7 @@ source of truth for resume and for the implementer.
 | Skill | When |
 |-------|------|
 | `crucible` | Phases 1–2 — recon, interrogate, harden (Grok attacks) |
-| `to-goals` | Phase 3 — cut signed-off `PLAN.md` into `GOALS.md` |
+| `to-goals` | Phase 3 — cut signed-off `PLAN.md` into `GOALS.md`; prove the oracles by tier (Tier 1 runs each `proof` against trap stubs); Grok oracle review (`grok-review.sh --oracle`) gates the commit |
 | `run-goal` | Phase 4 — exec `scripts/run-goal.sh`; wake on nonzero |
 | `run-goals` | Phase 5 — exec `scripts/run-goals.sh`; wake on nonzero |
 | `wayfinder` | Phase 0 — borrowed; needs `setup-matt-pocock-skills` once per repo (local tracker under `.scratch/`) |
@@ -249,8 +268,8 @@ leaning on the bare name.
 
 ## Hard rules
 
-- The Architect plans and arbitrates. Grok attacks the **plan**
-  (`grok-review.sh`). Opus 5.5 reviews **code**
+- The Architect plans and arbitrates. Grok attacks the **plan** and the
+  **oracles** (`grok-review.sh`, `--oracle`). Opus 5.5 reviews **code**
   (`claude-goal-review.sh`). Haiku 5.5 implements (`claude-implement.sh`).
   Nobody grades their own work: the Architect's plan is attacked by a
   different model, and the code Opus judges was written by the
