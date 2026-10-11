@@ -37,20 +37,26 @@ find_claude() {
   command -v claude 2>/dev/null || true
 }
 
-# True when the installed walk mod (a copy in the plugin cache) matches
-# mods/walk, the types the engine writes into a loaded mod aside.
-walk_copy_current() {
-  local copy
-  copy="$(python3 - <<'EOF' 2>/dev/null
-import json, os
+# The house's mods, each installed from the local marketplace
+# (.claude-plugin/marketplace.json) as <name>@claude-coding-workflow.
+MODS=(walk lessons)
+
+# mod_copy_current NAME — true when the installed mod (a copy in the plugin
+# cache) matches mods/NAME, the types the engine writes into a loaded mod aside
+# (a mod's own types/index.d.ts contract, where it has one, is compared).
+mod_copy_current() {
+  local name="$1" copy
+  copy="$(python3 - "$name" <<'EOF' 2>/dev/null
+import json, os, sys
 p = os.path.expanduser("~/.claude/plugins/installed_plugins.json")
-rows = json.load(open(p)).get("plugins", {}).get("walk@claude-coding-workflow") or []
+rows = json.load(open(p)).get("plugins", {}).get(sys.argv[1] + "@claude-coding-workflow") or []
 print(rows[0]["installPath"] if rows else "")
 EOF
 )"
   [[ -n "$copy" && -d "$copy" ]] || return 1
-  diff -rq -x types -x .DS_Store "$ROOT/mods/walk" "$copy" >/dev/null 2>&1 &&
-    diff -q "$ROOT/mods/walk/types/index.d.ts" "$copy/types/index.d.ts" >/dev/null 2>&1
+  diff -rq -x types -x .DS_Store "$ROOT/mods/$name" "$copy" >/dev/null 2>&1 || return 1
+  [[ ! -f "$ROOT/mods/$name/types/index.d.ts" ]] ||
+    diff -q "$ROOT/mods/$name/types/index.d.ts" "$copy/types/index.d.ts" >/dev/null 2>&1
 }
 
 find_grok() {
@@ -103,11 +109,12 @@ do_install() {
     echo "borrowed skills not linked: no clone at $MATTPOCOCK_SKILLS_DIR. Clone and pin it:"
     clone_hint
   fi
-  # The walk mod (the running goal in the prompt footer, and the /walk pane),
-  # installed through a local marketplace. `plugin install` copies it into the
-  # plugin cache, so a changed mod is pushed there by `plugin update` (which
-  # needs a new version in mods/walk/.claude-plugin/plugin.json); open sessions
-  # pick it up after a restart.
+  # The mods: walk (the running goal in the prompt footer, and the /walk pane)
+  # and lessons (approved reminders from repeated failures, and /lessons),
+  # installed through a local marketplace. `plugin install` copies a mod into
+  # the plugin cache, so a changed mod is pushed there by `plugin update`
+  # (which needs a new version in mods/<name>/.claude-plugin/plugin.json); open
+  # sessions pick it up after a restart.
   local claude_bin
   claude_bin="$(find_claude)"
   if [[ -n "$claude_bin" ]]; then
@@ -116,20 +123,24 @@ do_install() {
         echo "marketplace: claude-coding-workflow -> $ROOT" ||
         echo "marketplace: could not add $ROOT (run: claude plugin marketplace add $ROOT)"
     fi
-    if ! "$claude_bin" plugin list 2>/dev/null | grep -q 'walk@claude-coding-workflow'; then
-      "$claude_bin" plugin install walk@claude-coding-workflow >/dev/null 2>&1 &&
-        echo "mod: walk installed (restart open sessions)" ||
-        echo "mod: could not install walk (run: claude plugin install walk@claude-coding-workflow)"
-    elif ! walk_copy_current; then
-      "$claude_bin" plugin marketplace update claude-coding-workflow >/dev/null 2>&1 || true
-      "$claude_bin" plugin update walk@claude-coding-workflow >/dev/null 2>&1 || true
-      if walk_copy_current; then
-        echo "mod: walk updated (restart open sessions)"
-      else
-        echo "mod: WARN walk's installed copy differs from mods/walk and was not updated:"
-        echo "     bump the version in mods/walk/.claude-plugin/plugin.json, re-run install.sh"
+    local mod refreshed=""
+    for mod in "${MODS[@]}"; do
+      if ! "$claude_bin" plugin list 2>/dev/null | grep -q "$mod@claude-coding-workflow"; then
+        [[ -n "$refreshed" ]] || { "$claude_bin" plugin marketplace update claude-coding-workflow >/dev/null 2>&1 || true; refreshed=1; }
+        "$claude_bin" plugin install "$mod@claude-coding-workflow" >/dev/null 2>&1 &&
+          echo "mod: $mod installed (restart open sessions)" ||
+          echo "mod: could not install $mod (run: claude plugin install $mod@claude-coding-workflow)"
+      elif ! mod_copy_current "$mod"; then
+        [[ -n "$refreshed" ]] || { "$claude_bin" plugin marketplace update claude-coding-workflow >/dev/null 2>&1 || true; refreshed=1; }
+        "$claude_bin" plugin update "$mod@claude-coding-workflow" >/dev/null 2>&1 || true
+        if mod_copy_current "$mod"; then
+          echo "mod: $mod updated (restart open sessions)"
+        else
+          echo "mod: WARN $mod's installed copy differs from mods/$mod and was not updated:"
+          echo "     bump the version in mods/$mod/.claude-plugin/plugin.json, re-run install.sh"
+        fi
       fi
-    fi
+    done
   fi
   chmod +x \
     "$ROOT/scripts/grok-review.sh" \
@@ -140,6 +151,7 @@ do_install() {
     "$ROOT/scripts/run-goals.sh" \
     "$ROOT/scripts/goals.py" \
     "$ROOT/scripts/events.py" \
+    "$ROOT/scripts/lessons.py" \
     "$ROOT/scripts/logs.sh" \
     "$ROOT/scripts/install.sh" \
     "$ROOT/scripts/tests/findings-test.sh" \
@@ -158,6 +170,7 @@ do_install() {
     "$ROOT/scripts/tests/review-fallback-test.sh" \
     "$ROOT/scripts/tests/implement-test.sh" \
     "$ROOT/scripts/tests/walk-status-test.sh" \
+    "$ROOT/scripts/tests/lessons-test.sh" \
     "$ROOT/scripts/tests/grok-review-test.sh" \
     "$ROOT/scripts/tests/tmp-hygiene-test.sh" \
     "$ROOT/scripts/tests/run-all.sh" \
@@ -332,6 +345,12 @@ do_check() {
     echo "temp hygiene: FAIL"; rc=1
     test_show tmp-hygiene-test.sh
   fi
+  if test_ok lessons-test.sh; then
+    echo "lessons: OK (extract, redaction, the evidence queue, distil cage, /lessons, render, detach)"
+  else
+    echo "lessons: FAIL"; rc=1
+    test_show lessons-test.sh
+  fi
   if test_ok walk-status-test.sh; then
     echo "walk status: OK (the running goal from the event index; idle once stopped or its process is gone)"
   else
@@ -341,22 +360,25 @@ do_check() {
   local cbin
   cbin="$(find_claude)"
   if [[ -n "$cbin" ]]; then
-    if "$cbin" plugin test "$ROOT/mods/walk" >/dev/null 2>&1; then
-      echo "walk mod: OK (tests pass)"
-    else
-      echo "walk mod: FAIL"; rc=1
-      "$cbin" plugin test "$ROOT/mods/walk" || true
-    fi
-    if "$cbin" plugin list 2>/dev/null | grep -A4 'walk@claude-coding-workflow' | grep -q 'enabled'; then
-      echo "walk mod: installed and enabled"
-      if walk_copy_current; then
-        echo "walk mod: installed copy matches the repo"
+    local mod
+    for mod in "${MODS[@]}"; do
+      if "$cbin" plugin test "$ROOT/mods/$mod" >/dev/null 2>&1; then
+        echo "$mod mod: OK (tests pass)"
       else
-        echo "walk mod: WARN installed copy differs from mods/walk (bump its version, re-run install.sh)"
+        echo "$mod mod: FAIL"; rc=1
+        "$cbin" plugin test "$ROOT/mods/$mod" || true
       fi
-    else
-      echo "walk mod: not installed (re-run install.sh)"
-    fi
+      if "$cbin" plugin list 2>/dev/null | grep -A4 "$mod@claude-coding-workflow" | grep -q 'enabled'; then
+        echo "$mod mod: installed and enabled"
+        if mod_copy_current "$mod"; then
+          echo "$mod mod: installed copy matches the repo"
+        else
+          echo "$mod mod: WARN installed copy differs from mods/$mod (bump its version, re-run install.sh)"
+        fi
+      else
+        echo "$mod mod: not installed (re-run install.sh)"
+      fi
+    done
   fi
   if "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" validate \
     && "$ROOT/scripts/goals.py" "$ROOT/GOALS.example.md" todos \

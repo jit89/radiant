@@ -44,7 +44,7 @@ runs in another that never sees the Architect's conversation.
 - `scripts/deepseek-code.sh` — legacy implementer in Codex (`IMPLEMENTER=codex`).
 - `scripts/lib/findings.sh` — parses the reviewer verdict into findings.
 - `scripts/tests/findings-test.sh` — self-test for that parser.
-- `scripts/install.sh` — symlink skills into `~/.claude/skills`, install the `walk` mod.
+- `scripts/install.sh` — symlink skills into `~/.claude/skills`, install the `walk` and `lessons` mods.
 - `mods/walk/` — Claude Code mod: the running goal as a prompt-footer label
   (`walk g4-ack r1 · review · 3/7`), and `/walk [dir]`, a pane with every goal
   of GOALS.md as a live git graph (state, round, phase, model, time, cost; a
@@ -54,6 +54,18 @@ runs in another that never sees the Architect's conversation.
   user-wide from this repo's marketplace (`.claude-plugin/marketplace.json`);
   `plugin install` copies it into the plugin cache, so after editing the mod
   bump its version and re-run `install.sh`, then restart open sessions.
+- `mods/lessons/` + `scripts/lessons.py` — failures that repeat, and the
+  person's corrections, become reminders in the system prompt, but only the
+  ones approved with `/lessons` (docs/features/lessons-hook/PLAN.md). At
+  compaction, session end and every 5th failed tool call, `lessons.py` reads
+  the new transcript rows into an evidence queue (redacted), and Haiku 5.5
+  (`claude -p --safe-mode --restricted --effort high`, no tools, 0.05 USD a call, 0.25 USD a
+  day) words them as pending lessons. `/lessons` shows each with its evidence;
+  `approve ID [global]` (project scope by default), `edit`, `reject`,
+  `forget`, `list`, `off`/`on`. Approved lessons (10 lines at most, project
+  first, expired after 30 days unseen) are one system-prompt section that
+  changes only when the approved set does. Never writes CLAUDE.md, memory or
+  any repo; lessons live in `~/.claude/lessons/` (0700).
 
 ## Install
 
@@ -178,7 +190,7 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `KEEP_RUN_DIR=1` | off | Keep the run dir after a goal lands |
 | `CW_OUT_DIR` | unset | Launchers write raw output, `.err` and verdict/report here and delete none; `run-goal.sh` sets it to its run dir |
 | `CW_KEEP_RAW=1` | off | A standalone launcher keeps its raw output and `.err` after an `ok` result |
-| `CW_PRUNE_DAYS` | `14` | Age past which `~/.cache/claude-coding-workflow/runs/` and `grok/` entries are deleted at the next run (`0` = never) |
+| `CW_PRUNE_DAYS` | `14` | Age past which `~/.cache/claude-coding-workflow/runs/`, `grok/` and `lessons/logs/` entries are deleted at the next run (`0` = never) |
 
 Where files live: a goal's run dir (stop file, diff, proof output, the
 launchers' output) is `~/.cache/claude-coding-workflow/runs/run-goal-<id>-*`,

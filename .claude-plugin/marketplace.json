@@ -12,6 +12,12 @@
       "description": "The running goal as a prompt-footer label, and /walk: the goal DAG as a live git graph in a pane.",
       "source": "./mods/walk",
       "category": "productivity"
+    },
+    {
+      "name": "lessons",
+      "description": "Failures and corrections that repeat across sessions become system-prompt reminders, once approved with /lessons.",
+      "source": "./mods/lessons",
+      "category": "productivity"
     }
   ]
 }

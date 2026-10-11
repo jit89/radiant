@@ -37,22 +37,38 @@ How the crucibles and reviews ran for item 5 (repeat for the next items):
   `HOME`), `scripts/events.py --self-test` and `scripts/install.sh --check`
   (which runs the suite itself, at `-j4`).
 
-Order (revised after the uregex walk, 2026-10-11):
+Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
 1. ~~Item 7.1 (Grok rounds in the background) and item 2.2's one line~~ —
    done: `CLAUDE.md`, `skills/crucible/SKILL.md`, `skills/run-goal{,s}/SKILL.md`.
 2. ~~Item 5 / step 4: oracle review + tiered satisfiability~~ — done and
    committed (crucible, two Opus review rounds, tests green).
 3. ~~Item 4: temp-file hygiene~~ — done (crucible, three Grok rounds, Opus
    review, tests green); today's `$TMPDIR` leftovers cleared once.
-4. **Item 1: the lessons hook (crucible) — NEXT.**
-5. Item 3: implementer-prompt audit against the uregex evidence.
-   (User, 2026-10-11: the lessons hook and the prompt audit come before the
-   parallel walker.)
-6. Item 6 / step 5: the parallel walker (crucible); the one change big
+4. ~~Item 1: the lessons hook~~ — done (crucible, five Grok rounds, Opus
+   review, tests green; `mods/lessons`, `scripts/lessons.py`).
+5. **Next: the red-black tree dogfood (C)** — the full workflow, crucible
+   to walk; also the lessons hook's first real use.
+6. **Step 3: a red host proof becomes a fix round (crucible).** Today a
+   proof that fails after the implementer's DONE wakes the walk
+   (`proof-red`, `scripts/run-goal.sh`); step 3 sends the proof output back
+   as a fix round within `MAX_FIX_ROUNDS`, so an implementer slip no longer
+   stops an unattended walk or spends an Opus review on a red diff. The
+   crucible has to tell causes apart: wrong implementation (fix round), wrong
+   oracle (still a wake: the implementer may not edit it), host/sandbox
+   difference, timeout or tamper (wakes, as today). (User, 2026-10-12: moved
+   ahead of the prompt audit and the walker. Before the walker because the
+   walker builds on how a hop ends; before the audit because it adds an
+   implementer message the audit should cover; after the red-black tree,
+   which may give the first real proof-red case: uregex had none, since
+   Haiku runs the proof itself before DONE.)
+7. Item 3: implementer-prompt audit against the uregex and red-black tree
+   evidence. (User, 2026-10-11: the lessons hook and the prompt audit come
+   before the parallel walker.)
+8. Item 9: TypeScript tier rules — before the TypeScript project's Phase 3
+   (user, 2026-10-12: the dogfood after the red-black tree is in TypeScript,
+   run in a separate session).
+9. Item 6 / step 5: the parallel walker (crucible); the one change big
    enough that a bootstrap might be reconsidered.
-7. Step 3: proof-red becomes a fix round — moved last: the uregex walk had
-   zero proof-red wakes (Haiku runs the proof itself before reporting DONE),
-   so there is no evidence it is needed yet.
 
 uregex walk evidence (for items 3 and 5): 7/7 goals done, 21:42Z-22:52Z;
 Haiku 5.5 on every pass, no DECLINED, no DeepSeek fallback; 1 FIX round (g3,
@@ -126,6 +142,15 @@ assumed on macOS, GNU `cat -A` / `sed -i` assumed, zsh `bad substitution` and
 | Distil | `claude -p --bare --model claude-haiku-5-5`, no tools, digest only, JSON lessons with evidence counts |
 | Store | pending file; approved (or seen ≥3 times with no instruction-like text from tool output) → auto-memory `feedback` or `CLAUDE.local.md` |
 | Use | `UserPromptSubmit` hook adds the capped list to each prompt |
+
+**Done (2026-10-11/12)** — `docs/features/lessons-hook/` (PLAN, five Grok
+rounds, journal). What changed from the shape above: a mod (`mods/lessons`)
+instead of settings hooks, so the list is one `prompt.compose` system-prompt
+section (no per-prompt injection); every lesson waits for `/lessons approve`
+(no auto-promotion: recurrence does not make tool output safe); Haiku runs
+`--safe-mode --restricted`, not `--bare` (which needs an API key); a persisted
+evidence queue, so a capped day or a failed call loses nothing. Live: 6 s,
+0.0012 USD, two lessons from this session's own zsh-glob and Write mistakes.
 
 ## 2. Verification-loop ideas from "Building verification loops in Claude Code" (2026-10-11)
 
@@ -343,3 +368,46 @@ on each; a surviving mutation is an oracle gap. On uregex, six planted bugs
 were each caught, but that needed a scratch implementation to plant them in;
 on the real code it needs none. Open: who writes the mutations (host script
 vs reviewer), how many, and whether a survivor wakes or only journals.
+
+## 9. TypeScript rules for Tier 1 and Tier 2 (2026-10-12)
+
+**Why (user):** planting bugs and running the cheap oracle checks is not meant
+to catch every possible error, only the ones that really break an oracle in
+this language, so the expensive model never has to fall back to Tier 3 (a full
+scratch implementation of the feature to validate the tests). The next project
+after the red-black tree is TypeScript, and `GOAL-FORMAT.md` gives TypeScript
+one table row (`throw new Error("<feature>-trap")`; the message in the
+runner's failure). C and Python have rules learned on the dogfoods (flushed
+traps, `-Werror`, `WILL_FAIL`, `PYTHONDONTWRITEBYTECODE`); TypeScript has none
+yet.
+
+**Research:** `docs/research/2026-10-12-typescript-tier-rules.md` (two Haiku
+5.5 agents, high effort, sourced, not yet verified by the Architect). The
+gaps it found, by what they would let through Tier 1 or Tier 2:
+1. *No type check in the run.* Vitest, Node's type stripping, Bun and Jest
+   with babel/swc never check types, so an oracle with a wrong-typed call or
+   an invented type still reaches the trap and passes Tier 1. Add a
+   `tsc --noEmit --incremental false` step over the oracle and stubs, as well
+   as the run (GOAL-FORMAT's "never compile-only" rules out compiling instead
+   of running, not both).
+2. *Ways to pass against the stub:* an un-awaited rejection, a bare
+   `toThrow()`, a `vi.mock`/`jest.mock` of the feature module that replaces
+   the trap. Pin the trap text and require it in the output.
+3. *Vacuous runs:* `.only` allowed locally (Vitest unless `CI`), snapshots
+   that auto-write or auto-pass, zero tests collected. `CI=1`,
+   `allowOnly: false`, no snapshot oracles, count the tests.
+4. *Files the proof leaves:* coverage, `.tsbuildinfo`, the Vitest/Vite and
+   Jest caches, `__snapshots__` (the analogue of `PYTHONDONTWRITEBYTECODE`;
+   otherwise the first goal wakes as tampering).
+5. *Tier 2 semantics:* IEEE doubles and `-0`, string-order `sort()`, UTF-16
+   `length`, date-only strings parsing as UTC, ICU-dependent collation,
+   `toEqual` ignoring `undefined` keys; cross-check on the proof's runtime,
+   TZ and ICU, with a reference, a brute-force model or fast-check.
+
+**Plan:** a small crucible (it changes the to-goals rulebook): verify each
+cited source; keep only the rules that would break a real oracle; write a
+TypeScript block in `GOAL-FORMAT.md` (the Tier 1 `tsc` step, Vitest and
+node:test recipes, the Tier 2 list) and the matching lines in
+`skills/to-goals/SKILL.md` §4; prove it on a tiny throwaway TypeScript repo
+the way the C rules were proved: plant each oracle defect class and show the
+recipe turns it red. Done before the TypeScript project's Phase 3.
