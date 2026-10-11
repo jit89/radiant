@@ -38,6 +38,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 HOUSE="$(cd "$HERE/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/dotenv.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/cache.sh"
 MODEL="${DEEPSEEK_MODEL:-deepseek-v4-flash}"
 BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com/}"
 CODEX_HOME_DIR="${DEEPSEEK_CODEX_HOME:-$HOME/.cache/claude-coding-workflow/codex}"
@@ -47,6 +49,7 @@ HANDOFF=""
 THREAD_ID=""
 RETURN_DOC=""
 OUT=""
+LAST_JSONL=""
 
 usage() {
   echo "usage: deepseek-code.sh [--resume THREAD_ID] <handoff.md>" >&2
@@ -275,8 +278,12 @@ codex_once() {
   shift || true
   local extra=("$@")
   local prompt_file jsonl
-  prompt_file="$(mktemp -t deepseek-prompt-XXXXXX.txt)"
-  jsonl="$(mktemp -t deepseek-jsonl-XXXXXX.jsonl)"
+  # A second call is a retry of the last attempt: its pair is no longer read.
+  # The last attempt's pair stays (the caller tails it, LOG: prints it).
+  if [[ -n "${LAST_JSONL:-}" ]]; then rm -f "$LAST_JSONL" "${LAST_JSONL}.err"; fi
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/deepseek-prompt-XXXXXX")"
+  jsonl="$(mktemp "${TMPDIR:-/tmp}/deepseek-jsonl-XXXXXX")"
+  (umask 077 && : >"${jsonl}.err")
   LAST_JSONL="$jsonl"
   printf '%s\n' "$prompt" >"$prompt_file"
 
@@ -321,6 +328,7 @@ codex_once() {
   "${cmd[@]}" - <"$prompt_file" >"$jsonl" 2>"${jsonl}.err"
   LAST_RC=$?
   set -e
+  rm -f "$prompt_file"
 
   local parsed
   parsed="$(parse_thread_id <"$jsonl" || true)"
@@ -367,7 +375,7 @@ if [[ "$SMOKE" -eq 1 ]]; then
   sed -i.bak 's/^model_reasoning_effort = .*/model_reasoning_effort = "low"/' \
     "$CODEX_HOME/config.toml" && rm -f "$CODEX_HOME/config.toml.bak"
   OUT="${TMPDIR:-/tmp}/deepseek-smoke-$$.txt"
-  : >"$OUT"
+  cw_private "$OUT"
   LAST_RC=0
   LAST_KIND=""
   MAX_RETRIES="${DEEPSEEK_MAX_RETRIES:-3}"
@@ -402,7 +410,7 @@ write_codex_config "${SMOKE_EFFORT:-high}"
 
 RETURN_DOC="${TMPDIR:-/tmp}/return-$(basename "$HANDOFF")"
 OUT="${TMPDIR:-/tmp}/deepseek-report-$(basename "$HANDOFF")"
-: >"$OUT"
+cw_private "$OUT"
 THREAD_ID="${RESUME_ID:-}"
 
 read -r -d '' PROMPT <<EOF || true

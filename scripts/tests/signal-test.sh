@@ -6,6 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-signal-XXXXXX")"
+export TMPDIR="$TMP"
 TMP="$(cd "$TMP" && pwd -P)"
 # A unique sleep length marks every process a stub starts.
 NAP="37.$$"
@@ -56,6 +57,17 @@ mode, sig, ready, out = sys.argv[1:5]
 cmd = sys.argv[5:]
 p = subprocess.Popen(cmd, start_new_session=True,
                      stdout=open(out, "w"), stderr=subprocess.STDOUT)
+# The goal runs in a session of its own, out of reach of a signal to this
+# test's group: stopping this driver must stop it too (run-all.sh TERMs the
+# group on an interrupt).
+def stop(signum, frame):
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    sys.exit(128 + signum)
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
 end = time.time() + 30
 while time.time() < end:
     try:

@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import shutil
 import tempfile
 import time
 import uuid
@@ -423,6 +424,7 @@ def cmd_self_test() -> int:
         assert jsonl.is_file() and load_rows(jsonl)
     finally:
         os.chdir(old)
+        shutil.rmtree(tmp, ignore_errors=True)
     return 0
 
 

@@ -12,7 +12,7 @@
 #   claude-goal-review.sh --smoke
 #
 # --add-dir grants Read access outside the repo. The Orchestrator keeps the
-# brief, DIFF_FILE and PROOF_OUTPUT in a private run dir under TMPDIR; without
+# brief, DIFF_FILE and PROOF_OUTPUT in a private run dir under ~/.cache/claude-coding-workflow/runs/; without
 # that grant a headless reviewer cannot open any of them and reviews blind.
 # The brief's own directory is added automatically.
 #
@@ -26,7 +26,11 @@
 #   PROOF_OUTPUT: <path>     # Architect-run proof, packed as ground truth
 #
 # Optional env: CLAUDE_REVIEW_MODEL / CLAUDE_REVIEW_EFFORT /
-# CLAUDE_REVIEW_FALLBACK_MODEL / DRY_RUN / OUT). Result lines:
+# CLAUDE_REVIEW_FALLBACK_MODEL / CLAUDE_REVIEW_DRY_RUN / CLAUDE_REVIEW_OUT (the
+# verdict path). CW_OUT_DIR: write every file there and delete none (run-goal.sh
+# passes its run folder); unset, they go to a new folder under
+# ~/.cache/claude-coding-workflow/runs/ and the raw output and .err are removed
+# after an `ok` review unless CW_KEEP_RAW=1. Result lines:
 #   CLAUDE_REVIEW_RESULT: ok | rate_limited | flagged | error | dry_run
 #   SESSION_ID: <uuid>
 #   VERDICT: DONE | FIX | BLOCKED | MISSING
@@ -53,6 +57,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/dotenv.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/cache.sh"
 HOUSE="$(cd "$HERE/.." && pwd)"
 MODEL="${CLAUDE_REVIEW_MODEL:-claude-opus-5-5}"
 EFFORT="${CLAUDE_REVIEW_EFFORT:-high}"
@@ -114,8 +120,25 @@ flagged_refusal() {
   python3 "$HERE/lib/flagged-refusal.py" "$1" "$2" >/dev/null 2>&1
 }
 
+# out_dir — the folder this review writes into, made on first use (a dry run
+# makes none): the caller's CW_OUT_DIR, or a new private folder under runs/.
+OUT_DIR=""
+out_dir() {
+  [[ -z "$OUT_DIR" ]] || return 0
+  if [[ -n "${CW_OUT_DIR:-}" ]]; then
+    [[ -d "$CW_OUT_DIR" ]] || { echo "CW_OUT_DIR is not a directory: $CW_OUT_DIR" >&2; exit 1; }
+    OUT_DIR="$CW_OUT_DIR"
+  else
+    cw_cache_init || { echo "cannot create $CW_CACHE" >&2; exit 1; }
+    OUT_DIR="$(mktemp -d "$CW_CACHE/runs/claude-goal-review-XXXXXX")"
+  fi
+  [[ -n "$OUT" ]] || OUT="$OUT_DIR/$OUT_NAME"
+}
+
 run_claude() {
   local prompt="$1" model="$MODEL" fell_back="" raw rc
+  # Every raw/.err pair, the flagged attempts' too: a retry must not orphan one.
+  local raws=()
 
   while :; do
     local session_flag=(--session-id "$SESSION_ID")
@@ -154,7 +177,10 @@ run_claude() {
       exit 0
     fi
 
-    raw="$(mktemp -t claude-goal-raw-XXXXXX.json)"
+    out_dir
+    raw="$(mktemp "$OUT_DIR/claude-goal-raw-XXXXXX")"
+    cw_private "${raw}.err"
+    raws+=("$raw" "${raw}.err")
     set +e
     "${cmd[@]}" >"$raw" 2>"${raw}.err"
     rc=$?
@@ -214,7 +240,15 @@ run_claude() {
   parsed_text="${parsed#*$'\t'}"
   [[ -n "$parsed_sid" ]] && SESSION_ID="$parsed_sid"
 
+  cw_private "$OUT"
   printf '%s\n' "$parsed_text" >"$OUT"
+  # Standalone, an ok review's verdict holds everything worth keeping; under
+  # CW_OUT_DIR the caller decides (an ok review can still end in a wake).
+  if [[ -z "${CW_OUT_DIR:-}" && "${CW_KEEP_RAW:-0}" != "1" ]]; then
+    rm -f "${raws[@]}"
+    # Empty when CLAUDE_REVIEW_OUT put the verdict elsewhere.
+    rmdir "$OUT_DIR" 2>/dev/null || true
+  fi
   echo "CLAUDE_REVIEW_RESULT: ok"
   echo "SESSION_ID: ${SESSION_ID}"
   echo "VERDICT: $(verdict_of "$OUT")"
@@ -228,7 +262,8 @@ run_claude() {
 if [[ "$SMOKE" -eq 1 ]]; then
   EFFORT="low"
   SESSION_ID="$(new_session_id)"
-  OUT="${CLAUDE_REVIEW_OUT:-${TMPDIR:-/tmp}/claude-goal-smoke-$$.md}"
+  OUT="${CLAUDE_REVIEW_OUT:-}"
+  OUT_NAME="claude-goal-smoke-$$.md"
   run_claude "You are a goal reviewer, not a plan attacker. Reply with exactly:
 PONG ${MODEL}
 VERDICT: DONE"
@@ -247,7 +282,8 @@ if [[ -n "$RESUME_ID" ]]; then
 else
   SESSION_ID="$(new_session_id)"
 fi
-OUT="${CLAUDE_REVIEW_OUT:-${TMPDIR:-/tmp}/claude-goal-${SESSION_ID}-$(date -u +%Y%m%dT%H%M%SZ).md}"
+OUT="${CLAUDE_REVIEW_OUT:-}"
+OUT_NAME="claude-goal-${SESSION_ID}-$(date -u +%Y%m%dT%H%M%SZ).md"
 
 if [[ -n "$RESUME_ID" ]]; then
   read -r -d '' PROMPT <<EOF || true

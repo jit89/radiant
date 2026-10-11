@@ -6,6 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-result-XXXXXX")"
+export TMPDIR="$TMP"
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" EVENTS_CACHE="$TMP/cache"
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost

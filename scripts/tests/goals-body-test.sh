@@ -6,6 +6,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 GOALS_PY="$HERE/goals.py"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-body-XXXXXX")"
+export TMPDIR="$TMP" HOME="$TMP/home"; mkdir -p "$HOME"
 trap 'rm -rf "$TMP"' EXIT
 fails=0
 

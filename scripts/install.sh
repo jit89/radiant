@@ -159,6 +159,8 @@ do_install() {
     "$ROOT/scripts/tests/implement-test.sh" \
     "$ROOT/scripts/tests/walk-status-test.sh" \
     "$ROOT/scripts/tests/grok-review-test.sh" \
+    "$ROOT/scripts/tests/tmp-hygiene-test.sh" \
+    "$ROOT/scripts/tests/run-all.sh" \
     "$ROOT/scripts/lib/claude-meta.py" \
     "$ROOT/scripts/lib/oracle-files.py" \
     "$ROOT/scripts/lib/flagged-refusal.py" \
@@ -169,8 +171,42 @@ do_install() {
   echo "launchers: grok-review.sh claude-goal-review.sh deepseek-code.sh goals.py"
 }
 
+# The house tests run once, side by side (scripts/tests/run-all.sh: each in its
+# own TMPDIR and HOME, a leak counts as a failure); the steps below read the
+# results. CW_TEST_JOBS sets how many at a time (default 4).
+TEST_RESULTS=""
+test_ok() { [[ "$(cat "$TEST_RESULTS/$1.rc" 2>/dev/null)" == 0 ]]; }
+test_show() { cat "$TEST_RESULTS/$1.out" 2>/dev/null || echo "(no output: $1 did not run)"; }
+
 do_check() {
   local rc=0
+  TEST_RESULTS="$(mktemp -d "${TMPDIR:-/tmp}/cw-check-tests-XXXXXX")"
+  # Removed on any exit: set -e can end --check before its last line.
+  trap 'rm -rf "$TEST_RESULTS"' EXIT
+  local suite_rc=0
+  # In the background so a signal to --check reaches the runner rather than
+  # orphaning it (a background job starts with INT ignored, so Ctrl-C is
+  # passed on as TERM); the runner stops its tests and dies of the signal.
+  # `|| true` on the waits: under set -e the runner's 143 would end the trap
+  # before its own exit status.
+  "$ROOT/scripts/tests/run-all.sh" --results "$TEST_RESULTS" >"$TEST_RESULTS/summary" 2>&1 &
+  RUNNER_PID=$!
+  trap 'kill -TERM "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null || true; exit 130' INT
+  trap 'kill -TERM "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null || true; exit 143' TERM
+  wait "$RUNNER_PID" || suite_rc=$?
+  trap - INT TERM
+  # Killed rather than failed: stop here, not with every step reading FAIL.
+  if [[ "$suite_rc" -gt 128 ]]; then
+    echo "tests: interrupted (exit $suite_rc)"
+    exit "$suite_rc"
+  fi
+  if [[ "$suite_rc" -eq 0 ]]; then
+    echo "tests: OK ($(tail -n1 "$TEST_RESULTS/summary"))"
+  else
+    echo "tests: FAIL"; rc=1
+    # Names only: each failing step below prints its test's output.
+    grep -E '^(FAIL|LEAK) ' "$TEST_RESULTS/summary" || true
+  fi
   local claude codex grok
   claude="$(find_claude || true)"
   if [[ -n "$claude" ]]; then
@@ -188,113 +224,119 @@ do_check() {
   else
     echo "codex: MISSING"; rc=1
   fi
-  if "$ROOT/scripts/tests/findings-test.sh" >/dev/null 2>&1; then
+  if test_ok findings-test.sh; then
     echo "findings parser: OK"
   else
     echo "findings parser: FAIL"; rc=1
-    "$ROOT/scripts/tests/findings-test.sh" || true
+    test_show findings-test.sh
   fi
-  if "$ROOT/scripts/tests/orch-commit-test.sh" >/dev/null 2>&1; then
+  if test_ok orch-commit-test.sh; then
     echo "orchestrator commits: OK (narrow; no foreign GOALS.md or journal edits)"
   else
     echo "orchestrator commits: FAIL"; rc=1
-    "$ROOT/scripts/tests/orch-commit-test.sh" || true
+    test_show orch-commit-test.sh
   fi
-  if "$ROOT/scripts/tests/git-guard-test.sh" >/dev/null 2>&1; then
+  if test_ok git-guard-test.sh; then
     echo "git guard: OK (.git plus its config include graph, checked before every host git call)"
   else
     echo "git guard: FAIL"; rc=1
-    "$ROOT/scripts/tests/git-guard-test.sh" || true
+    test_show git-guard-test.sh
   fi
-  if "$ROOT/scripts/tests/signal-test.sh" >/dev/null 2>&1; then
+  if test_ok signal-test.sh; then
     echo "signals: OK (INT/TERM stop nonzero, no orphans)"
   else
     echo "signals: FAIL"; rc=1
-    "$ROOT/scripts/tests/signal-test.sh" || true
+    test_show signal-test.sh
   fi
-  if "$ROOT/scripts/tests/result-parse-test.sh" >/dev/null 2>&1; then
+  if test_ok result-parse-test.sh; then
     echo "launcher results: OK (missing/timeout classified)"
   else
     echo "launcher results: FAIL"; rc=1
-    "$ROOT/scripts/tests/result-parse-test.sh" || true
+    test_show result-parse-test.sh
   fi
-  if "$ROOT/scripts/tests/goals-contract-test.sh" >/dev/null 2>&1; then
+  if test_ok goals-contract-test.sh; then
     echo "GOALS.md contract: OK (bodies frozen, status only)"
   else
     echo "GOALS.md contract: FAIL"; rc=1
-    "$ROOT/scripts/tests/goals-contract-test.sh" || true
+    test_show goals-contract-test.sh
   fi
-  if "$ROOT/scripts/tests/goals-body-test.sh" >/dev/null 2>&1; then
+  if test_ok goals-body-test.sh; then
     echo "goal bodies: OK (exact id, every goal needs one body)"
   else
     echo "goal bodies: FAIL"; rc=1
-    "$ROOT/scripts/tests/goals-body-test.sh" || true
+    test_show goals-body-test.sh
   fi
-  if "$ROOT/scripts/tests/blockers-test.sh" >/dev/null 2>&1; then
+  if test_ok blockers-test.sh; then
     echo "blockers gate: OK (no dispatch past an unfinished blocker)"
   else
     echo "blockers gate: FAIL"; rc=1
-    "$ROOT/scripts/tests/blockers-test.sh" || true
+    test_show blockers-test.sh
   fi
-  if "$ROOT/scripts/tests/resume-contract-test.sh" >/dev/null 2>&1; then
+  if test_ok resume-contract-test.sh; then
     echo "resume contract: OK (committed, staged, unstaged, untracked and ignored drift refused)"
   else
     echo "resume contract: FAIL"; rc=1
-    "$ROOT/scripts/tests/resume-contract-test.sh" || true
+    test_show resume-contract-test.sh
   fi
-  if "$ROOT/scripts/tests/verdict-test.sh" >/dev/null 2>&1; then
+  if test_ok verdict-test.sh; then
     echo "verdicts: OK (final VERDICT: line only; brief matches prompt)"
   else
     echo "verdicts: FAIL"; rc=1
-    "$ROOT/scripts/tests/verdict-test.sh" || true
+    test_show verdict-test.sh
   fi
-  if "$ROOT/scripts/tests/resume-state-test.sh" >/dev/null 2>&1; then
+  if test_ok resume-state-test.sh; then
     echo "resume state: OK (same thread/session, pending FIX restored)"
   else
     echo "resume state: FAIL"; rc=1
-    "$ROOT/scripts/tests/resume-state-test.sh" || true
+    test_show resume-state-test.sh
   fi
-  if "$ROOT/scripts/tests/walk-end-test.sh" >/dev/null 2>&1; then
+  if test_ok walk-end-test.sh; then
     echo "walk end: OK (exit 0 only when every goal is done)"
   else
     echo "walk end: FAIL"; rc=1
-    "$ROOT/scripts/tests/walk-end-test.sh" || true
+    test_show walk-end-test.sh
   fi
-  if "$ROOT/scripts/tests/journal-records-test.sh" >/dev/null 2>&1; then
+  if test_ok journal-records-test.sh; then
     echo "journal records: OK (only this goal's records are committed; resume takes them)"
   else
     echo "journal records: FAIL"; rc=1
-    "$ROOT/scripts/tests/journal-records-test.sh" || true
+    test_show journal-records-test.sh
   fi
-  if "$ROOT/scripts/tests/plan-freeze-test.sh" >/dev/null 2>&1; then
+  if test_ok plan-freeze-test.sh; then
     echo "plan freeze: OK (agents read the plan at BASE_SHA; edits are tamper)"
   else
     echo "plan freeze: FAIL"; rc=1
-    "$ROOT/scripts/tests/plan-freeze-test.sh" || true
+    test_show plan-freeze-test.sh
   fi
-  if "$ROOT/scripts/tests/proof-test.sh" >/dev/null 2>&1; then
+  if test_ok proof-test.sh; then
     echo "proof: OK (timeout, no credentials, repo unchanged; ignored files only outside the contract)"
   else
     echo "proof: FAIL"; rc=1
-    "$ROOT/scripts/tests/proof-test.sh" || true
+    test_show proof-test.sh
   fi
-  if "$ROOT/scripts/tests/implement-test.sh" >/dev/null 2>&1; then
+  if test_ok implement-test.sh; then
     echo "implementer: OK (Haiku sandboxed and key-free; one DeepSeek fallback on a refusal or decline, none on a rate limit)"
   else
     echo "implementer: FAIL"; rc=1
-    "$ROOT/scripts/tests/implement-test.sh" || true
+    test_show implement-test.sh
   fi
-  if "$ROOT/scripts/tests/grok-review-test.sh" >/dev/null 2>&1; then
+  if test_ok grok-review-test.sh; then
     echo "grok review: OK (a turn that did not end normally is an error, never a review)"
   else
     echo "grok review: FAIL"; rc=1
-    "$ROOT/scripts/tests/grok-review-test.sh" || true
+    test_show grok-review-test.sh
   fi
-  if "$ROOT/scripts/tests/walk-status-test.sh" >/dev/null 2>&1; then
+  if test_ok tmp-hygiene-test.sh; then
+    echo "temp hygiene: OK (launcher output in the caller's folder; wake evidence under ~/.cache, 0700, pruned past 14 days)"
+  else
+    echo "temp hygiene: FAIL"; rc=1
+    test_show tmp-hygiene-test.sh
+  fi
+  if test_ok walk-status-test.sh; then
     echo "walk status: OK (the running goal from the event index; idle once stopped or its process is gone)"
   else
     echo "walk status: FAIL"; rc=1
-    "$ROOT/scripts/tests/walk-status-test.sh" || true
+    test_show walk-status-test.sh
   fi
   local cbin
   cbin="$(find_claude)"
@@ -323,20 +365,22 @@ do_check() {
   else
     echo "goals.py: FAIL"; rc=1
   fi
-  if "$ROOT/scripts/mock-walk.sh" --quick >/tmp/cw-mock-walk-check.out \
-    && grep -q 'GOAL g4-delta DONE' /tmp/cw-mock-walk-check.out \
-    && grep -q 'walk-end' /tmp/cw-mock-walk-check.out; then
+  mwtmp="$(mktemp -d "${TMPDIR:-/tmp}/cw-mock-walk-check-XXXXXX")"
+  if "$ROOT/scripts/mock-walk.sh" --quick --dir "$mwtmp/repo" >"$mwtmp/out" \
+    && grep -q 'GOAL g4-delta DONE' "$mwtmp/out" \
+    && grep -q 'walk-end' "$mwtmp/out"; then
     echo "mock-walk: OK"
   else
     echo "mock-walk: FAIL"; rc=1
   fi
-  rltmp="$(mktemp -t grok-rl-XXXXXX.json)"
+  rm -rf "$mwtmp"
+  rltmp="$(mktemp "${TMPDIR:-/tmp}/grok-rl-XXXXXX")"
   printf '%s\n' '{"is_error":true,"api_error_status":429,"result":"You hit your session limit","terminal_reason":"api_error"}' >"$rltmp"
   # shellcheck disable=SC1091
   source "$ROOT/scripts/lib/dotenv.sh"
-  grtmp="$(mktemp -t grok-rl-XXXXXX.json)"
+  grtmp="$(mktemp "${TMPDIR:-/tmp}/grok-rl-XXXXXX")"
   printf '%s\n' '{"error":{"message":"429 Too Many Requests"},"stopReason":"error"}' >"$grtmp"
-  oktmp="$(mktemp -t grok-ok-XXXXXX.json)"
+  oktmp="$(mktemp "${TMPDIR:-/tmp}/grok-ok-XXXXXX")"
   printf '%s\n' '{"text":"PONG","stopReason":"end_turn","sessionId":"x"}' >"$oktmp"
   if is_transport_rate_limit 1 /dev/null "$rltmp" \
     && is_transport_rate_limit 1 /dev/null "$grtmp" \
@@ -409,7 +453,7 @@ do_check() {
       commit -q -m "chore: wake-check DAG"
     echo dirt > dirt.txt
     set +e
-    "$ROOT/scripts/run-goal.sh" g1-store >/tmp/cw-wake-check.out 2>/tmp/cw-wake-check.err
+    "$ROOT/scripts/run-goal.sh" g1-store >"$waketmp/out" 2>"$waketmp/err"
     wrc=$?
     set -e
     [[ "$wrc" -ne 0 ]]
@@ -449,6 +493,7 @@ do_check() {
     echo "mattpocock-skills pin: no clone at $MATTPOCOCK_SKILLS_DIR"
     clone_hint
   fi
+  rm -rf "$TEST_RESULTS"
   return "$rc"
 }
 

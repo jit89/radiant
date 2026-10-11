@@ -32,18 +32,19 @@ How the crucibles and reviews ran for item 5 (repeat for the next items):
   seeded with round 1's review and the journaled response. Item 5 took two
   rounds (11, then 2 findings); a third was judged not worth it.
 - After review: plant two or three bugs the new tests guard against and
-  confirm each turns them red; then run every `scripts/tests/*-test.sh`, the
-  events self-test and `scripts/install.sh --check`.
+  confirm each turns them red; then run `scripts/tests/run-all.sh -j 8` (every
+  test, side by side, failing any that leaves files in its `TMPDIR` or
+  `HOME`), `scripts/events.py --self-test` and `scripts/install.sh --check`
+  (which runs the suite itself, at `-j4`).
 
 Order (revised after the uregex walk, 2026-10-11):
 1. ~~Item 7.1 (Grok rounds in the background) and item 2.2's one line~~ —
    done: `CLAUDE.md`, `skills/crucible/SKILL.md`, `skills/run-goal{,s}/SKILL.md`.
 2. ~~Item 5 / step 4: oracle review + tiered satisfiability~~ — done and
    committed (crucible, two Opus review rounds, tests green).
-3. **Item 4: temp-file hygiene (crucible, one round) — NEXT.** The uregex walk
-   is over, so clearing today's `$TMPDIR` leftovers is safe once no walk or
-   review is live.
-4. Item 1: the lessons hook (crucible).
+3. ~~Item 4: temp-file hygiene~~ — done (crucible, three Grok rounds, Opus
+   review, tests green); today's `$TMPDIR` leftovers cleared once.
+4. **Item 1: the lessons hook (crucible) — NEXT.**
 5. Item 3: implementer-prompt audit against the uregex evidence.
    (User, 2026-10-11: the lessons hook and the prompt audit come before the
    parallel walker.)
@@ -175,6 +176,15 @@ must-hold rules in code); a table of contents for files over 100 lines is
 skipped unless the run shows a skill section being missed.
 
 ## 4. Temp-file hygiene (2026-10-11)
+
+**Done (2026-10-11):** crucible at `docs/features/temp-hygiene/` (Grok APPROVED in
+round 3, 10 findings: 9 taken, 1 in part), implemented in-session:
+`scripts/lib/cache.sh`; `CW_OUT_DIR` in the three launchers (raw output dropped
+only standalone and `ok`); run folders and walker stop folders under
+`~/.cache/claude-coding-workflow/runs/`, Grok verdicts under `grok/`, both 0700
+and pruned past 14 days; every test isolates `TMPDIR` and `HOME`; tests in
+`scripts/tests/tmp-hygiene-test.sh`; the leak guard is `scripts/tests/run-all.sh`.
+The measurements below are the input it started from.
 
 Nothing in the house deletes its own temp files; macOS clears `$TMPDIR` at
 reboot and by `tmp_cleaner`. Measured 3 days after a boot, in

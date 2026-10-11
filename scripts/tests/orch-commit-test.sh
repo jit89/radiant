@@ -6,6 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-orch-commit-XXXXXX")"
+export TMPDIR="$TMP"
 trap 'rm -rf "$TMP"' EXIT
 export EVENTS_CACHE="$TMP/cache" HOME="$TMP/home"
 mkdir -p "$HOME"

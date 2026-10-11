@@ -35,6 +35,11 @@
 #   GROK_REVIEW_EFFORT    default: high
 #   GROK_REVIEW_DRY_RUN=1 print the command, skip the API call
 #   GROK_REVIEW_OUT       override the verdict file path
+#   CW_OUT_DIR            write raw, .err and verdict here and delete none of
+#                         them (the caller owns the folder); unset, they go to
+#                         ~/.cache/claude-coding-workflow/grok/ and the raw
+#                         output and .err are removed after an `ok` round
+#   CW_KEEP_RAW=1         keep the raw output and .err after an `ok` round
 #
 # Result lines (stdout, parse these):
 #   GROK_REVIEW_RESULT: ok | rate_limited | error | dry_run
@@ -50,6 +55,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/dotenv.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/cache.sh"
 HOUSE="$(cd "$HERE/.." && pwd)"
 
 MODEL="${GROK_REVIEW_MODEL:-grok-4.7}"
@@ -115,6 +122,20 @@ GROK_BIN="$(find_grok)" || {
   exit 1
 }
 
+# Where this round's files go: the caller's folder, or the house's grok/ folder
+# (made 0700, and pruned past CW_PRUNE_DAYS before the round adds to it).
+if [[ -n "${CW_OUT_DIR:-}" ]]; then
+  [[ -d "$CW_OUT_DIR" ]] || { echo "CW_OUT_DIR is not a directory: $CW_OUT_DIR" >&2; exit 1; }
+  OUT_DIR="$CW_OUT_DIR"
+else
+  # A dry run prints the command and creates nothing, like the Claude launchers.
+  if [[ "${GROK_REVIEW_DRY_RUN:-0}" != "1" ]]; then
+    cw_cache_init || { echo "cannot create $CW_CACHE" >&2; exit 1; }
+    cw_prune
+  fi
+  OUT_DIR="$CW_CACHE/grok"
+fi
+
 new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 
 # Final line only, full "VERDICT: <TOKEN>" form; the grammar is lib/verdict.py.
@@ -155,7 +176,8 @@ run_grok() {
   fi
 
   local raw rc
-  raw="$(mktemp -t grok-review-raw-XXXXXX.json)"
+  raw="$(mktemp "$OUT_DIR/grok-review-raw-XXXXXX")"
+  cw_private "${raw}.err"
   set +e
   "${cmd[@]}" >"$raw" 2>"${raw}.err"
   rc=$?
@@ -190,6 +212,9 @@ run_grok() {
   parsed_text="${parsed#*$'\t'}"
   [[ -n "$parsed_sid" ]] && SESSION_ID="$parsed_sid"
 
+  # Written only once a round parsed: a failed round never empties a verdict
+  # already at GROK_REVIEW_OUT, nor leaves a 0-byte one in grok/.
+  cw_private "$OUT"
   printf '%s\n' "$parsed_text" >"$OUT"
   # A turn that did not end normally carries no review, only whatever Grok
   # said before it stopped: on the oracle-review crucible a call to a tool
@@ -217,6 +242,11 @@ print((d.get("stopReason") or d.get("stop_reason") or "") if isinstance(d, dict)
     echo "VERDICT_FILE: ${OUT}"
     exit 1
   fi
+  # Standalone, an ok round's verdict holds everything worth keeping; under
+  # CW_OUT_DIR the caller decides.
+  if [[ -z "${CW_OUT_DIR:-}" && "${CW_KEEP_RAW:-0}" != "1" ]]; then
+    rm -f "$raw" "${raw}.err"
+  fi
   echo "GROK_REVIEW_RESULT: ok"
   echo "SESSION_ID: ${SESSION_ID}"
   echo "VERDICT: $(verdict_of "$OUT")"
@@ -226,7 +256,7 @@ print((d.get("stopReason") or d.get("stop_reason") or "") if isinstance(d, dict)
 if [[ "$SMOKE" -eq 1 ]]; then
   EFFORT="low"
   SESSION_ID="$(new_session_id)"
-  OUT="${GROK_REVIEW_OUT:-${TMPDIR:-/tmp}/grok-review-smoke-$$.md}"
+  OUT="${GROK_REVIEW_OUT:-$OUT_DIR/grok-review-smoke-$$.md}"
   run_grok "You are a plan attacker. Reply with exactly:
 PONG ${MODEL}
 VERDICT: APPROVED"
@@ -266,7 +296,7 @@ if [[ -n "$RESUME_ID" ]]; then
 else
   SESSION_ID="$(new_session_id)"
 fi
-OUT="${GROK_REVIEW_OUT:-${TMPDIR:-/tmp}/grok-review-${SESSION_ID}-$(date -u +%Y%m%dT%H%M%SZ).md}"
+OUT="${GROK_REVIEW_OUT:-$OUT_DIR/grok-review-${SESSION_ID}-$(date -u +%Y%m%dT%H%M%SZ).md}"
 
 TOOLS="Your only tools are read_file, grep_search and list_dir: there is no shell, and calling any other tool ends the review with nothing recorded."
 if [[ "$ORACLE" -eq 1 && -n "$RESUME_ID" ]]; then

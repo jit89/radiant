@@ -18,6 +18,8 @@ source "$HERE/lib/events.sh"
 source "$HERE/lib/git-guard.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/orch-files.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/cache.sh"
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "not a git repo" >&2
@@ -30,12 +32,16 @@ utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # that stopped on tampering leaves it behind, and the walker checks it before
 # its first commit — a planted filter would otherwise run on that commit.
 git_meta_init || { echo "cannot locate the gitdir" >&2; exit 1; }
+# Stop folders live under ~/.cache/claude-coding-workflow/runs/ (macOS clears
+# idle $TMPDIR entries); entries past CW_PRUNE_DAYS go first.
+cw_cache_init || { echo "cannot create $CW_CACHE" >&2; exit 1; }
+cw_prune
 
 # walk_stop REASON DETAIL — nonzero stop that writes and commits nothing in the
 # repo: the reasons that use it are ones where a commit is unsafe.
 walk_stop() {
   local dir stop
-  dir="$(mktemp -d "${TMPDIR:-/tmp}/run-goals-stop-XXXXXX")"
+  dir="$(mktemp -d "$CW_CACHE/runs/run-goals-stop-XXXXXX")"
   chmod 700 "$dir"
   stop="$dir/stop.md"
   printf '# Stop: walk\n\n- reason: %s\n- detail: %s\n- utc: %s\n' "$1" "$2" "$(utc)" >"$stop"
@@ -175,7 +181,7 @@ trap 'on_signal TERM 143' TERM
 # (the restart after the fix is the same job).
 walk_stuck() {
   local remaining="$1" dir stop
-  dir="$(mktemp -d "${TMPDIR:-/tmp}/run-goals-stuck-XXXXXX")"
+  dir="$(mktemp -d "$CW_CACHE/runs/run-goals-stuck-XXXXXX")"
   chmod 700 "$dir"
   stop="$dir/stop.md"
   cat >"$stop" <<EOF

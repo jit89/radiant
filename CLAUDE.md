@@ -236,6 +236,10 @@ line (no stop-file dump, no Opus findings) and a JSONL index in
 `since 5m|walk`. Do not invent SQL. The markdown journal is still
 source of truth for resume and for the implementer.
 
+A wake's run dir (the stop file and everything it names) and Grok's verdict
+files live under `~/.cache/claude-coding-workflow/` (`runs/`, `grok/`),
+private and pruned after 14 days, not in `$TMPDIR`, which macOS clears.
+
 ## Skill quick-reference
 
 | Skill | When |

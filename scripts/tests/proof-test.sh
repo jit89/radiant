@@ -7,6 +7,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-proof-XXXXXX")"
+export TMPDIR="$TMP"
 TMP="$(cd "$TMP" && pwd -P)"
 NAP="41.$$"
 cleanup() {

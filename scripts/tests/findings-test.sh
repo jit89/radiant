@@ -10,6 +10,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 source "$HERE/lib/findings.sh"
 
 TMP="$(mktemp -d)"
+export TMPDIR="$TMP" HOME="$TMP/home"; mkdir -p "$HOME"
 trap 'rm -rf "$TMP"' EXIT
 fails=0
 

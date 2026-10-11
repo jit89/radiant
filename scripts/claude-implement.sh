@@ -21,6 +21,12 @@
 #   IMPLEMENTER_ALLOWED_DOMAINS comma list the sandbox may reach (default none)
 #   IMPLEMENTER_MAX_BUDGET_USD  passed as --max-budget-usd when set
 #   IMPLEMENTER_DRY_RUN=1       print the command, call nothing
+#   CW_OUT_DIR                  write raw output, .err and report there and
+#                               delete none (run-goal.sh passes its run
+#                               folder); unset, a new folder under
+#                               ~/.cache/claude-coding-workflow/runs/, and an
+#                               `ok` pass removes its raw output and .err
+#   CW_KEEP_RAW=1               keep them after an `ok` pass anyway
 #
 # Result lines (stdout):
 #   IMPLEMENTER_RESULT: ok | rate_limited (exit N) | declined (<provider>)
@@ -61,6 +67,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 HOUSE="$(cd "$HERE/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/dotenv.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/cache.sh"
 
 MODEL="${IMPLEMENTER_MODEL:-claude-haiku-5-5}"
 EFFORT="${IMPLEMENTER_EFFORT:-xhigh}"
@@ -148,6 +156,8 @@ make_key_file() {
 env_unsets() {
   local name
   printf '%s\n' -u ANTHROPIC_BASE_URL
+  # The house's own folder settings are for this launcher, not the model's shell.
+  printf '%s\n' -u CW_OUT_DIR -u CW_KEEP_RAW -u CW_PRUNE_DAYS
   for name in $(compgen -e); do
     [[ "$name" != GIT_CONFIG_* ]] || continue
     if grep -qiE '(^|_)(API)?KEY(_|$)|(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)' <<<"$name"; then
@@ -187,9 +197,25 @@ PY
 }
 
 # run_pass PROVIDER SESSION_MODE(new|resume) SID PROMPT TOOLS
-# Sets RAW (envelope), ERRF (stderr), RC, CMD_SHOWN.
+# out_dir — the folder this pass writes into, made on first use (a dry run
+# makes none): the caller's CW_OUT_DIR, or a new private folder under runs/.
+OUT_DIR=""
+out_dir() {
+  [[ -z "$OUT_DIR" ]] || return 0
+  if [[ -n "${CW_OUT_DIR:-}" ]]; then
+    [[ -d "$CW_OUT_DIR" ]] || { echo "CW_OUT_DIR is not a directory: $CW_OUT_DIR" >&2; exit 1; }
+    OUT_DIR="$CW_OUT_DIR"
+  else
+    cw_cache_init || { echo "cannot create $CW_CACHE" >&2; exit 1; }
+    OUT_DIR="$(mktemp -d "$CW_CACHE/runs/claude-implement-XXXXXX")"
+  fi
+}
+
+# Sets RAW (envelope), ERRF (stderr), RC, CMD_SHOWN. RAWS keeps every pass's
+# pair: the unsaved-thread retry and the DeepSeek fallback each make a new one.
 RAW=""
 ERRF=""
+RAWS=()
 RC=0
 run_pass() {
   local provider="$1" mode="$2" sid="$3" prompt="$4" tools="$5"
@@ -244,8 +270,11 @@ run_pass() {
     exit 0
   fi
 
-  RAW="$(mktemp -t claude-implement-raw-XXXXXX.json)"
+  out_dir
+  RAW="$(mktemp "$OUT_DIR/claude-implement-raw-XXXXXX")"
   ERRF="${RAW}.err"
+  cw_private "$ERRF"
+  RAWS+=("$RAW" "$ERRF")
   set +e
   env "${unsets[@]}" "${envs[@]+"${envs[@]}"}" "${cmd[@]}" </dev/null >"$RAW" 2>"$ERRF"
   RC=$?
@@ -264,8 +293,8 @@ classify() {
   SESSION="$sid"
   STATUS="MISSING"
   ERR_DETAIL=""
-  REPORT="${RAW%.json}.md"
-  : >"$REPORT"
+  REPORT="${RAW}.md"
+  cw_private "$REPORT"
   # Checked before the exit code: a flagged turn may exit non-zero, and must
   # not read as an error or a rate limit.
   if python3 "$HERE/lib/flagged-refusal.py" "$RAW" "$ERRF" >/dev/null 2>&1; then
@@ -340,10 +369,25 @@ emit_and_exit() {
   echo "IMPLEMENTER_MODEL: ${model}"
   [[ -z "$FELL_BACK" ]] || echo "IMPLEMENTER_FALLBACK: haiku -> deepseek (${FELL_BACK})"
   usage_lines
+  # Standalone, an ok pass's report holds everything worth keeping; under
+  # CW_OUT_DIR the caller decides (an ok pass can still end in a wake). After
+  # usage_lines, which reads the envelope.
+  local log="$RAW" errf="$ERRF"
+  if [[ "$KIND" == ok && -z "${CW_OUT_DIR:-}" && "${CW_KEEP_RAW:-0}" != "1" ]]; then
+    rm -f "${RAWS[@]}"
+    # An earlier pass's empty report (a flagged pass's, before the fallback)
+    # too. A declined pass's report holds Haiku's reason: it stays.
+    local r
+    for r in "${RAWS[@]}"; do
+      [[ "$r.md" == "$REPORT" || -s "$r.md" ]] || rm -f "$r.md"
+    done
+    log="(removed)"
+    errf="(removed)"
+  fi
   echo "RETURN_HANDOFF: ${RETURN_DOC}"
   echo "REPORT: ${REPORT}"
-  echo "LOG: ${RAW}"
-  echo "stderr: ${ERRF}"
+  echo "LOG: ${log}"
+  echo "stderr: ${errf}"
   case "$KIND" in
     ok) exit 0 ;;
     rate_limited) exit 75 ;;

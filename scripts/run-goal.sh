@@ -26,6 +26,8 @@ source "$HERE/lib/findings.sh"
 source "$HERE/lib/git-guard.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/orch-files.sh"
+# shellcheck disable=SC1091
+source "$HERE/lib/cache.sh"
 
 GOALS_PY="$HERE/goals.py"
 # IMPLEMENTER=claude (default): claude-implement.sh, Haiku 5.5 with a DeepSeek
@@ -565,7 +567,15 @@ trap 'on_signal TERM 143' TERM
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die_gate "not a git repo"
 cd "$ROOT"
 
-RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/run-goal-${GOAL_ID}-XXXXXX")"
+# Under ~/.cache, not $TMPDIR: on a wake this folder is the evidence the stop
+# file points at, and macOS clears idle $TMPDIR entries after ~3 days. Folders
+# past CW_PRUNE_DAYS (14) go first. The two launchers write into it
+# (CW_OUT_DIR, passed to each run_step below, not exported to the proof or the
+# implementer's shell) and delete nothing there: succeed removes it, a wake
+# keeps it.
+cw_cache_init || die_gate "cannot create $CW_CACHE"
+cw_prune
+RUN_DIR="$(mktemp -d "$CW_CACHE/runs/run-goal-${GOAL_ID}-XXXXXX")"
 chmod 700 "$RUN_DIR"
 STOP_FILE="$RUN_DIR/stop.md"
 ART_DIR="$HOME/.cache/claude-coding-workflow/run-goal-${GOAL_ID}"
@@ -783,9 +793,9 @@ while :; do
   PHASE="implementer r${ROUND}"
   set +e
   if [[ -n "$THREAD_ID" ]]; then
-    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$IMPL_LAUNCHER" --resume "$THREAD_ID" "$HAND"
+    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" --resume "$THREAD_ID" "$HAND"
   else
-    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" "$IMPL_LAUNCHER" "$HAND"
+    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "$HAND"
   fi
   ds_rc=$?
   set -e
@@ -968,9 +978,9 @@ EOF
   # PROOF_OUTPUT at all: headless Claude denies reads outside the repo and
   # there is nobody to approve the prompt. It then reviews on no evidence.
   if [[ -n "$SESSION_ID" ]]; then
-    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" "$BRIEF"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" "$BRIEF"
   else
-    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" "$REVIEWER" --add-dir "$RUN_DIR" "$BRIEF"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --add-dir "$RUN_DIR" "$BRIEF"
   fi
   rv_rc=$?
   set -e

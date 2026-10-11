@@ -176,6 +176,18 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `PROOF_TIMEOUT` | `600` | Seconds for the host proof |
 | `PROOF_ENV_KEEP` | empty | Space-separated credential-like variables the proof may still see (others named `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*` are removed) |
 | `KEEP_RUN_DIR=1` | off | Keep the run dir after a goal lands |
+| `CW_OUT_DIR` | unset | Launchers write raw output, `.err` and verdict/report here and delete none; `run-goal.sh` sets it to its run dir |
+| `CW_KEEP_RAW=1` | off | A standalone launcher keeps its raw output and `.err` after an `ok` result |
+| `CW_PRUNE_DAYS` | `14` | Age past which `~/.cache/claude-coding-workflow/runs/` and `grok/` entries are deleted at the next run (`0` = never) |
+
+Where files live: a goal's run dir (stop file, diff, proof output, the
+launchers' output) is `~/.cache/claude-coding-workflow/runs/run-goal-<id>-*`,
+removed when the goal lands and kept on a wake; Grok verdicts are in
+`~/.cache/claude-coding-workflow/grok/`. Both folders are 0700 and pruned
+past `CW_PRUNE_DAYS`. Run the tests with `scripts/tests/run-all.sh [-j N]`:
+four at a time by default (`CW_TEST_JOBS`), each in its own `TMPDIR` and
+`HOME`, failing any test that leaves something in either; `install.sh --check`
+runs them the same way (~3 minutes at `-j4`, against ~7.5 one at a time).
 
 The legacy `deepseek-code.sh` keeps Codex in `workspace-write` (not
 `danger-full-access`). Codex remounts `<repo>/.git` read-only inside that

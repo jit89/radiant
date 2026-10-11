@@ -6,6 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/cw-grok-review-XXXXXX")" && pwd)"
+export TMPDIR="$TMP" HOME="$TMP/home"; mkdir -p "$HOME"
 trap 'rm -rf "$TMP"' EXIT
 fails=0
 
