@@ -74,14 +74,30 @@ test('session start renders with the transcript\'s project key and runs the due 
 // The checklist dialog (Addendum A1). Two pending lessons: L1 recommended, L2 not.
 const ITEMS = [
   { id: 'L1', text: 'Re-read a file before Write.', scope: 'global', count: 2, recommended: true, check: '',
+    summary: 'seen 2× in 2 sessions · you said "No, re-read it first"', sessions: 2, fix: '',
     evidence: [{ id: 'E1', user_said: 'No, re-read it first', after_action: 'Write: /r/a.md' }] },
   { id: 'L2', text: 'zsh: run setopt nomatch.', scope: 'global', count: 5, recommended: false,
     check: 'nomatch is the default that errors\u001b[8m',
+    summary: 'seen 5× in 1 session · e.g. `ls *.md` → untrusted tool output: no matches found', sessions: 1,
+    fix: 'zsh errors on unmatched globs; quote them or use unsetopt nomatch.',
     evidence: [{ id: 'E2', command: 'ls *.md', count: 3, untrusted_tool_output: ['(eval):1: no matches found\u200b'] }] },
 ]
+// The list after Use suggested fix on L2: L2 rewritten (unchecked), L3 a new recommended arrival.
+const ITEMS_AFTER = [
+  ITEMS[0],
+  { ...ITEMS[1], text: 'zsh errors on unmatched globs; quote them or use unsetopt nomatch.', fix: '', check: 'not checked' },
+  { id: 'L3', text: 'A new lesson.', scope: 'project', count: 2, recommended: true, check: '',
+    summary: 'seen 2× in 2 sessions', sessions: 2, fix: '', evidence: [] },
+]
 
-function dialogEngine(on: On, surfaces: readonly 'terminal'[] = ['terminal']) {
+function dialogEngine(
+  on: On,
+  surfaces: readonly 'terminal'[] = ['terminal'],
+  failReadAfterFix = false,
+  hold: { useFix?: Promise<void>; approve?: Promise<void>; failUseFix?: boolean; changeL1?: boolean } = {},
+) {
   const runs: string[][] = []
+  const stdins: (string | undefined)[] = []
   const toasts: string[] = []
   const opened: unknown[] = []
   const closed: string[] = []
@@ -107,11 +123,24 @@ function dialogEngine(on: On, surfaces: readonly 'terminal'[] = ['terminal']) {
   on('process.run', async ($, e) => {
     const args = e.argv.slice(4)
     runs.push(args)
+    stdins.push(e.init?.stdin)
+    if (hold.useFix && args[0] === 'review' && args.some(a => a.startsWith('--use-fix='))) await hold.useFix
+    if (hold.approve && args[0] === 'review' && args.includes('--approve')) await hold.approve
+    if (hold.failUseFix && args[0] === 'review' && args.some(a => a.startsWith('--use-fix='))) {
+      return { value: { exitCode: 1, stdout: '', stderr: 'boom', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    const fixed = runs.some(r => r[0] === 'review' && r.some(a => a.startsWith('--use-fix=')))
+    if (failReadAfterFix && fixed && args[0] === 'cli' && args.includes('--json-list')) {
+      return { value: { exitCode: 1, stdout: '', stderr: 'boom', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const stdout =
       args[0] === 'render'
         ? JSON.stringify({ section: '', pending: 2, expired: 0 })
         : args[0] === 'cli' && args.includes('--json-list')
-          ? JSON.stringify({ items: ITEMS })
+          ? JSON.stringify({ items: !runs.some(r => r[0] === 'review' && r.some(a => a.startsWith('--use-fix='))) ? ITEMS
+              : hold.changeL1 ? [{ ...ITEMS_AFTER[0], text: 'Re-read a file, then Write it.' }, ...ITEMS_AFTER.slice(1)] : ITEMS_AFTER })
+          : args[0] === 'review' && args.some(a => a.startsWith('--use-fix='))
+            ? JSON.stringify({ text: 'L2 now reads: zsh errors on unmatched globs. (not checked: /lessons recheck)', changed: false })
           : args[0] === 'review'
             ? JSON.stringify({ text: 'Approved (project): L1.', changed: true })
             : args[0] === 'notices'
@@ -119,7 +148,7 @@ function dialogEngine(on: On, surfaces: readonly 'terminal'[] = ['terminal']) {
               : JSON.stringify({ text: 'typed verb', changed: false })
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  return { runs, toasts, opened, closed }
+  return { runs, toasts, opened, closed, stdins }
 }
 
 function lessonsPane() {
@@ -155,13 +184,61 @@ test('the first draw ticks exactly the recommended lessons, and shows the check 
   expect((await ui.find({ key: 't-L1' }))?.text).toContain('(Recommended)')
   expect((await ui.find({ key: 't-L2' }))?.text).toContain('[ ] L2')
   expect((await ui.find({ key: 't-L2' }))?.text).not.toContain('(Recommended)')
-  expect((await ui.find({ key: 'u-L2-E2-0' }))?.text).toContain('untrusted tool output: (eval):1: no matches found?')
-  expect((await ui.find({ key: 'c-L2' }))?.text).toContain('check: nomatch is the default that errors?[8m')
+  expect((await ui.find({ key: 'c-L2' }))?.text).toContain('✗ check: nomatch is the default that errors?[8m')
   expect(await ui.find({ key: 'c-L1' })).toBeUndefined()
+  expect((await ui.find({ key: 's-L2' }))?.text).toContain('seen 5× in 1 session · e.g. `ls *.md` → untrusted tool output: no matches found')
+  // Evidence is collapsed until asked for, then drawn in full, still marked untrusted.
+  expect(await ui.find({ key: 'u-L2-E2-0' })).toBeUndefined()
+  await ui.press({ key: 'x-L2' })
+  expect((await ui.find({ key: 'x-L2' }))?.text).toContain('evidence ▾')
+  expect((await ui.find({ key: 'u-L2-E2-0' }))?.text).toContain('untrusted tool output: (eval):1: no matches found?')
+  await ui.press({ key: 'x-L2' })
+  expect(await ui.find({ key: 'u-L2-E2-0' })).toBeUndefined()
+})
+
+test("a suggested fix is shown with its button; using it re-reads the list and keeps the person's ticks", async ($, on) => {
+  const seen = await startDialog($, on)
+  const { runs, closed } = seen
+  const ui = await $.ui.mount(lessonsPane())
+  expect((await ui.find({ key: 'g-L2' }))?.text).toContain('suggested: zsh errors on unmatched globs; quote them or use unsetopt nomatch.')
+  expect(await ui.find({ key: 'f-L1' })).toBeUndefined()
+  // The person leaves L1 (recommended) ticked, ticks L2, picks global, then uses L2's fix.
+  await ui.press({ key: 't-L2' })
+  await ui.select({ key: 'scope', value: 'global' })
+  await ui.press({ key: 'f-L2' })
+  expect(runs.find(r => r[0] === 'review')).toEqual(['review', '--project-key=-repo', '--use-fix=L2', '--typed', '--bind'])
+  // The use-fix call carries the text and the fix the dialog drew.
+  expect(JSON.parse(String(seen.stdins[runs.findIndex(r => r[0] === 'review')]))).toEqual({
+    texts: { L2: 'zsh: run setopt nomatch.' },
+    fix: 'zsh errors on unmatched globs; quote them or use unsetopt nomatch.',
+  })
+  expect(closed).toEqual([])
+  // L1 keeps its tick; the rewritten L2 and the newly arrived recommended L3 come back unticked; scope kept.
+  expect((await ui.find({ key: 't-L1' }))?.text).toContain('[x] L1')
+  expect((await ui.find({ key: 't-L2' }))?.text).toContain('[ ] L2  zsh errors on unmatched globs')
+  expect((await ui.find({ key: 't-L3' }))?.text).toContain('[ ] L3')
+  expect(await ui.find({ key: 'f-L2' })).toBeUndefined()
+  await ui.press({ key: 't-L3' })
+  await ui.press({ key: 'approve' })
+  expect(runs.filter(r => r[0] === 'review').at(-1)).toEqual(['review', '--project-key=-repo', '--approve', 'L1', 'L3', '--scope=global', '--typed', '--bind'])
+})
+
+test('a failed re-read after a fix takes the rewritten lesson out of the dialog, so its stale draw cannot be approved', async ($, on) => {
+  const { runs } = dialogEngine(on, ['terminal'], true)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: T1 })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'lessons', args: '', origin: { kind: 'composer' } } as never)
+  const ui = await $.ui.mount(lessonsPane())
+  await ui.press({ key: 't-L2' })
+  await ui.press({ key: 'f-L2' })
+  expect(await ui.find({ key: 't-L2' })).toBeUndefined()
+  await ui.press({ key: 'approve' })
+  expect(runs.filter(r => r[0] === 'review').at(-1)).toEqual(['review', '--project-key=-repo', '--approve', 'L1', '--scope=project', '--typed', '--bind'])
 })
 
 test('a toggle redraws; Approve selected sends exactly the ticked ids with --typed and the scope', async ($, on) => {
-  const { runs, toasts, closed } = await startDialog($, on)
+  const seen = await startDialog($, on)
+  const { runs, toasts, closed } = seen
   const ui = await $.ui.mount(lessonsPane())
   await ui.press({ key: 't-L2' })
   expect((await ui.find({ key: 't-L2' }))?.text).toContain('[x] L2')
@@ -169,7 +246,9 @@ test('a toggle redraws; Approve selected sends exactly the ticked ids with --typ
   expect((await ui.find({ key: 't-L1' }))?.text).toContain('[ ] L1')
   await ui.select({ key: 'scope', value: 'global' })
   await ui.press({ key: 'approve' })
-  expect(runs.find(r => r[0] === 'review')).toEqual(['review', '--project-key=-repo', '--approve', 'L2', '--scope=global', '--typed'])
+  expect(runs.find(r => r[0] === 'review')).toEqual(['review', '--project-key=-repo', '--approve', 'L2', '--scope=global', '--typed', '--bind'])
+  // The text each id was drawn with goes along, so lessons.py approves only what was shown.
+  expect(JSON.parse(String(seen.stdins[seen.runs.findIndex(r => r[0] === 'review')]))).toEqual({ texts: { L2: 'zsh: run setopt nomatch.' } })
   expect(runs.slice(-2)).toEqual([['render', '--project-key=-repo', '--json'], ['notices', '--project-key=-repo']])
   expect(toasts).toContain('Approved (project): L1.')
   expect(closed).toContain('lessons')
@@ -179,7 +258,7 @@ test('Reject unselected sends only the unticked ids; Keep for later sends nothin
   const { runs, closed } = await startDialog($, on)
   const ui = await $.ui.mount(lessonsPane())
   await ui.press({ key: 'reject' })
-  expect(runs.find(r => r[0] === 'review')).toEqual(['review', '--project-key=-repo', '--reject', 'L2', '--scope=project', '--typed'])
+  expect(runs.find(r => r[0] === 'review')).toEqual(['review', '--project-key=-repo', '--reject', 'L2', '--scope=project', '--typed', '--bind'])
   const before = runs.length
   await ui.press({ key: 'keep' })
   expect(runs.length).toBe(before)
@@ -350,4 +429,67 @@ test('a refresh after /clear announces auto-approved lessons too', async ($, on)
   await $.classic.SessionStart({ source: 'clear', transcript_path: T2 })
   expect(runs.filter(r => r[0] === 'notices').length).toBe(before + 1)
   expect(toasts.filter(t => t.startsWith('auto-approved L9')).length).toBe(2)
+})
+
+test('while a suggested fix is being applied, Approve, a toggle and the scope are ignored', async ($, on) => {
+  let land = () => {}
+  const held = new Promise<void>(resolve => { land = resolve })
+  const { runs } = dialogEngine(on, ['terminal'], false, { useFix: held })
+  await $.classic.SessionStart({ source: 'startup', transcript_path: T1 })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'lessons', args: '', origin: { kind: 'composer' } } as never)
+  const ui = await $.ui.mount(lessonsPane())
+  await ui.press({ key: 't-L2' })
+  const fixing = ui.press({ key: 'f-L2' })   // not awaited: the use-fix call is held
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await ui.press({ key: 'approve' })
+  await ui.press({ key: 't-L1' })
+  await ui.select({ key: 'scope', value: 'global' })
+  expect(runs.filter(r => r[0] === 'review' && r.includes('--approve'))).toEqual([])
+  land()
+  await fixing
+  // The fix landed: L1 kept its tick (the toggle was ignored), the scope is still project.
+  expect((await ui.find({ key: 't-L1' }))?.text).toContain('[x] L1')
+  await ui.press({ key: 'approve' })
+  expect(runs.filter(r => r[0] === 'review').at(-1)).toEqual(['review', '--project-key=-repo', '--approve', 'L1', '--scope=project', '--typed', '--bind'])
+})
+
+test('a use-fix call that fails takes the lesson out of the dialog', async ($, on) => {
+  const { runs } = dialogEngine(on, ['terminal'], false, { failUseFix: true })
+  await $.classic.SessionStart({ source: 'startup', transcript_path: T1 })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'lessons', args: '', origin: { kind: 'composer' } } as never)
+  const ui = await $.ui.mount(lessonsPane())
+  await ui.press({ key: 't-L2' })
+  await ui.press({ key: 'f-L2' })
+  expect(await ui.find({ key: 't-L2' })).toBeUndefined()
+  await ui.press({ key: 'approve' })
+  expect(runs.filter(r => r[0] === 'review').at(-1)).toEqual(['review', '--project-key=-repo', '--approve', 'L1', '--scope=project', '--typed', '--bind'])
+})
+
+test('while an approve is running, Use suggested fix is ignored', async ($, on) => {
+  let land = () => {}
+  const held = new Promise<void>(resolve => { land = resolve })
+  const { runs } = dialogEngine(on, ['terminal'], false, { approve: held })
+  await $.classic.SessionStart({ source: 'startup', transcript_path: T1 })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'lessons', args: '', origin: { kind: 'composer' } } as never)
+  const ui = await $.ui.mount(lessonsPane())
+  const approving = ui.press({ key: 'approve' })   // not awaited: the approve call is held
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await ui.press({ key: 'f-L2' })
+  expect(runs.filter(r => r[0] === 'review' && r.some(a => a.startsWith('--use-fix=')))).toEqual([])
+  land()
+  await approving
+})
+
+test('after a fix, a ticked lesson whose text changed elsewhere comes back unticked', async ($, on) => {
+  dialogEngine(on, ['terminal'], false, { changeL1: true })
+  await $.classic.SessionStart({ source: 'startup', transcript_path: T1 })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'lessons', args: '', origin: { kind: 'composer' } } as never)
+  const ui = await $.ui.mount(lessonsPane())
+  expect((await ui.find({ key: 't-L1' }))?.text).toContain('[x] L1')
+  await ui.press({ key: 'f-L2' })
+  expect((await ui.find({ key: 't-L1' }))?.text).toContain('[ ] L1  Re-read a file, then Write it.')
 })

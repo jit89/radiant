@@ -63,10 +63,15 @@ runs in another that never sees the Architect's conversation.
   day) words them as pending lessons. A second Haiku call checks each one;
   a lesson is **Recommended** when the check says correct and every piece of
   its evidence is your own typed correction or was seen in 2+ sessions.
-  `/lessons` opens a checklist dialog: recommended lessons start ticked, the
-  evidence (tool output marked untrusted) and a not-recommended lesson's
-  check reason sit under each, one scope applies to all (project by
-  default), and **Approve selected** / **Reject unselected** / **Keep for
+  `/lessons` opens a checklist dialog: recommended lessons start ticked, and
+  each lesson shows three lines (the lesson, `✗ check:` when not
+  recommended, and one summary such as ``seen 5× in 2 sessions · e.g. `ls
+  *.md` → untrusted tool output: no matches found``), with the full evidence
+  behind `evidence ▸` (`/lessons show ID` in text). When the check judges a
+  lesson incorrect it may suggest a fix: **Use suggested fix** (`/lessons fix
+  ID`) rewrites the lesson, clears its check (it stays pending until
+  `/lessons recheck`) and keeps your other ticks. One scope applies to all
+  (project by default), and **Approve selected** / **Reject unselected** / **Keep for
   later** act only on your key press. A lesson drawn only from your own
   typed corrections, in a call that saw no tool output, and checked correct
   is approved without the dialog (project scope, 3 a day, a toast naming

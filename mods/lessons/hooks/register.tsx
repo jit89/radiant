@@ -39,6 +39,8 @@ const dialog = atom({ plugin: 'lessons', key: 'dialog' } as const, {
   scope: 'project',
   key: '',
   status: null,
+  open: [],
+  busy: false,
 } as LessonsDialog)
 
 // This session's transcript (from the classic events, which carry it), the
@@ -49,6 +51,9 @@ let transcript: string | null = null
 let projectKey: string | null = null
 let section = ''
 let failures = 0
+// Bumped each time the dialog opens: a fix still running from an earlier
+// dialog leaves the new one's state alone.
+let generation = 0
 
 function keyOf(path: string): string {
   const parts = path.split('/')
@@ -61,9 +66,9 @@ function keyOfCwd(cwd: string): string {
   return cwd.replace(/[^A-Za-z0-9]/g, '-')
 }
 
-async function lessons($: Dollar, args: string[], timeoutMs = 5000) {
+async function lessons($: Dollar, args: string[], timeoutMs = 5000, stdin?: string) {
   const house = `${$.plugin.root}/../..`
-  return $.process.run([...LESSONS, house, ...args], { timeoutMs })
+  return $.process.run([...LESSONS, house, ...args], stdin === undefined ? { timeoutMs } : { timeoutMs, stdin })
 }
 
 async function key($: Dollar): Promise<string> {
@@ -137,6 +142,9 @@ function cleanItem(item: LessonItem): LessonItem {
     count: Number(item.count) || 0,
     recommended: item.recommended === true,
     check: visible(item.check),
+    summary: visible(item.summary),
+    sessions: Number(item.sessions) || 0,
+    fix: visible(item.fix),
     evidence: (item.evidence ?? []).map(ev =>
       'command' in ev
         ? { id: visible(ev.id), command: visible(ev.command), count: Number(ev.count) || 0,
@@ -146,26 +154,44 @@ function cleanItem(item: LessonItem): LessonItem {
   }
 }
 
-// Open the checklist with the pending lessons, the recommended ones ticked.
-// Returns the command's answer.
-async function openDialog($: Dollar): Promise<string> {
-  const k = await key($)
+// The pending lessons as the dialog draws them, or why they could not be read.
+async function readItems($: Dollar, k: string): Promise<LessonItem[] | string> {
   const run = await lessons($, ['cli', `--project-key=${k}`, '--args=pending', '--json-list'], 15000)
-  let items: LessonItem[]
   try {
     if (run.exitCode !== 0) throw new Error(`exit ${run.exitCode}`)
-    items = (JSON.parse(run.stdout) as { items: LessonItem[] }).items.map(cleanItem)
+    return (JSON.parse(run.stdout) as { items: LessonItem[] }).items.map(cleanItem)
   } catch (error) {
     return `lessons: could not read the pending lessons (${String(error)})`
   }
+}
+
+// Open the checklist with the pending lessons, the recommended ones ticked
+// (the only time ticks come from `recommended`). Returns the command's answer.
+async function openDialog($: Dollar): Promise<string> {
+  const BUSY = 'An approve, reject or suggested fix is still running; run /lessons again in a moment.'
+  if ((await read($, dialog)).busy) return BUSY
+  const k = await key($)
+  const items = await readItems($, k)
+  if (typeof items === 'string') return items
   if (items.length === 0) return 'No pending lessons.'
-  await update($, dialog, () => ({
-    items,
-    ticks: items.filter(item => item.recommended).map(item => item.id),
-    scope: 'project',
-    key: k,
-    status: null,
-  }))
+  // Replaced only if no action took the flag while the list was read: a
+  // running action keeps its dialog.
+  let opened = false
+  await update($, dialog, v => {
+    if (v.busy) return v
+    opened = true
+    return {
+      items,
+      ticks: items.filter(item => item.recommended).map(item => item.id),
+      scope: 'project',
+      key: k,
+      status: null,
+      open: [],
+      busy: false,
+    }
+  })
+  if (!opened) return BUSY
+  generation += 1
   await $.ui.open({ id: PANE, title: 'lessons', focus: true, closeOnEscape: true, holdToasts: true })
   return `${items.length} pending lesson${items.length === 1 ? '' : 's'}: review them in the dialog.`
 }
@@ -173,37 +199,149 @@ async function openDialog($: Dollar): Promise<string> {
 // A button press in the dialog: approve the ticked or reject the unticked,
 // with exactly the ids drawn when it opened. Only the person can press it, so
 // it passes --typed (Addendum A1.5).
-async function review($: Dollar, action: 'approve' | 'reject') {
-  const d = await read($, dialog)
-  const ids = d.items.map(item => item.id).filter(id => (action === 'approve') === d.ticks.includes(id))
-  if (ids.length === 0) {
-    await update($, dialog, v => ({ ...v, status: action === 'approve' ? 'Nothing is ticked.' : 'Every lesson is ticked.' }))
-    return
-  }
-  const run = await lessons($, ['review', `--project-key=${d.key}`, `--${action}`, ...ids, `--scope=${d.scope}`, '--typed'], 15000)
-  let out: { text: string; changed: boolean }
-  try {
-    if (run.exitCode !== 0) throw new Error(`exit ${run.exitCode}`)
-    out = JSON.parse(run.stdout) as { text: string; changed: boolean }
-  } catch (error) {
-    await update($, dialog, v => ({ ...v, status: `lessons: ${String(error)}` }))
-    return
-  }
-  if (out.changed) await refresh($)
-  $.ui.toast(out.text)
-  await $.ui.close({ id: PANE })
+// Take the dialog's busy flag in one state update (test-and-set): true when
+// this press got it, false when another action holds it. Every action that
+// sends ids, or changes what is drawn, takes it first and frees it in finally.
+async function claim($: Dollar): Promise<boolean> {
+  let mine = false
+  await update($, dialog, v => {
+    if (v.busy) return v
+    mine = true
+    return { ...v, busy: true }
+  })
+  return mine
 }
 
-async function toggle($: Dollar, id: string) {
+async function release($: Dollar) {
+  await update($, dialog, v => ({ ...v, busy: false }))
+}
+
+// The text each id was drawn with, sent on stdin with --bind: lessons.py acts
+// only on ids that still read exactly as drawn, so no race between presses or
+// processes can approve, reject or rewrite words the person did not see.
+function drawnTexts(d: LessonsDialog, ids: string[]): Record<string, string> {
+  const texts: Record<string, string> = {}
+  for (const item of d.items) if (ids.includes(item.id)) texts[item.id] = item.text
+  return texts
+}
+
+async function review($: Dollar, action: 'approve' | 'reject') {
+  if (!(await claim($))) return
+  const gen = generation
+  try {
+    const d = await read($, dialog)
+    const ids = d.items.map(item => item.id).filter(id => (action === 'approve') === d.ticks.includes(id))
+    if (ids.length === 0) {
+      await update($, dialog, v => ({ ...v, status: action === 'approve' ? 'Nothing is ticked.' : 'Every lesson is ticked.' }))
+      return
+    }
+    const run = await lessons(
+      $,
+      ['review', `--project-key=${d.key}`, `--${action}`, ...ids, `--scope=${d.scope}`, '--typed', '--bind'],
+      15000,
+      JSON.stringify({ texts: drawnTexts(d, ids) }),
+    )
+    let out: { text: string; changed: boolean }
+    try {
+      if (run.exitCode !== 0) throw new Error(`exit ${run.exitCode}`)
+      out = JSON.parse(run.stdout) as { text: string; changed: boolean }
+    } catch (error) {
+      await update($, dialog, v => ({ ...v, status: `lessons: ${String(error)}` }))
+      return
+    }
+    if (out.changed) await refresh($)
+    $.ui.toast(out.text)
+    await $.ui.close({ id: PANE })
+  } catch (error) {
+    await update($, dialog, v => ({ ...v, status: `lessons: ${String(error)}` }))
+  } finally {
+    // A dialog opened meanwhile owns the flag now.
+    if (gen === generation) await release($)
+  }
+}
+
+// Use suggested fix (Addendum B2.2): the lesson's text becomes the fix and its
+// check is cleared. The dialog re-reads the list and stays open, keeping the
+// scope and the ticks of lessons still pending; the rewritten lesson and any
+// lesson that arrived meanwhile come back unticked (B2.3). On any failure the
+// lesson leaves the dialog: its draw may no longer match the store.
+async function useFix($: Dollar, id: string) {
+  if (!(await claim($))) return
+  const gen = generation
+  // A dialog reopened meanwhile is not this one: its state is left alone.
+  const mine = async (fn: (v: LessonsDialog) => LessonsDialog) => {
+    if (gen === generation) await update($, dialog, fn)
+  }
+  const drop = (why: string) =>
+    mine(v => ({
+      ...v,
+      items: v.items.filter(item => item.id !== id),
+      ticks: v.ticks.filter(t => t !== id),
+      open: v.open.filter(o => o !== id),
+      status: `${why}; ${id} was taken out of this dialog: run /lessons again to see it.`,
+    }))
+  try {
+    const d = await read($, dialog)
+    const item = d.items.find(i => i.id === id)
+    await mine(v => ({ ...v, status: 'Applying the suggested fix…' }))
+    const run = await lessons(
+      $,
+      ['review', `--project-key=${d.key}`, `--use-fix=${id}`, '--typed', '--bind'],
+      15000,
+      JSON.stringify({ texts: drawnTexts(d, [id]), fix: item?.fix ?? '' }),
+    )
+    let text: string
+    try {
+      if (run.exitCode !== 0) throw new Error(`exit ${run.exitCode}`)
+      text = (JSON.parse(run.stdout) as { text: string }).text
+    } catch (error) {
+      await drop(`lessons: ${String(error)}`)
+      return
+    }
+    const items = await readItems($, d.key)
+    if (typeof items === 'string') {
+      await drop(items)
+      return
+    }
+    await mine(v => {
+      const before = new Set(v.items.map(i => i.id))
+      const still = new Set(items.map(i => i.id))
+      return {
+        ...v,
+        items,
+        // A tick is kept only if its lesson still reads the same: a lesson
+        // changed elsewhere (an edit, a trim and re-add) comes back unticked.
+        ticks: v.ticks.filter(t => t !== id && before.has(t) && still.has(t)
+          && v.items.find(i => i.id === t)?.text === items.find(i => i.id === t)?.text),
+        open: v.open.filter(o => still.has(o)),
+        status: visible(text),
+      }
+    })
+    if (items.length === 0 && gen === generation) await $.ui.close({ id: PANE })
+  } catch (error) {
+    await drop(`lessons: ${String(error)}`)
+  } finally {
+    if (gen === generation) await release($)
+  }
+}
+
+async function toggleEvidence($: Dollar, id: string) {
   await update($, dialog, v => ({
     ...v,
-    status: null,
-    ticks: v.ticks.includes(id) ? v.ticks.filter(t => t !== id) : [...v.ticks, id],
+    open: v.open.includes(id) ? v.open.filter(o => o !== id) : [...v.open, id],
   }))
 }
 
+async function toggle($: Dollar, id: string) {
+  await update($, dialog, v =>
+    v.busy
+      ? v
+      : { ...v, status: null, ticks: v.ticks.includes(id) ? v.ticks.filter(t => t !== id) : [...v.ticks, id] },
+  )
+}
+
 async function setScope($: Dollar, scope: string) {
-  await update($, dialog, v => ({ ...v, scope: scope === 'global' ? 'global' : 'project' }))
+  await update($, dialog, v => (v.busy ? v : { ...v, scope: scope === 'global' ? 'global' : 'project' }))
 }
 
 async function keep($: Dollar) {
@@ -230,8 +368,8 @@ export const register: Register = on => {
     const started = await next(e)
     await $.command.register({
       name: 'lessons',
-      description: 'Review lessons drawn from repeated failures: pending, list, approve ID [global], edit, reject, forget, off, on',
-      argumentHint: '[pending|list|approve ID [global]|edit ID TEXT|reject ID|forget ID|off|on]',
+      description: 'Review lessons drawn from repeated failures (a checklist with no arguments; typed: show, fix, approve, edit, reject, forget, list, recheck, auto, off, on)',
+      argumentHint: '[pending|list|show ID|fix ID|approve ID [global]|edit ID TEXT|reject ID|forget ID|recheck|auto on|off|off|on]',
     })
     const pending = await refresh($)
     if (pending > 0 && (await $.session.surfaces()).length > 0) {
@@ -310,27 +448,41 @@ export const register: Register = on => {
               {d.ticks.includes(item.id) ? '[x]' : '[ ]'} {item.id}  {item.text}
               {item.recommended ? '  (Recommended)' : ''}
             </Button>
-            {item.evidence.map(ev =>
-              'command' in ev ? (
-                <Box key={`e-${item.id}-${ev.id}`} flexDirection="column">
-                  <Text dimColor>      ran `{ev.command}` ({ev.count}x)</Text>
-                  {ev.untrusted_tool_output.map((line, i) => (
-                    <Box key={`u-${item.id}-${ev.id}-${i}`}>
-                      <Text dimColor>        untrusted tool output: {line}</Text>
-                    </Box>
-                  ))}
-                </Box>
-              ) : (
-                <Box key={`e-${item.id}-${ev.id}`}>
-                  <Text dimColor>      you said "{ev.user_said}" after {ev.after_action}</Text>
-                </Box>
-              ),
-            )}
             {item.check ? (
               <Box key={`c-${item.id}`}>
-                <Text dimColor>      check: {item.check}</Text>
+                <Text dimColor>      ✗ check: {item.check}</Text>
               </Box>
             ) : null}
+            <Box key={`s-${item.id}`}>
+              <Text dimColor>      {item.summary}</Text>
+            </Box>
+            {item.fix ? (
+              <Box key={`g-${item.id}`} flexDirection="column">
+                <Text>      suggested: {item.fix}</Text>
+                <Button key={`f-${item.id}`} plain onPress={() => useFix($, item.id)}>      Use suggested fix</Button>
+              </Box>
+            ) : null}
+            <Button key={`x-${item.id}`} plain dimColor onPress={() => toggleEvidence($, item.id)}>
+              {'      '}evidence {d.open.includes(item.id) ? '▾' : '▸'}
+            </Button>
+            {d.open.includes(item.id)
+              ? item.evidence.map(ev =>
+                  'command' in ev ? (
+                    <Box key={`e-${item.id}-${ev.id}`} flexDirection="column">
+                      <Text dimColor>        ran `{ev.command}` ({ev.count}x)</Text>
+                      {ev.untrusted_tool_output.map((line, i) => (
+                        <Box key={`u-${item.id}-${ev.id}-${i}`}>
+                          <Text dimColor>          untrusted tool output: {line}</Text>
+                        </Box>
+                      ))}
+                    </Box>
+                  ) : (
+                    <Box key={`e-${item.id}-${ev.id}`}>
+                      <Text dimColor>        you said "{ev.user_said}" after {ev.after_action}</Text>
+                    </Box>
+                  ),
+                )
+              : null}
           </Box>
         ))}
         <Select

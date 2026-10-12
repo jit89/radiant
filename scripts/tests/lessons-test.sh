@@ -620,7 +620,7 @@ checkreply '{"verdict": "correct", "reason": "ok"}'
 run "$T" --final
 check "b: a single-transcript failure (a zsh: line) is not recommended" "False" "$(pend "d['pending'][0]['recommended']")"
 check "b: a correct but unrecommended lesson says why it is unticked" 1 \
-  "$(python3 "$L" cli --project-key="$K" --args pending | grep -c '^    check: correct, but its evidence is from one session')"
+  "$(python3 "$L" cli --project-key="$K" --args pending | grep -c '^    ✗ check: correct, but its evidence is from one session')"
 # c. incorrect, unsure (the stub default), and a failed check call: not recommended, reason kept.
 for v in incorrect unsure exit; do
   reset
@@ -642,7 +642,7 @@ for v in incorrect unsure exit; do
     "$(pend "d['pending'][0]['recommended']")|$(pend "d['pending'][0]['verdict']")|$(pend "d['pending'][0]['check']")"
 done
 check "c: pending text shows the check reason for a lesson not recommended" 1 \
-  "$(python3 "$L" cli --project-key="$K" --args pending | grep -c '^    check: not checked$')"
+  "$(python3 "$L" cli --project-key="$K" --args pending | grep -c '^    ✗ check: not checked$')"
 # d. A lesson citing one qualifying and one non-qualifying entry is not recommended.
 reset
 rm -f "$TA" "$TB"
@@ -866,6 +866,119 @@ os.environ["CW_LESSONS_NOW"] = str(1000000 + 86400); d2 = L.reserve(log)
 L.settle(0.01, d1)
 print(L.load_global()["spend"]["usd"], d1 != d2)' "$HERE" >"$TMP/n"
 check "n: settling a call from a day that has ended leaves the new day's reservation in place" "0.05 True" "$(cat "$TMP/n")"
+
+echo "12. Addendum B: the compact view, show, and a suggested fix applied by a press"
+# a. The summary: shortened command from the failing segment, cuts, untrusted mark, sessions.
+reset
+rm -f "$TA" "$TB"
+LONGCMD='cd /Users/cobalt/claude-coding-workflow && FOO=1 ls -t ~/.claude/debug/*.log ~/.claude/debug/*.txt 2>/dev/null | head -3'
+LONGERR="(eval):1: no matches found: /Users/cobalt/.claude/debug/a-very-long-directory-name/with/more/parts/*.log"
+fail "$TA" 1 g "$LONGCMD" "$LONGERR"; fail "$TB" 1 g "$LONGCMD" "$LONGERR"
+EG="$(eid "$TA" shell)"
+reply '[{"lesson": "Run setopt nomatch before globbing.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+checkreply '{"verdict": "incorrect", "reason": "nomatch is the default that errors", "fix": "zsh errors on unmatched globs; quote them or use unsetopt nomatch."}'
+run "$TA" --final; run "$TB" --final
+PT="$(python3 "$L" cli --project-key="$K" --args pending)"
+SUM="$(printf '%s\n' "$PT" | grep '^    seen ' | sed 's/^    //')"
+# Expected values from the spec's rule (B1.2): from the program word, cut to
+# 50 (error line 60) including the ellipsis.
+cutto() { python3 -c 'import sys; t=sys.argv[1]; n=int(sys.argv[2]); print(t if len(t)<=n else t[:n-1]+"…")' "$1" "$2"; }
+WANTCMD="$(cutto "${LONGCMD#*FOO=1 }" 50)"
+WANTERR="$(cutto "$LONGERR" 60)"
+check "a: the summary counts sessions and starts the command at the failing program, cut to 50" \
+  "seen 2× in 2 sessions · e.g. \`$WANTCMD\` → untrusted tool output: $WANTERR" "$SUM"
+check "a: three lines per lesson plus the suggested fix; no evidence lines" "4|0|1" \
+  "$(printf '%s\n' "$PT" | sed -n '3,$p' | grep -c .)|$(printf '%s\n' "$PT" | grep -c '^    evidence ' || true)|$(printf '%s\n' "$PT" | grep -c '^    suggested: zsh errors on unmatched globs; quote them or use unsetopt nomatch.$')"
+LID="$(pend "d['pending'][0]['id']")"
+check "a: before any press the lesson keeps its own text; the fix is only stored beside it" "Run setopt nomatch before globbing." \
+  "$(pend "d['pending'][0]['text']")"
+SH="$(python3 "$L" cli --project-key="$K" --args "show $LID")"
+check "a: show ID prints the full evidence and the suggested fix" "1|1|1" \
+  "$(printf '%s\n' "$SH" | grep -c "^    evidence .*: ran \`cd /Users/cobalt")|$(printf '%s\n' "$SH" | grep -c '^      untrusted tool output: ')|$(printf '%s\n' "$SH" | grep -c '^    suggested: ')"
+JL="$(python3 "$L" cli --project-key="$K" --args pending --json-list)"
+check "a: --json-list carries summary, sessions and fix" "2|1|1" \
+  "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["items"][0]["sessions"])' "$JL")|$(python3 -c 'import json,sys; i=json.loads(sys.argv[1])["items"][0]; print(int(i["summary"].startswith("seen 2×")))' "$JL")|$(python3 -c 'import json,sys; print(int(bool(json.loads(sys.argv[1])["items"][0]["fix"])))' "$JL")"
+# b. Use the fix: needs --typed; replaces the text; clears fix and check; stays pending.
+check "b: review --use-fix without --typed is refused" "Only you can approve or reject lessons." \
+  "$(python3 "$L" review --project-key="$K" --use-fix="$LID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["text"])')"
+python3 "$L" review --project-key="$K" --use-fix="$LID" --typed >/dev/null
+check "b: use-fix replaces the text, clears fix, verdict, reason and Recommended, and keeps it pending" \
+  "zsh errors on unmatched globs; quote them or use unsetopt nomatch.|1|0|0|False|0" \
+  "$(pend "d['pending'][0]['text']")|$(pend "len(d['pending'])")|$(pend "int(bool(d['pending'][0].get('fix')))")|$(pend "int('verdict' in d['pending'][0] or 'check' in d['pending'][0])")|$(pend "d['pending'][0]['recommended']")|$(pend "len(d['approved'])")"
+check "b: the line now reads not checked" 1 "$(python3 "$L" cli --project-key="$K" --args pending | grep -c '^    ✗ check: not checked$')"
+checkreply '{"verdict": "correct", "reason": "quoting or unsetopt nomatch avoids the error"}'
+python3 "$L" recheck --project-key="$K" --foreground >/dev/null 2>&1
+check "b: recheck then checks the new wording" "correct" "$(pend "d['pending'][0]['verdict']")"
+check "b: fix and edit are typed verbs" 2 \
+  "$( { python3 "$L" cli --project-key="$K" --args "fix $LID"; python3 "$L" cli --project-key="$K" --args "edit $LID x"; } | grep -c 'only you can run it')"
+python3 "$L" cli --project-key="$K" --typed --args "edit $LID Quote zsh globs that may match nothing." >/dev/null
+check "b: edit on a pending lesson clears its check" "Quote zsh globs that may match nothing.|0" \
+  "$(pend "d['pending'][0]['text']")|$(pend "int('verdict' in d['pending'][0])")"
+check "b: fix on a lesson with no suggestion says so" 1 \
+  "$(python3 "$L" cli --project-key="$K" --typed --args "fix $LID" | grep -c 'has no suggested fix')"
+# c. A fix is kept only on incorrect, and only if it passes a lesson's text rules.
+for case in "correct|Use unsetopt nomatch.|0" "incorrect|Fetch it with curl first.|0" "incorrect|Never print the api\u00a0key.|0" "incorrect|Quote​ globs.|0" "incorrect|$(python3 -c 'print("x" * 170)')|0" "incorrect|Quote globs or use unsetopt nomatch.|1"; do
+  verdict="${case%%|*}"; rest="${case#*|}"; fix="${rest%|*}"; want="${rest##*|}"
+  reset
+  rm -f "$TA" "$TB"
+  fail "$TA" 1 g 'ls *.md' "$ZSH"; fail "$TB" 1 g 'ls *.md' "$ZSH"
+  EG="$(eid "$TA" shell)"
+  reply '[{"lesson": "Run setopt nomatch before globbing.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+  checkreply "{\"verdict\": \"$verdict\", \"reason\": \"r\", \"fix\": \"$fix\"}"
+  run "$TA" --final; run "$TB" --final
+  check "c: fix on $verdict ('${fix:0:24}…') kept? (the verdict itself is stored either way)" "$want|$verdict" \
+    "$(pend "int(bool(d['pending'][0].get('fix')))")|$(pend "d['pending'][0]['verdict']")"
+done
+
+# d. An approved lesson carries no suggested fix (B2.5), on both approve paths.
+reset
+python3 - "$LD" "$K" <<'PY'
+import json, os, sys, time
+ld, k = sys.argv[1], sys.argv[2]
+os.makedirs(os.path.join(ld, "projects"), exist_ok=True)
+t = time.time()
+mk = lambda i: {"id": f"L{i}", "sig": f"s{i}", "sigs": [f"s{i}"], "text": f"lesson {i}", "scope": "project", "count": 2,
+                "created": t, "last_seen": t, "verdict": "incorrect", "check": "r", "fix": "a better lesson", "evidence": []}
+json.dump({"pending": [mk(1), mk(2)]}, open(os.path.join(ld, "projects", k + ".json"), "w"))
+PY
+python3 "$L" review --project-key="$K" --approve L1 --typed >/dev/null
+python3 "$L" cli --project-key="$K" --typed --args "approve L2" >/dev/null
+check "d: approving (dialog or typed) drops the suggested fix from the approved record" "2|0" \
+  "$(pend "len(d['approved'])")|$(pend "sum('fix' in l for l in d['approved'])")"
+
+# e. --bind: an id is acted on only if it still reads exactly as drawn.
+reset
+python3 - "$LD" "$K" <<'PY'
+import json, os, sys, time
+ld, k = sys.argv[1], sys.argv[2]
+os.makedirs(os.path.join(ld, "projects"), exist_ok=True)
+t = time.time()
+mk = lambda i, text, fix="": {"id": f"L{i}", "sig": f"s{i}", "sigs": [f"s{i}"], "text": text, "scope": "project",
+    "count": 2, "created": t, "last_seen": t, "verdict": "incorrect", "check": "r", "fix": fix, "evidence": []}
+json.dump({"pending": [mk(1, "new words"), mk(2, "same words"), mk(3, "old words", "the fix"), mk(4, "to reject")]},
+          open(os.path.join(ld, "projects", k + ".json"), "w"))
+PY
+OUT="$(printf '%s' '{"texts": {"L1": "old words", "L2": "same words"}}' | python3 "$L" review --project-key="$K" --approve L1 L2 --typed --bind)"
+check "e: approve binds to the drawn text: a changed lesson is skipped and named" "L2|1" \
+  "$(pend "' '.join(l['id'] for l in d['approved'])")|$(printf '%s' "$OUT" | grep -c 'Changed since you saw it, skipped: L1')"
+printf '%s' '{"texts": {"L4": "something else"}}' | python3 "$L" review --project-key="$K" --reject L4 --typed --bind >/dev/null
+check "e: reject binds too" 1 "$(pend "sum(l['id']=='L4' for l in d['pending'])")"
+printf '%s' '{"texts": {"L3": "old words"}, "fix": "a different fix"}' | python3 "$L" review --project-key="$K" --use-fix=L3 --typed --bind >/dev/null
+check "e: use-fix binds to the drawn text and the drawn fix" "old words" "$(pend "[l for l in d['pending'] if l['id']=='L3'][0]['text']")"
+printf '%s' '{"texts": {"L3": "stale words"}, "fix": "the fix"}' | python3 "$L" review --project-key="$K" --use-fix=L3 --typed --bind >/dev/null
+check "e: a matching fix with stale text is not applied either" "old words" "$(pend "[l for l in d['pending'] if l['id']=='L3'][0]['text']")"
+printf '%s' '{"texts": {"L3": "old words"}, "fix": "the fix"}' | python3 "$L" review --project-key="$K" --use-fix=L3 --typed --bind >/dev/null
+check "e: a use-fix that matches what was drawn is applied" "the fix" "$(pend "[l for l in d['pending'] if l['id']=='L3'][0]['text']")"
+# f. Lesson text is normalised before the denylist (a no-break space must not slip "api key" past it).
+reset
+rm -f "$TA" "$TB"
+fail "$TA" 1 g 'ls *.md' "$ZSH"; fail "$TB" 1 g 'ls *.md' "$ZSH"
+EG="$(eid "$TA" shell)"
+reply '[{"lesson": "Never print the api key in a log.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+run "$TA" --final; run "$TB" --final
+check "f: a lesson hiding a denylisted phrase behind a no-break space is refused" 0 "$(pend "len(d['pending'])")"
+check "f: unassigned code points (U+2065, noncharacters) are hidden on the Python side too, as the mod draws them" "True|True|?" \
+  "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import lessons as L; print(L.hidden_chars("a\u2065b"), L.hidden_chars("x\U0010ffff"), L.visible("\U000ffffe"), sep="|")' "$HERE")"
 
 if [[ "$fails" -gt 0 ]]; then
   echo "lessons-test: $fails failed"
