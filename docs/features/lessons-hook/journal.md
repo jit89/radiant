@@ -96,3 +96,15 @@ Opus (fresh, read-only, this change only): VERDICT FIX, 2 FIX + 10 NOTE; found n
 
 ## 2026-10-12T08:36:17Z — ARCHITECT addendum A review r2
 Narrow Opus round on the round-1 fixes (the first attempt hit the session limit and produced nothing; rerun after the reset): VERDICT DONE. Both round-1 FIXes and every taken NOTE confirmed (j1 red without `if clean`; n red under the old settle and under a reset; l red without the batch set; HIDDEN compiles with gu and leaves astral pairs alone). 5 NOTEs, all taken: j2 given a correct check so only the clean-call rule and the typed-only gate hold it (red only with both removed, as the review predicted; that double plant first crashed in auto_approve building `from` off a failure entry, so `from` now lists corrections only, and j2 then went red for the right reason, an auto-approval); the no-screen test asserts notices are never read (they are consumed on read); pending lessons record `gone` and why_not says "some of its evidence is no longer queued"; case e's L4 has one queued typed correction plus a gone id, pinning recheck's guard (red without it); mod HIDDEN adds U+0890-0891. 3 more plants red. Full suite 21/21 at -j8 (153 s), mods 18/18 and walk, TMPDIR unchanged. Addendum A done.
+
+## 2026-10-12T08:54:20Z — ARCHITECT addendum B
+User: the review is hard to read (long commands, every error line) and asked how a lesson is fixed. Answered: /lessons edit replaces the text verbatim (no Haiku). Locked with the user: B1 compact view (3 lines, summary from the failing segment, expand per lesson, /lessons show ID) and B2 a suggested fix from the check on an incorrect verdict, applied only by a press (Use suggested fix / /lessons fix ID), which clears the check until recheck. Next: Grok round on Addendum B.
+
+## 2026-10-12T09:01:25Z — ARCHITECT addendum B r1
+Grok REVISE: 3 findings (re-read re-ticks cleared lessons; stale check reason after a fix/edit; compact snippet unmarked and text path applies an unseen fix). All taken. Round B2 next.
+
+## 2026-10-12T09:04:17Z — ARCHITECT addendum B r2
+Grok APPROVED Addendum B (rounds B1-B2). 3 findings taken, none rejected. Awaiting user sign-off.
+
+## 2026-10-12T09:04:58Z — ARCHITECT addendum B signoff
+User signed off Addendum B (Grok APPROVED rB2). Next: commit addendum + log, then build in-session.

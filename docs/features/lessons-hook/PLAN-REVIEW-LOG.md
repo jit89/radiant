@@ -194,3 +194,40 @@ VERDICT: APPROVED
 ### Architect's response
 
 APPROVED. No changes.
+
+## Addendum B (2026-10-12)
+User-requested change after Addendum A shipped: a compact review (three lines per lesson, evidence on demand) and a suggested fix the person applies with one press. Appended to PLAN.md as "Addendum B"; rounds below resume the plan session.
+
+## Round B1 — Grok
+
+The last review approved the plan. I'll re-read the revision and check whether anything new broke.Addendum A’s earlier rules are still in the file: the spend return path adjusts by `total_cost_usd − 0.05` under the lock, Recommended needs every cited entry, `typed: true` is only a human typed prompt, the clean distil is stored first, and both daily counters carry a date. Addendum B is the new work, and three of its rules break the review gate.
+
+1. **A re-read after Use suggested fix puts ticks back on lessons the person cleared.** The dialog loads ticks from `recommended` when it opens, and B2.2 tells it to re-read the list and stay open without saying what happens to ticks or scope. The rewritten lesson is supposed to come back unticked, so the natural reload ticks every still-recommended lesson again, including ones the person had unticked, and ticks a recommended lesson that arrived while the dialog was open. The next Approve selected then approves that set. Fix: on that re-read, keep the current scope and the current ticks for ids that are still pending, leave the rewritten id unticked, and leave new ids unticked.
+
+2. **The old check reason stays attached to the new text.** B2.2 says the lesson is shown as `not checked`, but “check is cleared” is defined as removing `verdict` and setting `recommended` false. The stored `check` string is what the dialog prints once `verdict` is gone, and that string was written about the previous wording. The same gap is in B2.3 for `/lessons edit`. Fix: clear the stored `check` string in the same write as the text change, so the line is `not checked`.
+
+3. **The line the person approves from shows tool output with no untrusted mark, and the text path applies a fix it never shows.** The compact summary is `e.g. \`<command>\` → <first error line>`, and `/lessons pending` has no expand. That error line is the same untrusted tool output A1 marks, and a Recommended lesson is already ticked, so Approve selected can land on a snippet that is not labelled. Separately, `suggested: <fix>` is specified only inside the dialog; `/lessons fix ID` applies the stored fix on the text path, and neither `pending` nor `show ID` is required to print it first. Fix: prefix that snippet with `untrusted tool output:`, and print `suggested: <fix>` in `pending` and `show ID` before `fix ID` can apply it.
+
+VERDICT: REVISE
+
+### Architect's response
+
+All 3 taken.
+
+1. **Ticks after a re-read.** B2.3: the re-read keeps the scope and the ticks of ids still pending; the rewritten lesson and newly arrived ids come back unticked; ticks come from `recommended` only when the dialog first opens. Tested.
+2. **Stale check reason.** Use-fix and edit clear verdict, the stored `check` reason, `gone` and recommended in the same write; the line reads `not checked`. Tested.
+3. **Untrusted mark and the text path.** The summary's error snippet is prefixed `untrusted tool output:`; `pending` and `show ID` print `suggested: <fix>` before `fix ID` can apply it. Tested.
+
+## Round B2 — Grok
+
+I'll re-read Addendum B and check the three open findings against the file.The three open findings are fixed in the file. A re-read keeps the current scope and the ticks of lessons still pending, and both the rewritten lesson and any lesson that arrived while the dialog was open come back unticked. Use-fix and edit clear the verdict, the stored check reason, `gone`, and `recommended` in the same write, and the line reads `not checked`. The compact summary prefixes the error snippet with `untrusted tool output:`, and both `pending` and `show ID` print `suggested: <fix>`. The new tests cover those cases.
+
+Addendum A’s earlier rules are unchanged: the spend return path adjusts by `total_cost_usd − 0.05` under the lock, Recommended needs every cited entry, `typed: true` is only a human typed prompt, the clean distil is stored first, and both daily counters carry a date.
+
+No new material flaw.
+
+VERDICT: APPROVED
+
+### Architect's response
+
+APPROVED. No changes.

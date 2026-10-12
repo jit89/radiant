@@ -532,3 +532,102 @@ everything else._
   dialog has no text field.
 - A pane needs a terminal; the engine seats a pane the person opened at any
   width.
+
+## Addendum B (2026-10-12): a compact review, and a suggested fix
+
+_Requested by the user after Addendum A shipped (commit f14ddde): the review
+shows too much (long one-line commands, every error line), and fixing a
+lesson needs a better path than retyping it. Locked with the user: both B1
+and B2. Everything above stands unless this section changes it._
+
+### B1. Compact by default
+
+1. Each pending lesson shows at most three lines, in the dialog and in the
+   `/lessons pending` text alike:
+   - the lesson: `[x]`/`[ ]` (dialog only), its id, its text, and
+     ` (Recommended)` when recommended;
+   - when not recommended, one line `✗ check: <why_not, at most 90 chars>`;
+   - one summary line: `seen <count>× in <S> session(s)`, then, for the
+     first cited failure, ` · e.g. \`<command>\` → untrusted tool output:
+     <its first error line>` (the error line is tool output and keeps A1's
+     mark in the compact view too), or for a correction,
+     ` · you said "<prompt>"`;
+   - in the `/lessons pending` text and in `/lessons show ID`, a lesson with
+     a stored fix also shows `suggested: <fix>`, so the text path shows a
+     fix before `/lessons fix ID` can apply it.
+2. The command in the summary is shortened from the segment that names the
+   failing program (the `program_of` rule: past `cd …&&`, assignments and
+   shell plumbing) and cut to 50 characters; the error line and a quoted
+   prompt to 60; each cut ends in `…`. All text still goes through
+   `visible()` (and the mod's own filter).
+3. Full evidence stays one press away: in the dialog, each lesson has an
+   `evidence ▸` / `evidence ▾` button that shows or hides its full evidence
+   lines, which are drawn as today (error lines marked `untrusted tool
+   output:`); in text, `/lessons show ID` prints that lesson in full.
+4. `--json-list` items gain `summary` (the line in B1.1, already built by
+   lessons.py) and `sessions` (the distinct sessions across cited entries);
+   the full `evidence` stays for the expand view.
+
+### B2. A suggested fix, applied only by the person
+
+1. The check (A2.1) may add `"fix": "<at most 160 chars>"` to its JSON when
+   its verdict is `incorrect`: the lesson reworded so the advice is right.
+   The check prompt asks for it only then. A fix is kept only if it passes
+   everything a lesson must pass (`validate`'s text rules: length, hidden
+   characters, the denylist); otherwise it is dropped and logged by id.
+   Stored on the pending lesson as `fix` (through `visible()`).
+2. In the dialog, a lesson with a fix shows `suggested: <fix>` under it and
+   a **Use suggested fix** button. Pressing it (a key press, so `--typed`)
+   runs `lessons.py review --use-fix ID --typed`: the lesson's text becomes
+   the fix, `fix` is cleared, and its check is cleared in the same write
+   (`verdict` removed, the stored `check` reason removed, `gone` removed,
+   `recommended` false), so it is shown unticked with `✗ check: not checked`
+   until `/lessons recheck` checks it again. The lesson stays pending;
+   nothing reaches the system prompt until the person approves it.
+   `/lessons fix ID` (typed, `--typed` gated) does the same in text.
+3. **Re-reading the list after a fix keeps the person's choices.** The
+   dialog re-reads the pending list and stays open, keeping the current
+   scope and the current ticks for every id still pending; the rewritten
+   lesson comes back unticked, and an id that was not in the dialog before
+   (a lesson that arrived while it was open) comes back unticked. An id no
+   longer pending drops out with its tick. Ticks are taken from
+   `recommended` only when the dialog first opens.
+4. `/lessons edit ID TEXT` on a pending lesson also clears its check the
+   same way (verdict, reason, `gone`, recommended), since the old verdict
+   was about the old text.
+5. A fix comes from Haiku reading the same untrusted evidence as the lesson
+   it corrects: it is shown as a suggestion, passes the same text checks,
+   needs one press to apply and then the usual approval. It never applies
+   itself, never touches an approved lesson, and never feeds A4.
+
+### B3. Tests and review
+
+- lessons-test.sh: the summary line (shortened command from the failing
+  segment, 50/60-char cuts, a correction's prompt, sessions count); `show
+  ID` prints the full evidence; `--json-list` carries `summary` and
+  `sessions`; a check reply with a fix on `incorrect` stores it; a fix that
+  fails the text rules (denylist, hidden characters, too long) is dropped;
+  a fix on `correct` is ignored; `review --use-fix` needs `--typed`,
+  replaces the text, clears `fix` and the check, keeps it pending; `fix ID`
+  and `edit ID` clear the check; `recheck` then checks it.
+- register.test.tsx: the first draw shows only the three compact lines per
+  lesson; `evidence ▸` expands and collapses the full lines; a lesson with a
+  fix shows it and the button; pressing it sends `review --use-fix ID
+  --typed`, re-reads the list and keeps the dialog open; after that re-read
+  a lesson the person had unticked stays unticked, the rewritten lesson and
+  a newly arrived recommended lesson are unticked, and the scope is kept.
+- lessons-test.sh also: the summary marks its error snippet untrusted;
+  `pending` and `show ID` print `suggested: <fix>`; after use-fix and after
+  edit the stored check reason is gone and the line reads `not checked`.
+- Planted bugs, each shown red: summary built from the first segment instead
+  of the failing one; no 50-char cut; a fix applied without the press (stored
+  as the text); a fix that fails the denylist kept; use-fix without
+  `--typed`; use-fix leaving the old verdict.
+- A narrow fresh Opus review of this change; the full suite at `-j 8`.
+
+### B. Out of scope
+
+- Approved lessons are not shown suggested fixes (the check runs on new and
+  rechecked pending lessons only).
+- No free-text editing inside the dialog; `/lessons edit` stays the way to
+  word a lesson yourself.
