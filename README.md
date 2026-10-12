@@ -60,9 +60,19 @@ runs in another that never sees the Architect's conversation.
   compaction, session end and every 5th failed tool call, `lessons.py` reads
   the new transcript rows into an evidence queue (redacted), and Haiku 5.5
   (`claude -p --safe-mode --restricted --effort high`, no tools, 0.05 USD a call, 0.25 USD a
-  day) words them as pending lessons. `/lessons` shows each with its evidence;
-  `approve ID [global]` (project scope by default), `edit`, `reject`,
-  `forget`, `list`, `off`/`on`. Approved lessons (10 lines at most, project
+  day) words them as pending lessons. A second Haiku call checks each one;
+  a lesson is **Recommended** when the check says correct and every piece of
+  its evidence is your own typed correction or was seen in 2+ sessions.
+  `/lessons` opens a checklist dialog: recommended lessons start ticked, the
+  evidence (tool output marked untrusted) and a not-recommended lesson's
+  check reason sit under each, one scope applies to all (project by
+  default), and **Approve selected** / **Reject unselected** / **Keep for
+  later** act only on your key press. A lesson drawn only from your own
+  typed corrections, in a call that saw no tool output, and checked correct
+  is approved without the dialog (project scope, 3 a day, a toast naming
+  `/lessons forget ID`; `/lessons auto off` stops it). Typed verbs remain
+  for `claude -p` and edits: `approve ID [global]`, `edit`, `reject`,
+  `forget`, `list`, `recheck`, `auto on|off`, `off`/`on`. Approved lessons (10 lines at most, project
   first, expired after 30 days unseen) are one system-prompt section that
   changes only when the approved set does. Never writes CLAUDE.md, memory or
   any repo; lessons live in `~/.claude/lessons/` (0700).

@@ -50,6 +50,15 @@ elif op == "result":
         {"type": "tool_result", "tool_use_id": a[0], "is_error": a[1] == "err", "content": a[2]}]}}
 elif op == "say":
     row = {"type": "user", "message": {"role": "user", "content": a[0]}}
+elif op == "sayside":
+    row = {"type": "user", "isSidechain": True, "promptSource": "typed", "origin": {"kind": "human"},
+           "message": {"role": "user", "content": a[0]}}
+elif op == "sayas":
+    # sayas KIND SOURCE TEXT: a prompt row with origin.kind KIND (or "-" for
+    # none) and promptSource SOURCE, as Claude Code stores them.
+    row = {"type": "user", "promptSource": a[1], "message": {"role": "user", "content": a[2]}}
+    if a[0] != "-":
+        row["origin"] = {"kind": a[0]}
 elif op == "text":
     row = {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": a[0]}]}}
 elif op == "partial":
@@ -71,18 +80,36 @@ mkdir -p "$STUB"
 cat >"$TMP/claude" <<'SH'
 #!/usr/bin/env bash
 S="$STUB_DIR"
-echo call >>"$S/calls"
 printf '%s\n' "$@" >"$S/argv"
-printf '%s' "$2" >"$S/prompt"
+# The check call (Addendum A2.1) is told apart by its prompt: it is recorded
+# in check-prompt / checks and answered from check-reply, so calls, prompt and
+# reply stay the distil call's.
+# Per call: reply-N / mode-N (N = this distil call's number since the last
+# reset) override reply / mode; check-mode overrides mode for check calls.
+reply="$S/reply"
+m="$(cat "$S/mode" 2>/dev/null || echo ok)"
+if [[ "$2" == "You check one proposed lesson"* ]]; then
+  echo check >>"$S/checks"
+  printf '%s' "$2" >"$S/check-prompt"
+  reply="$S/check-reply"
+  [[ -f "$reply" ]] || printf '%s' '{"verdict": "unsure", "reason": "stub"}' >"$reply"
+  [[ -f "$S/check-mode" ]] && m="$(cat "$S/check-mode")"
+else
+  echo call >>"$S/calls"
+  n="$(wc -l <"$S/calls" | tr -d ' ')"
+  printf '%s' "$2" >"$S/prompt"
+  printf '%s' "$2" >"$S/prompt-$n"
+  [[ -f "$S/reply-$n" ]] && reply="$S/reply-$n"
+  [[ -f "$S/mode-$n" ]] && m="$(cat "$S/mode-$n")"
+fi
 env >"$S/env"
 pwd >"$S/cwd"
-m="$(cat "$S/mode" 2>/dev/null || echo ok)"
 [[ "$m" != sleep ]] || { sleep "$(cat "$S/sleep")"; touch "$S/slept"; m=ok; }
 case "$m" in
   exit1) echo '{"type":"result","is_error":true,"subtype":"error_during_execution","result":"rate limited","total_cost_usd":0}'; exit 1 ;;
   iserror) echo '{"type":"result","is_error":true,"subtype":"error_max_budget_usd","result":"","total_cost_usd":0.05}' ;;
   nojson) echo 'not json at all' ;;
-  *) python3 -c 'import json,sys; print(json.dumps({"type":"result","subtype":"success","is_error":False,"result":open(sys.argv[1]).read(),"total_cost_usd":float(open(sys.argv[2]).read() if __import__("os").path.exists(sys.argv[2]) else 0.0125),"usage":{"input_tokens":100,"output_tokens":20}}))' "$S/reply" "$S/cost" ;;
+  *) python3 -c 'import json,sys; print(json.dumps({"type":"result","subtype":"success","is_error":False,"result":open(sys.argv[1]).read(),"total_cost_usd":float(open(sys.argv[2]).read() if __import__("os").path.exists(sys.argv[2]) else 0.0125),"usage":{"input_tokens":100,"output_tokens":20}}))' "$reply" "$S/cost" ;;
 esac
 SH
 chmod +x "$TMP/claude"
@@ -241,7 +268,7 @@ check "tool output cannot close the <digest> block" "1|1" \
 check "both digest entries are marked distilled with their count" "True True 2 2" \
   "$(q "$(proj)" "' '.join(str(x) for e in sorted(d['queue'].values(), key=lambda e: e['id']) for x in [e['distilled']]) + ' ' + ' '.join(str(e['count_at_distil']) for e in d['queue'].values())")"
 check "lesson=True only on the cited entry" "$E1" "$(q "$(proj)" "' '.join(e['id'] for e in d['queue'].values() if e['lesson'])")"
-check "spend recorded" 0.0125 "$(q "$LD/global.json" "d['spend']['usd']")"
+check "spend recorded: one distil and one check, each settled to its cost" 0.025 "$(q "$LD/global.json" "d['spend']['usd']")"
 
 echo "4. distil failures keep the queue; malformed twice drops"
 for m in exit1 iserror sleep; do
@@ -327,7 +354,11 @@ check "run --due at a later session start catches the throttled range up" "$(wc 
   "$(q "$(proj)" "d['transcripts']['$T']['offset']")|$(ls "$LC/due" | grep -c s6 || true)"
 python3 - "$LD/global.json" <<'PY'
 import json, sys
-d = json.load(open(sys.argv[1])); d["cap_usd_day"] = 0.01; json.dump(d, open(sys.argv[1], "w"))
+import datetime
+# 0.08 spent of a 0.10 cap: a call needs its 0.05 reservation, so none runs today.
+d = json.load(open(sys.argv[1])); d["cap_usd_day"] = 0.10
+d["spend"] = {"day": datetime.datetime.fromtimestamp(1001200).strftime("%Y-%m-%d"), "usd": 0.08}
+json.dump(d, open(sys.argv[1], "w"))
 PY
 : >"$STUB/calls"
 fail "$T" 2 w 'npm test' 'npm ERR! missing script: test'
@@ -551,6 +582,290 @@ json.dump(d, open(p, "w"))
 PY
 check "pending shows hidden characters as ?" "1|1|0" \
   "$(lc pending | grep -c 'ls?\[8mhidden')|$(lc pending | grep -c 'err?x')|$(lc pending | LC_ALL=C grep -c $'\x1b' || true)"
+
+echo "11. Addendum A: the check, Recommended, the dialog's verbs, auto-approve, the spend reserve"
+cid() { python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import lessons as L; print(L.evidence_id(L.correction_sig(sys.argv[2])))' "$HERE" "$1"; }
+checkreply() { printf '%s' "$1" >"$STUB/check-reply"; }
+pend() { q "$(proj)" "$1"; }
+ZSH='(eval):1: no matches found: *.md'
+# a. One failure seen in two transcripts, the check says correct (fenced): recommended.
+reset
+TA="$P/a1.jsonl"; TB="$P/a2.jsonl"
+fail "$TA" 1 g 'ls *.md' "$ZSH"
+fail "$TB" 1 g 'ls *.md' "$ZSH"
+EG="$(eid "$TA" shell)"
+reply '[{"lesson": "Quote zsh globs that may match nothing.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+checkreply '```json
+{"verdict": "correct", "reason": "zsh errors on an unmatched glob by default"}
+```'
+run "$TA" --final; run "$TB" --final
+check "a: seen in 2 transcripts + check correct (fenced reply) → Recommended" "True|correct|2" \
+  "$(pend "d['pending'][0]['recommended']")|$(pend "d['pending'][0]['verdict']")|$(pend "len(d['queue'][[k for k in d['queue']][0]]['sessions'])")"
+argv="$(tr '\n' ' ' <"$STUB/argv")"
+miss=0
+for flag in --safe-mode --restricted --strict-mcp-config "--permission-mode dontAsk" --no-session-persistence \
+  "--max-budget-usd 0.05" "--model claude-haiku-5-5" "--effort high" "--output-format json"; do
+  [[ "$argv" == *" $flag "* ]] || { miss=$((miss + 1)); echo "    check call missing: $flag"; }
+done
+check "the check call uses the distil argv, prompt first, --tools \"\" last" "0|-p|" "$miss|$(sed -n 1p "$STUB/argv")|$(tail -n1 "$STUB/argv")"
+check "the check prompt labels tool output untrusted and escapes <" "1|0" \
+  "$(grep -c 'untrusted_tool_output' "$STUB/check-prompt" | sed 's/^[1-9][0-9]*$/1/')|$(grep -c '</data>.*</data>' "$STUB/check-prompt" || true)"
+# b. The same failure seen twice in one transcript: not recommended, whatever the check says.
+reset
+T="$P/b.jsonl"
+fail "$T" 2 g 'ls *.md' "$ZSH"
+EG="$(eid "$T" shell)"
+reply '[{"lesson": "Quote zsh globs that may match nothing.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+checkreply '{"verdict": "correct", "reason": "ok"}'
+run "$T" --final
+check "b: a single-transcript failure (a zsh: line) is not recommended" "False" "$(pend "d['pending'][0]['recommended']")"
+check "b: a correct but unrecommended lesson says why it is unticked" 1 \
+  "$(python3 "$L" cli --project-key="$K" --args pending | grep -c '^    check: correct, but its evidence is from one session')"
+# c. incorrect, unsure (the stub default), and a failed check call: not recommended, reason kept.
+for v in incorrect unsure exit; do
+  reset
+  fail "$TA" 0 x x x 2>/dev/null || true
+  rm -f "$TA" "$TB"
+  fail "$TA" 1 g 'ls *.md' "$ZSH"; fail "$TB" 1 g 'ls *.md' "$ZSH"
+  EG="$(eid "$TA" shell)"
+  reply '[{"lesson": "Run setopt nomatch before globbing.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+  case "$v" in
+    incorrect) checkreply '{"verdict": "incorrect", "reason": "nomatch is the default that errors"}' ;;
+    unsure) rm -f "$STUB/check-reply" ;;
+    exit) checkreply 'not json' ;;
+  esac
+  run "$TA" --final; run "$TB" --final
+  want="False|incorrect|nomatch is the default that errors"
+  [[ "$v" == unsure ]] && want="False|unsure|stub"
+  [[ "$v" == exit ]] && want="False|unsure|not checked"
+  check "c: check $v → not recommended, its reason stored" "$want" \
+    "$(pend "d['pending'][0]['recommended']")|$(pend "d['pending'][0]['verdict']")|$(pend "d['pending'][0]['check']")"
+done
+check "c: pending text shows the check reason for a lesson not recommended" 1 \
+  "$(python3 "$L" cli --project-key="$K" --args pending | grep -c '^    check: not checked$')"
+# d. A lesson citing one qualifying and one non-qualifying entry is not recommended.
+reset
+rm -f "$TA" "$TB"
+fail "$TA" 1 g 'ls *.md' "$ZSH"; fail "$TB" 1 g 'ls *.md' "$ZSH"
+fail "$TB" 2 m 'make' 'make: *** No rule to make target'
+EG="$(eid "$TA" shell)"; EM="$(eid "$TB" make)"
+reply '[{"lesson": "Check globs and make targets exist first.", "scope": "project", "evidence_ids": ["'"$EG"'", "'"$EM"'"], "count": 4}]'
+checkreply '{"verdict": "correct", "reason": "ok"}'
+run "$TA" --final; run "$TB" --final
+check "d: every cited entry must qualify (one 2-transcript, one single) → not recommended" "False" "$(pend "d['pending'][0]['recommended']")"
+# e. --json-list, review (only the ids given, skips gone ids, needs --typed), recheck.
+reset
+python3 - "$LD" "$K" <<'PY'
+import json, os, sys, time
+ld, k = sys.argv[1], sys.argv[2]
+os.makedirs(os.path.join(ld, "projects"), exist_ok=True)
+t = time.time()
+mk = lambda i, rec: {"id": f"L{i}", "sig": f"s{i}", "sigs": [f"s{i}"], "text": f"lesson {i}\u001b[2J", "scope": "global",
+    "count": 2, "created": t, "last_seen": t, "recommended": rec, "verdict": "correct" if rec else "incorrect",
+    "check": "" if rec else "wrong flag", "evidence": [{"id": f"E{i}", "command": f"cmd{i}", "count": 2,
+    "untrusted_tool_output": [f"err{i}"]}]}
+# L4 cites one queued typed correction (qualifying) and one id gone from the
+# queue: only the gone-evidence guard keeps it from being Recommended.
+p = {"pending": [mk(1, True), mk(2, False), mk(3, False)] + [{"id": "L4", "sig": "s4", "sigs": ["s4", "sq"], "text": "old",
+    "scope": "project", "count": 2, "created": t, "last_seen": t,
+    "evidence": [{"id": "Eq", "user_said": "no, use perl", "after_action": "ls"},
+                 {"id": "Egone", "user_said": "no", "after_action": "ls"}]}],
+     "queue": {"sq": {"id": "Eq", "sig": "sq", "kind": "correction", "typed": True, "first_seen": t, "distilled": True,
+                      "malformed": 0, "count_at_distil": 1, "lesson": True, "prompt": "no, use perl", "action": "ls",
+                      "count": 1, "sessions": ["a"]}}}
+json.dump(p, open(os.path.join(ld, "projects", k + ".json"), "w"))
+PY
+JL="$(python3 "$L" cli --project-key="$K" --args pending --json-list)"
+check "--json-list: items with recommended and check, hidden characters made visible" "True|wrong flag|0" \
+  "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1])["items"]; print(d[0]["recommended"])' "$JL")|$(python3 -c 'import json,sys; d=json.loads(sys.argv[1])["items"]; print(d[1]["check"])' "$JL")|$(printf '%s' "$JL" | grep -c $'\033' || true)"
+check "review without --typed is refused" "Only you can approve or reject lessons.|4" \
+  "$(python3 "$L" review --project-key="$K" --approve L1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["text"])')|$(pend "len(d['pending'])")"
+RV="$(python3 "$L" review --project-key="$K" --approve L1 L9 --reject L3 --scope=project --typed)"
+check "review approves and rejects only the ids given and skips gone ones" "L1|L2 L4|1|skipped: L9" \
+  "$(pend "' '.join(l['id'] for l in d['approved'])")|$(pend "' '.join(l['id'] for l in d['pending'])")|$(pend "int('s3' in d['rejected'])")|$(printf '%s' "$RV" | grep -o 'skipped: L9')"
+checkreply '{"verdict": "correct", "reason": "fine"}'
+python3 "$L" recheck --project-key="$K" --foreground >/dev/null 2>&1
+check "recheck checks only lessons with no verdict; gone evidence is not recommended, and says so" "incorrect|correct|False|1" \
+  "$(pend "[l for l in d['pending'] if l['id']=='L2'][0]['verdict']")|$(pend "[l for l in d['pending'] if l['id']=='L4'][0]['verdict']")|$(pend "[l for l in d['pending'] if l['id']=='L4'][0]['recommended']")|$(python3 "$L" cli --project-key="$K" --args pending | grep -c 'check: correct, but some of its evidence is no longer queued')"
+check "recheck and auto are typed verbs" "2" \
+  "$( { python3 "$L" cli --project-key="$K" --args recheck; python3 "$L" cli --project-key="$K" --args 'auto off'; } | grep -c 'only you can run it')"
+# f. Auto-approve: a typed correction alone → an approved project lesson and a notice.
+reset
+T="$P/f.jsonl"
+fail "$T" 2 mk 'make' 'make: *** No rule to make target'
+tx "$T" use c1 'rm -rf vendor'; tx "$T" result c1 ok ''
+tx "$T" sayas human typed "Don't touch the vendor folder"
+EC="$(cid "Don't touch the vendor folder")"
+reply '[{"lesson": "Never modify the vendor folder.", "scope": "global", "evidence_ids": ["'"$EC"'"], "count": 1}]'
+checkreply '{"verdict": "correct", "reason": "the user said so"}'
+run "$T" --final
+check "f: a typed correction alone is auto-approved at project scope, with a notice" "1|True|project|0|1" \
+  "$(pend "len(d['approved'])")|$(pend "d['approved'][0]['auto']")|$(pend "d['approved'][0]['scope']")|$(pend "len(d['pending'])")|$(pend "len(d['notices'])")"
+check "f: the clean call (first) held no failure and no tool output; the mixed call (second) held the failure" "0|0|1" \
+  "$(sed -n '/^<digest>$/,$p' "$STUB/prompt-1" | grep -c '"kind": "failure"' || true)|$(sed -n '/^<digest>$/,$p' "$STUB/prompt-1" | grep -c 'untrusted_tool_output' || true)|$(sed -n '/^<digest>$/,$p' "$STUB/prompt-2" | grep -c '"kind": "failure"' || true)"
+check "f: notices are shown once" "1|0" \
+  "$(python3 "$L" notices --project-key="$K" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["notices"]))')|$(python3 "$L" notices --project-key="$K" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["notices"]))')"
+check "f: list marks it auto" 1 "$(python3 "$L" cli --project-key="$K" --args list | grep -c '\[project\]  auto')"
+# g. Not typed by the person: each origin goes to pending, never auto.
+for spec in "human suggestion_accepted" "- sdk" "task-notification system" "- typed" "human typed-paste" "human typed-list"; do
+  reset
+  T="$P/g.jsonl"; rm -f "$T"
+  kind="${spec% *}"; src="${spec#* }"; text="Don't touch the vendor folder"
+  [[ "$src" == typed-paste ]] && { src=typed; text="Don't touch the vendor folder [Pasted text #1 +40 lines]"; }
+  tx "$T" use c1 'rm -rf vendor'; tx "$T" result c1 ok ''
+  if [[ "$src" == typed-list ]]; then
+    src=typed
+    python3 - "$T" "$text" <<'PY'
+import json, sys
+row = {"type": "user", "promptSource": "typed", "origin": {"kind": "human"},
+       "message": {"role": "user", "content": [{"type": "text", "text": sys.argv[2]}]}}
+open(sys.argv[1], "a").write(json.dumps(row) + "\n")
+PY
+  else
+    tx "$T" sayas "$kind" "$src" "$text"
+  fi
+  EC="$(cid "$text")"
+  reply '[{"lesson": "Never modify the vendor folder.", "scope": "project", "evidence_ids": ["'"$EC"'"], "count": 1}]'
+  checkreply '{"verdict": "correct", "reason": "ok"}'
+  run "$T" --final
+  check "g: origin '$kind' / '$src' → pending, not auto" "0|1" "$(pend "len(d['approved'])")|$(pend "len(d['pending'])")"
+done
+# h. Gates: check not correct, 4th of the day, auto off.
+reset
+T="$P/h.jsonl"
+tx "$T" use c1 'rm -rf vendor'; tx "$T" result c1 ok ''
+tx "$T" sayas human typed "Don't touch the vendor folder"
+EC="$(cid "Don't touch the vendor folder")"
+reply '[{"lesson": "Never modify the vendor folder.", "scope": "project", "evidence_ids": ["'"$EC"'"], "count": 1}]'
+checkreply '{"verdict": "unsure", "reason": "cannot tell"}'
+run "$T" --final
+check "h: a typed correction the check is unsure about → pending (Recommended needs correct)" "0|1|False" \
+  "$(pend "len(d['approved'])")|$(pend "len(d['pending'])")|$(pend "d['pending'][0]['recommended']")"
+reset
+checkreply '{"verdict": "correct", "reason": "ok"}'
+for i in 1 2 3 4; do
+  T="$P/h$i.jsonl"
+  tx "$T" use c1 "tool$i"; tx "$T" result c1 ok ''
+  tx "$T" sayas human typed "Don't run tool$i here again"
+  EC="$(cid "Don't run tool$i here again")"
+  reply '[{"lesson": "Do not run tool'"$i"' here.", "scope": "project", "evidence_ids": ["'"$EC"'"], "count": 1}]'
+  run "$T" --final
+done
+check "h: at most 3 auto-approvals a day; the 4th waits, and is Recommended (a typed correction)" "3|1|True" \
+  "$(pend "len(d['approved'])")|$(pend "len(d['pending'])")|$(pend "d['pending'][0]['recommended']")"
+reset
+python3 "$L" cli --project-key="$K" --typed --args 'auto off' >/dev/null
+T="$P/h5.jsonl"
+tx "$T" use c1 'rm -rf vendor'; tx "$T" result c1 ok ''
+tx "$T" sayas human typed "Don't touch the vendor folder"
+EC="$(cid "Don't touch the vendor folder")"
+reply '[{"lesson": "Never modify the vendor folder.", "scope": "project", "evidence_ids": ["'"$EC"'"], "count": 1}]'
+run "$T" --final
+check "h: auto off → pending" "0|1" "$(pend "len(d['approved'])")|$(pend "len(d['pending'])")"
+# i. The spend reserve: a call needs its 0.05; a return adjusts, never assigns.
+reset
+python3 - "$LD" <<'PY'
+import datetime, json, os, sys
+os.makedirs(sys.argv[1], exist_ok=True)
+json.dump({"cap_usd_day": 0.25, "spend": {"day": datetime.datetime.now().strftime("%Y-%m-%d"), "usd": 0.10}},
+          open(os.path.join(sys.argv[1], "global.json"), "w"))
+PY
+python3 -c '
+import sys; sys.path.insert(0, sys.argv[1]); import lessons as L
+log = lambda m: None
+d = L.reserve(log); assert d             # 0.10 + 0.05 reserved
+L.settle(0.002, d)                        # one call returns: 0.10 + 0.002
+d = L.reserve(log); L.settle(0.0, d)      # a CLI failure: only its own 0.05 back
+print(L.load_global()["spend"]["usd"])' "$HERE" >"$TMP/spend"
+check "i: a return adjusts by cost - 0.05; earlier spend survives; a failure takes back only its reservation" 0.102 "$(cat "$TMP/spend")"
+python3 - "$LD" <<'PY'
+import json, os, sys
+p = os.path.join(sys.argv[1], "global.json"); d = json.load(open(p)); d["spend"]["usd"] = 0.21; json.dump(d, open(p, "w"))
+PY
+check "i: no call when spend + 0.05 would pass the cap" None \
+  "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import lessons as L; print(L.reserve(lambda m: None))' "$HERE")"
+
+# j. Only the clean call can auto-approve (A4.2), even when the clean call fails.
+reset
+T="$P/j1.jsonl"
+tx "$T" use c1 'rm -rf vendor'; tx "$T" result c1 ok ''
+tx "$T" sayas human typed "Don't touch the vendor folder"
+EC="$(cid "Don't touch the vendor folder")"
+echo exit1 >"$STUB/mode-1"
+reply '[{"lesson": "Never modify the vendor folder.", "scope": "project", "evidence_ids": ["'"$EC"'"], "count": 1}]'
+checkreply '{"verdict": "correct", "reason": "ok"}'
+run "$T" --final
+check "j: the clean call fails; the mixed call's lesson citing only the typed correction goes to pending" "2|0|1" \
+  "$(wc -l <"$STUB/calls" | tr -d ' ')|$(pend "len(d['approved'])")|$(pend "len(d['pending'])")"
+reset
+T="$P/j2.jsonl"
+fail "$T" 2 mk 'make' 'make: *** No rule to make target'
+tx "$T" use c1 'rm -rf vendor'; tx "$T" result c1 ok ''
+tx "$T" sayas human typed "Don't touch the vendor folder"
+EC="$(cid "Don't touch the vendor folder")"; EF="$(eid "$T" make)"
+echo exit1 >"$STUB/mode-1"
+# A correct check, so only the clean-call rule and the typed-only gate hold it
+# in pending (each alone; with both removed the case goes red).
+checkreply '{"verdict": "correct", "reason": "ok"}'
+reply '[{"lesson": "Ask before changing vendor or make targets.", "scope": "project", "evidence_ids": ["'"$EC"'", "'"$EF"'"], "count": 3}]'
+run "$T" --final
+check "j: the clean call fails; a mixed lesson citing the typed correction and a failure goes to pending" "0|1" \
+  "$(pend "len(d['approved'])")|$(pend "len(d['pending'])")"
+# k. The check call failing, or skipped at the cap, inside the pipeline.
+for how in exit1 cap; do
+  reset
+  rm -f "$TA" "$TB"
+  fail "$TA" 1 g 'ls *.md' "$ZSH"; fail "$TB" 1 g 'ls *.md' "$ZSH"
+  EG="$(eid "$TA" shell)"
+  reply '[{"lesson": "Quote zsh globs that may match nothing.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+  checkreply '{"verdict": "correct", "reason": "ok"}'
+  if [[ "$how" == exit1 ]]; then echo exit1 >"$STUB/check-mode"; else
+    mkdir -p "$LD"; printf '{"cap_usd_day": 0.06}' >"$LD/global.json"; fi
+  run "$TA" --final; run "$TB" --final
+  check "k: check $how → unsure, not checked, not recommended" "unsure|not checked|False" \
+    "$(pend "d['pending'][0]['verdict']")|$(pend "d['pending'][0]['check']")|$(pend "d['pending'][0]['recommended']")"
+done
+check "k: at the cap the distil ran and the check call was never made" "0" "$(cat "$STUB/checks" 2>/dev/null | wc -l | tr -d ' ')"
+# l. Two lessons in one reply citing the same evidence: only the first is checked.
+reset
+rm -f "$TA" "$TB"
+fail "$TA" 1 g 'ls *.md' "$ZSH"; fail "$TB" 1 g 'ls *.md' "$ZSH"
+EG="$(eid "$TA" shell)"
+reply '[{"lesson": "Quote zsh globs that may match nothing.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2},
+ {"lesson": "Check a glob matches before passing it in zsh.", "scope": "global", "evidence_ids": ["'"$EG"'"], "count": 2}]'
+run "$TA" --final; run "$TB" --final
+check "l: a second lesson on the same evidence is not checked (it would be dropped as known)" "1|1" \
+  "$(cat "$STUB/checks" 2>/dev/null | wc -l | tr -d ' ')|$(pend "len(d['pending'])")"
+# m. A sidechain row is never a correction; an entry queued before `typed` stays untyped.
+reset
+T="$P/m.jsonl"
+tx "$T" use c1 'rm -rf vendor'; tx "$T" result c1 ok ''
+tx "$T" sayside "Don't touch the vendor folder"
+check "m: a sidechain prompt is not a correction" 0 \
+  "$(python3 "$L" extract --transcript "$T" | python3 -c 'import json,sys; print(sum(s["kind"]=="correction" for s in json.load(sys.stdin)["signals"]))')"
+python3 -c '
+import sys; sys.path.insert(0, sys.argv[1]); import lessons as L
+sig = L.correction_sig("no")
+p = {"queue": {sig: {"id": L.evidence_id(sig), "sig": sig, "kind": "correction", "first_seen": 1, "distilled": False,
+     "malformed": 0, "count_at_distil": 0, "lesson": False, "prompt": "no", "action": "ls", "count": 1}},
+     "counts": {sig: 1}, "approved": []}
+L.apply_signals(p, {"approved": []}, [{"kind": "correction", "sig": sig, "prompt": "no", "action": "ls", "typed": True}], "s1")
+print(p["queue"][sig]["typed"])
+q = {"queue": {}, "counts": {}, "approved": []}
+for i in range(12):
+    L.apply_signals(q, {"approved": []}, [{"kind": "failure", "sig": "f", "tool": "Bash", "command": "x", "errors": []}], f"s{i}")
+print(len(q["queue"]["f"]["sessions"]), q["queue"]["f"]["sessions"][0])' "$HERE" >"$TMP/m"
+check "m: a pre-existing entry with no typed key stays untyped; sessions kept to the newest 10" "False|10 s2" "$(tr '\n' '|' <"$TMP/m" | sed 's/|$//')"
+# n. A reservation from a day that has ended is not taken out of today's spend.
+reset
+python3 -c '
+import os, sys; sys.path.insert(0, sys.argv[1]); import lessons as L
+log = lambda m: None
+os.environ["CW_LESSONS_NOW"] = "1000000"; d1 = L.reserve(log)
+os.environ["CW_LESSONS_NOW"] = str(1000000 + 86400); d2 = L.reserve(log)
+L.settle(0.01, d1)
+print(L.load_global()["spend"]["usd"], d1 != d2)' "$HERE" >"$TMP/n"
+check "n: settling a call from a day that has ended leaves the new day's reservation in place" "0.05 True" "$(cat "$TMP/n")"
 
 if [[ "$fails" -gt 0 ]]; then
   echo "lessons-test: $fails failed"
