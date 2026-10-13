@@ -44,11 +44,17 @@ Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
    committed (crucible, two Opus review rounds, tests green).
 3. ~~Item 4: temp-file hygiene~~ — done (crucible, three Grok rounds, Opus
    review, tests green); today's `$TMPDIR` leftovers cleared once.
-4. ~~Item 1: the lessons hook~~ — done (crucible, five Grok rounds, Opus
-   review, tests green; `mods/lessons`, `scripts/lessons.py`).
+4. ~~Item 1: the lessons hook~~ — done, then extended on the user's requests:
+   Addendum A (checklist dialog, Recommended, auto-approve from typed
+   corrections; f14ddde) and Addendum B (compact review, suggested fix,
+   approvals bound to the drawn text; 3025eb9). The base: crucible, five Grok
+   rounds, Opus review, tests green; `mods/lessons`, `scripts/lessons.py`.
 5. **Next: the red-black tree dogfood (C)** — the full workflow, crucible
    to walk; also the lessons hook's first real use.
-6. **Step 3: a red host proof becomes a fix round (crucible).** Today a
+6. **Item 10: walk progress in the task list; the walk footer dropped
+   (crucible).** (User, 2026-10-13, during the rbtree walk: next house item
+   after the dogfood, ahead of step 3.)
+7. **Step 3: a red host proof becomes a fix round (crucible).** Today a
    proof that fails after the implementer's DONE wakes the walk
    (`proof-red`, `scripts/run-goal.sh`); step 3 sends the proof output back
    as a fix round within `MAX_FIX_ROUNDS`, so an implementer slip no longer
@@ -61,13 +67,13 @@ Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
    implementer message the audit should cover; after the red-black tree,
    which may give the first real proof-red case: uregex had none, since
    Haiku runs the proof itself before DONE.)
-7. Item 3: implementer-prompt audit against the uregex and red-black tree
+8. Item 3: implementer-prompt audit against the uregex and red-black tree
    evidence. (User, 2026-10-11: the lessons hook and the prompt audit come
    before the parallel walker.)
-8. Item 9: TypeScript tier rules — before the TypeScript project's Phase 3
+9. Item 9: TypeScript tier rules — before the TypeScript project's Phase 3
    (user, 2026-10-12: the dogfood after the red-black tree is in TypeScript,
    run in a separate session).
-9. Item 6 / step 5: the parallel walker (crucible); the one change big
+10. Item 6 / step 5: the parallel walker (crucible); the one change big
    enough that a bootstrap might be reconsidered.
 
 uregex walk evidence (for items 3 and 5): 7/7 goals done, 21:42Z-22:52Z;
@@ -75,6 +81,13 @@ Haiku 5.5 on every pass, no DECLINED, no DeepSeek fallback; 1 FIX round (g3,
 oracle gap); 0 proof-red wakes; 1 wake (house false positive, item 7.2);
 implementer cost ~3.19 USD estimated; 4 regression tests added by Haiku on its
 own; clean rebuild 11/11 default, 13/13 ASan+UBSan.
+
+rbtree walk evidence (2026-10-13): 7/7 goals done, 09:43-10:16 IST (33 min,
+4-8 min per goal); Haiku 5.5 on every pass, no DECLINED, no DeepSeek fallback;
+0 FIX rounds; 0 proof-red wakes (step 3 still has no real case); 0 wakes; Opus
+DONE on every first review; 543 lines of library code; clean rebuild from a
+fresh checkout 7/7 default, 9/9 ASan+UBSan. Phase 3 carried the cost instead:
+two Grok plan rounds, three oracle rounds, a boxed 10-minute Tier 3 scratch.
 
 If a bootstrap is ever reconsidered: launchers deny the sandbox read of
 `$HOUSE/.env` by path only, so a stage-0 copy with a symlinked `.env` would
@@ -411,3 +424,40 @@ node:test recipes, the Tier 2 list) and the matching lines in
 `skills/to-goals/SKILL.md` §4; prove it on a tiny throwaway TypeScript repo
 the way the C rules were proved: plant each oracle defect class and show the
 recipe turns it red. Done before the TypeScript project's Phase 3.
+
+## 10. Walk progress in the task list; the walk footer dropped (2026-10-13)
+
+Seen on the rbtree walk: the Architect seeds the task list from `goals.py todos`
+at walk start, and the run-goals skill leaves it stale until the walk exits (the
+walker is a separate process). The user read "7 tasks (0 done, 7 open)" as the
+walk's state while the walk was 3/7, and prefers the task list to the footer.
+
+Proposal (user, 2026-10-13): the `walk` mod keeps the task list current, and the
+footer goes.
+- The mod calls `$.tool.call({ tool: "TaskUpdate", ... })` (and `TaskCreate` /
+  `TaskList`) from the walker's event stream it already reads: a goal's start
+  → `in_progress`, done → `completed`, bounced → stays open with the reason.
+  Better: the mod creates the tasks itself at walk start, so the Architect no
+  longer seeds them and nothing drifts; the run-goals skill's "seed the todo
+  list" step and its stale-badge note go.
+- Sessions with `TodoWrite` instead of the `Task*` tools get the whole list
+  rewritten with it.
+- The footer (`walk <goal> r<n> · <phase> · <done>/<total>`) is removed; the
+  `/walk` pane stays unless the user says otherwise.
+Probe first, with a throwaway mod: (1) `TaskUpdate` called from a mod runs with
+no permission prompt; (2) it changes the list this session displays, not a
+separate one. If either fails, stop and tell the user before building.
+
+## 11. House notes from the rbtree dogfood (2026-10-13)
+
+1. `grok-review.sh` has no timeout and no liveness check: a round started before
+   the Mac slept sat ~5 h with 3.5 s CPU and no output, indistinguishable from a
+   slow round. Add a wall-clock cap and/or a no-output-for-N-minutes check that
+   fails the round as void; long runs go under `caffeinate -i`.
+2. to-goals tips: a planted-bug runner must compile each variant from scratch
+   (Apple's `make` compares mtimes at 1 s, so a restored file inside the same
+   second keeps the planted object); never splice text with `perl -e "s/…/$x/"`
+   when `$x` can hold `$'`, `$(` or `$&` (it duplicated half of GOALS.md); zsh
+   arrays are 1-indexed (a Tier 1 loop mislabelled every goal).
+3. The rbtree DAG is the first real case for item 6: after g3, g4 / g5 / g7 are
+   independent.
