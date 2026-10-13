@@ -3,8 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { detail, paneLines } from './view'
 import type { WalkGraph } from '../types'
 
-const RUNNING = JSON.stringify({ running: true, label: 'g2-ack r1 · review · 1/3' })
-const IDLE = JSON.stringify({ running: false })
+const NO_WALKS = '[]'
 
 // g1 done; g2 (on g1) running; g3 (on g1 and g2) waiting.
 const GRAPH: WalkGraph = {
@@ -31,14 +30,15 @@ const GRAPH: WalkGraph = {
 }
 
 type On = Parameters<Parameters<typeof test>[1]>[1]
-type Dollar = Parameters<Parameters<typeof test>[1]>[0]
 
 // The engine's session start, working directory, the surfaces drawing it and
 // its panes, standing beneath the mod.
-function engine(on: On, surfaces: readonly ('terminal' | 'desktop')[] = ['terminal']) {
+function engine(on: On, surfaces: readonly ('terminal' | 'desktop')[] = ['terminal'], tools: string[] = []) {
   const panes: string[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'S1' }))
+  on('tool.list', () => ({ value: tools.map(name => ({ name })) as never }))
   on('session.surfaces', () => ({ value: surfaces }))
   on('ui.log', () => ({ value: undefined }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
@@ -50,20 +50,6 @@ function engine(on: On, surfaces: readonly ('terminal' | 'desktop')[] = ['termin
     value: panes.map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })),
   }))
   return panes
-}
-
-// The engine's footer, standing beneath the mod: records the modes it is asked
-// to draw.
-function footer(on: On, seen: string[][]) {
-  on('ui.render', { component: 'SessionMode' }, ($, e) => {
-    seen.push([...e.props.modes])
-    const { Text } = $.ui.resolve(e)
-    return <Text dimColor>{e.props.modes.join(' & ')}</Text>
-  })
-}
-
-async function draw($: Dollar) {
-  await $.ui.render({ surface: 'terminal', component: 'SessionMode', requestId: 'modes', props: { modes: ['focus'] } })
 }
 
 function pane(surface: 'terminal' | 'desktop', bodyColumns: number) {
@@ -84,40 +70,12 @@ function pane(surface: 'terminal' | 'desktop', bodyColumns: number) {
 }
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`adds the running goal to the footer (${surface})`, async ($, on) => {
-    const clock = mock.clock(on)
-    const seen: string[][] = []
-    let stdout = RUNNING
-    const cwds: (string | undefined)[] = []
-    on('process.run', async ($, e) => {
-      cwds.push(e.init?.cwd)
-      return { value: { exitCode: 0, stdout, stderr: '' } }
-    })
-    footer(on, seen)
-    engine(on, [surface])
-    // The desktop app hosts its sessions as an SDK client: not interactive.
-    await $.session.start({ cwd: '/repo', surface, isInteractive: surface === 'terminal' })
-
-    await draw($)
-    expect(seen.at(-1)).toEqual(['focus'])
-
-    await clock.advance(3000)
-    await draw($)
-    expect(seen.at(-1)).toEqual(['focus', 'walk g2-ack r1 · review · 1/3'])
-    expect(cwds.at(-1)).toBe('/repo')
-
-    stdout = IDLE
-    await clock.advance(3000)
-    await draw($)
-    expect(seen.at(-1)).toEqual(['focus'])
-  })
-
   test(`/walk opens the pane with the goal graph (${surface})`, async ($, on) => {
     mock.clock(on)
     const argvs: string[][] = []
     on('process.run', async ($, e) => {
       argvs.push([...e.argv])
-      const stdout = e.argv.includes('graph') ? JSON.stringify(GRAPH) : RUNNING
+      const stdout = e.argv.includes('graph') ? JSON.stringify(GRAPH) : NO_WALKS
       return { value: { exitCode: 0, stdout, stderr: '' } }
     })
     const panes = engine(on, [surface])
@@ -145,7 +103,7 @@ test('/walk DIR reads that repo, a failed read keeps the graph and says why', as
       if (fail) return { value: { exitCode: 1, stdout: '', stderr: 'GOALS.md: bad fence' } }
       return { value: { exitCode: 0, stdout: JSON.stringify(GRAPH), stderr: '' } }
     }
-    return { value: { exitCode: 0, stdout: IDLE, stderr: '' } }
+    return { value: { exitCode: 0, stdout: NO_WALKS, stderr: '' } }
   })
   engine(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
@@ -164,32 +122,12 @@ test('the pane is not read while it is closed', async ($, on) => {
   const argvs: string[][] = []
   on('process.run', async ($, e) => {
     argvs.push([...e.argv])
-    return { value: { exitCode: 0, stdout: IDLE, stderr: '' } }
+    return { value: { exitCode: 0, stdout: NO_WALKS, stderr: '' } }
   })
   engine(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await clock.advance(6000)
-  expect(argvs.length).toBe(2)
   expect(argvs.some(a => a.includes('graph'))).toBe(false)
-})
-
-test('a failed poll keeps the last label', async ($, on) => {
-  const clock = mock.clock(on)
-  const seen: string[][] = []
-  let exitCode = 0
-  on('process.run', async () => ({ value: { exitCode, stdout: exitCode ? '' : RUNNING, stderr: '' } }))
-  footer(on, seen)
-  engine(on)
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await clock.advance(3000)
-  exitCode = 1
-  await clock.advance(3000)
-  await draw($)
-  expect(seen.at(-1)).toEqual(['focus', 'walk g2-ack r1 · review · 1/3'])
-  // Five failures in a row clear it.
-  await clock.advance(4 * 3000)
-  await draw($)
-  expect(seen.at(-1)).toEqual(['focus'])
 })
 
 test('a session no surface draws never polls', async ($, on) => {
@@ -197,10 +135,67 @@ test('a session no surface draws never polls', async ($, on) => {
   let calls = 0
   on('process.run', async () => {
     calls += 1
-    return { value: { exitCode: 0, stdout: RUNNING, stderr: '' } }
+    return { value: { exitCode: 0, stdout: NO_WALKS, stderr: '' } }
   })
   engine(on, [])
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
+  await clock.advance(9000)
+  expect(calls).toBe(0)
+})
+
+test('the poll keeps the task list for the walk this session launched', async ($, on) => {
+  const clock = mock.clock(on)
+  const argvs: string[][] = []
+  const store = new Map<string, Record<string, unknown>>()
+  let next = 1
+  const WALK = { root: '/target', walk_id: 'cfcda33d-1111-4000-8000-000000000001', journal: 'docs/journal/x.md', session: 'S1', mtime: 1, live: true, started: 5 }
+  on('process.run', async ($, e) => {
+    argvs.push([...e.argv])
+    const stdout = e.argv.includes('walks') ? JSON.stringify([WALK]) : JSON.stringify(GRAPH)
+    return { value: { exitCode: 0, stdout, stderr: '' } }
+  })
+  on('tool.call', ($, e) => {
+    const input = e as unknown as Record<string, unknown>
+    if (input.tool === 'TaskList') return { result: { tasks: [...store.values()] } } as never
+    if (input.tool === 'TaskCreate') {
+      const id = String(next++)
+      store.set(id, { id, subject: input.subject, status: 'pending', activeForm: input.activeForm })
+      return { result: { task: { id, subject: input.subject } } } as never
+    }
+    const t = store.get(String(input.taskId))
+    if (!t) return { result: { success: false }, isError: true } as never
+    if (input.status === 'deleted') store.delete(String(input.taskId))
+    else for (const k of ['subject', 'status', 'owner', 'activeForm']) if (input[k] !== undefined) t[k] = input[k]
+    return { result: { success: true } } as never
+  })
+  engine(on, ['terminal'], ['TaskCreate', 'TaskUpdate', 'TaskList'])
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+
+  const walks = argvs.find(a => a.includes('walks')) ?? []
+  expect(walks.slice(walks.indexOf('walks'))).toEqual(['walks', '--session', 'S1', '--json'])
+  expect(argvs.some(a => a.includes('graph') && a.at(-1) === '/target')).toBe(true)
+  const tasks = [...store.values()].sort((a, b) => String(a.subject).localeCompare(String(b.subject)))
+  expect(tasks.map(t => t.subject)).toEqual([
+    'g1-store — Persist inbound mail',
+    'g2-ack — Label-ack after enqueue',
+    'g3-retry — Retry failed sends',
+  ])
+  expect(tasks.every(t => t.owner === 'walk:cfcda33d')).toBe(true)
+  expect(tasks.map(t => t.status)).toEqual(['completed', 'in_progress', 'pending'])
+  expect(tasks[1].activeForm).toBe('g2-ack · review · r1')
+})
+
+test('a session without the Task tools never touches the list', async ($, on) => {
+  const clock = mock.clock(on)
+  let calls = 0
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: NO_WALKS, stderr: '' } }))
+  on('tool.call', () => {
+    calls += 1
+    return { result: {} } as never
+  })
+  engine(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await clock.advance(9000)
   expect(calls).toBe(0)
 })

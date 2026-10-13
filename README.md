@@ -45,11 +45,12 @@ runs in another that never sees the Architect's conversation.
 - `scripts/lib/findings.sh` — parses the reviewer verdict into findings.
 - `scripts/tests/findings-test.sh` — self-test for that parser.
 - `scripts/install.sh` — symlink skills into `~/.claude/skills`, install the `walk` and `lessons` mods.
-- `mods/walk/` — Claude Code mod: the running goal as a prompt-footer label
-  (`walk g4-ack r1 · review · 3/7`), and `/walk [dir]`, a pane with every goal
+- `mods/walk/` — Claude Code mod: the walk this session launched as one task per
+  goal in the session's task list (ctrl+t), kept current by a reconcile every
+  3 s, and `/walk [dir]`, a pane with every goal
   of GOALS.md as a live git graph (state, round, phase, model, time, cost; a
   sidebar beside the transcript in the fullscreen layout). It polls
-  `scripts/events.py status` and `graph`, found beside the mod, else in
+  `scripts/events.py walks` and `graph`, found beside the mod, else in
   `$CLAUDE_CODING_WORKFLOW`, else `~/claude-coding-workflow`. Installed
   user-wide from this repo's marketplace (`.claude-plugin/marketplace.json`);
   `plugin install` copies it into the plugin cache, so after editing the mod

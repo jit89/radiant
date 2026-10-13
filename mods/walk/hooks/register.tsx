@@ -1,25 +1,24 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { WalkLabel, WalkView } from '../types'
+import type { WalkView } from '../types'
+import { EMPTY_TASKS, makeTaskPoller } from './tasks'
 import { paneLines } from './view'
 import type { Tone } from './view'
 
-// The goal a house orchestrator is running in this session's repo, as one
-// label in the prompt footer: `walk g4-ack r1 · review · 3/7`; and `/walk
+// The walk this session launched, as one task per goal in the session's task
+// list, kept current by a reconcile on every poll (reconcile.ts); and `/walk
 // [dir]`, a pane with every goal of that repo's GOALS.md as a git graph. The
 // walker runs as a background shell process, not as a subagent, so this reads
-// what it writes: `scripts/events.py status` and `graph` turn the event index
-// and GOALS.md into the label and the graph, and say idle once the goal
-// stopped or its process is gone.
-const label = atom({ plugin: 'walk', key: 'label' } as const, null as WalkLabel)
+// what it writes: `scripts/events.py walks` (the walks this session's ids
+// launched, in any repo) and `graph` (each goal's state). The task list is
+// written through the Task* tools; every task the mod owns carries the owner
+// `walk:<id8>`, and no other task is touched.
 const view = atom({ plugin: 'walk', key: 'view' } as const, { graph: null, error: null, dir: null } as WalkView)
+const tasks = atom({ plugin: 'walk', key: 'tasks' } as const, EMPTY_TASKS)
 
 const PANE = 'walk'
 const POLL_MS = 3000
-// A failed poll keeps the last label; this many in a row clear it, so a broken
-// poller never leaves a stale goal in the footer.
-const MAX_FAILURES = 5
 
 // `plugin install` copies the mod into the plugin cache, away from the house's
 // scripts, so events.py is found in the house: beside the mod when it is read
@@ -58,13 +57,27 @@ export const register: Register = on => {
     const events = async (args: string[], cwd: string) => {
       const run = await $.process.run([...EVENTS, house, ...args], { cwd, timeoutMs: 5000 })
       if (run.exitCode !== 0) throw new Error(`events.py exit ${run.exitCode}: ${run.stderr.slice(0, 200)}`)
-      return JSON.parse(run.stdout) as Record<string, unknown>
+      return JSON.parse(run.stdout) as unknown
     }
+    // The task poll (tasks.ts), wired to `$`.
+    const pollTasks = makeTaskPoller({
+      toolNames: async () => (await $.tool.list()).map(t => t.name),
+      sessionId: () => $.session.id(),
+      getState: () => read($, tasks),
+      setState: fn => update($, tasks, fn),
+      events: args => events(args, house),
+      call: async input => {
+        const r = (await $.tool.call(input as never)) as { deny?: string; isError?: boolean; result?: unknown }
+        if (r.deny) throw new Error(`${String(input.tool)} refused: ${r.deny}`)
+        if (r.isError) throw new Error(`${String(input.tool)} failed`)
+        return r.result
+      },
+      log: (line, sink) => $.ui.log(line, { to: sink }),
+    })
 
     let inflight: Promise<void> | null = null
-    let failures = 0
     const pollOnce = async () => {
-      // Nothing draws a footer in a plain -p run; the desktop app hosts its
+      // Nothing draws a task list in a plain -p run; the desktop app hosts its
       // sessions as an SDK client (not "interactive") and still draws one.
       if ((await $.session.surfaces()).length === 0) return
       const cwd = await $.session.cwd()
@@ -79,20 +92,7 @@ export const register: Register = on => {
           await update($, view, v => (v.dir === dir ? { ...v, error: String(error) } : v))
         }
       }
-      try {
-        const status = await events(['status', '--json'], cwd)
-        const shown: WalkLabel =
-          status.running && typeof status.label === 'string' ? `walk ${status.label}` : null
-        failures = 0
-        if (shown !== (await read($, label))) await update($, label, () => shown)
-      } catch (error) {
-        // A failed poll (python missing, a GOALS.md mid-edit) keeps the last label.
-        failures += 1
-        $.ui.log(`walk: status poll failed (${failures}): ${String(error)}`, { to: 'debug' })
-        if (failures >= MAX_FAILURES && (await read($, label)) !== null) {
-          await update($, label, () => null)
-        }
-      }
+      await pollTasks()
     }
     // One poll at a time: a tick during one is skipped, and /walk waits for it
     // and then reads again, so the pane it opened is filled at once.
@@ -124,12 +124,6 @@ export const register: Register = on => {
     await $.ui.open({ id: PANE, title: 'walk' })
     await pollNow?.()
     return { text: `Walk pane opened for ${dir ?? 'this repo'}.` }
-  })
-
-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const text = await read($, label)
-    if (!text) return next(e)
-    return next({ ...e, props: { ...e.props, modes: [...e.props.modes, text] } })
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

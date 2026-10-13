@@ -109,7 +109,7 @@ do_install() {
     echo "borrowed skills not linked: no clone at $MATTPOCOCK_SKILLS_DIR. Clone and pin it:"
     clone_hint
   fi
-  # The mods: walk (the running goal in the prompt footer, and the /walk pane)
+  # The mods: walk (the walk's goals in the session's task list, and the /walk pane)
   # and lessons (approved reminders from repeated failures, and /lessons),
   # installed through a local marketplace. `plugin install` copies a mod into
   # the plugin cache, so a changed mod is pushed there by `plugin update`

@@ -55,6 +55,14 @@ let failures = 0
 // dialog leaves the new one's state alone.
 let generation = 0
 
+// Whether a finished tool call is the person's main loop failing: not a
+// subagent's, and not a plugin's (`caller` is `next.origin?.plugin`, `engine`
+// for the model's own call site; a `tool.call` carries no origin of its own).
+// It cannot throw, so the hook's `.catch(passThrough)` never reruns the tool.
+export function countsAsMine(agentId: string | undefined, caller: string | undefined, isError: unknown): boolean {
+  return !agentId && (caller === undefined || caller === 'engine') && isError === true
+}
+
 function keyOf(path: string): string {
   const parts = path.split('/')
   return parts[parts.length - 2] ?? ''
@@ -387,7 +395,7 @@ export const register: Register = on => {
 
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    if (!e.agentId && result.isError === true) {
+    if (countsAsMine(e.agentId, next.origin?.plugin, result.isError)) {
       failures += 1
       if (failures % FAILURES_PER_RUN === 0) {
         try {

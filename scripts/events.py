@@ -19,6 +19,7 @@ Usage (from the target repo):
                    [--goal ID] [--walk ID|current] [--json]
   events.py status [--json]      # the goal running now, from anywhere in the repo
   events.py graph [--json] [--dir DIR]   # every goal as a git graph (the /walk pane)
+  events.py walks --session ID [--session ID ...] [--json]   # walks those sessions launched
   events.py --self-test
 """
 
@@ -101,16 +102,38 @@ def read_walk_file(walk_path: Path) -> str | None:
     return wid if isinstance(wid, str) and wid else None
 
 
-def write_walk_file(walk_path: Path, walk_id: str, journal: Path) -> None:
+def read_walk_data(walk_path: Path) -> dict | None:
+    """The whole walk file, or None when it is missing or does not parse."""
+    try:
+        data = json.loads(walk_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # ValueError: bad JSON or bytes that are not UTF-8
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_walk_file(walk_path: Path, walk_id: str, journal: Path,
+                    session: str | None = None, root: Path | None = None) -> None:
+    """Write the walk file atomically (a temp file beside it, then a rename), so
+    a reader never sees half of it. `session` is the launching Claude session
+    (`CLAUDE_CODE_SESSION_ID`) and `root` the repo root: the walk mod finds the
+    walks a session launched by them."""
     walk_path.parent.mkdir(parents=True, exist_ok=True)
-    walk_path.write_text(
-        json.dumps(
-            {"walk_id": walk_id, "journal": str(journal)},
-            separators=(",", ":"),
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    data = {"walk_id": walk_id, "journal": str(journal)}
+    if session:
+        data["session"] = session
+    if root is not None:
+        data["root"] = str(root)
+    fd, tmp = tempfile.mkstemp(dir=walk_path.parent, prefix=f".{walk_path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, separators=(",", ":")) + "\n")
+        os.replace(tmp, walk_path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def journal_mentions_walk(journal: Path, walk_id: str) -> bool:
@@ -125,11 +148,20 @@ def journal_mentions_walk(journal: Path, walk_id: str) -> bool:
 
 def ensure_walk(journal: Path) -> tuple[str, bool]:
     _, walk_path = paths_for(journal)
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
+    root = git_root()
     existing = read_walk_file(walk_path)
     if existing and journal_mentions_walk(journal, existing):
+        # A reuse rewrites the file only when its launcher or root changed (a
+        # walk resumed from another session moves there); the ensure-walk every
+        # goal's run-goal.sh makes leaves the file, and its mtime, alone.
+        data = read_walk_data(walk_path) or {}
+        if (session and data.get("session") != session) or data.get("root") != str(root):
+            write_walk_file(walk_path, existing, journal,
+                            session=session or data.get("session"), root=root)
         return existing, False
     wid = str(uuid.uuid4())
-    write_walk_file(walk_path, wid, journal)
+    write_walk_file(walk_path, wid, journal, session=session, root=root)
     return wid, True
 
 
@@ -525,6 +557,129 @@ def live_goals(rows: list[dict]) -> dict[str, dict]:
     return live
 
 
+def all_rows(jsonl: Path) -> list[dict]:
+    """Every row of an event index, in file order (not a tail: a long walk
+    outgrows any window, and `started` needs its first rows)."""
+    return tail_rows(jsonl, limit=10**9)
+
+
+def ordered(rows: list[dict]) -> list[tuple[tuple[int, int], dict]]:
+    """Rows with their order key: `ts_mono` (milliseconds; `ts` is whole
+    seconds and a fast gate writes two rows in one second), then position in
+    the file, so a later line wins a tie."""
+    keyed = []
+    for i, r in enumerate(rows):
+        try:
+            mono = int(r.get("ts_mono") or 0)
+        except (TypeError, ValueError):
+            mono = 0
+        keyed.append(((mono, i), r))
+    keyed.sort(key=lambda kr: kr[0])
+    return keyed
+
+
+def walk_liveness(rows: list[dict], walk_id: str) -> tuple[bool, int | None]:
+    """Whether the walker of `walk_id` is alive, and when it began (`started`,
+    the earliest `ts_mono` of a row carrying its pid and pid_start).
+
+    Live: the newest `walk` row, or else the newest `dispatch` / `phase` row,
+    of this walk carries a pid that is alive, and no `walk_end` row of this
+    walk is newer than that row. The `walk` pid is run-goals.sh's and spans the
+    gap between goals; the `dispatch` / `phase` pid is run-goal.sh's and makes a
+    single /run-goal (which writes no `walk` row) live. A `walk_end` older than
+    the live row is stale (an interrupt before the file's unlink, then a reuse).
+    """
+    mine = [(k, r) for k, r in ordered(rows) if r.get("walk_id") == walk_id]
+    newest: dict[str, tuple[tuple[int, int], dict]] = {}
+    for k, r in mine:
+        ev = r.get("event")
+        group = "walk" if ev == "walk" else "goal" if ev in ("dispatch", "phase") else ev
+        if group in ("walk", "goal", "walk_end"):
+            newest[group] = (k, r)
+    chosen = None
+    for group in ("walk", "goal"):
+        if group not in newest:
+            continue
+        k, r = newest[group]
+        p = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+        if p.get("pid") and pid_alive(p["pid"], p.get("pid_start")):
+            chosen = (k, p)
+            break
+    if chosen is None:
+        return False, None
+    k, p = chosen
+    if "walk_end" in newest and newest["walk_end"][0] > k:
+        return False, None
+    pid, start = p.get("pid"), " ".join(str(p.get("pid_start") or "").split())
+    started = None
+    for (mono, _), r in mine:
+        q = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+        if q.get("pid") == pid and " ".join(str(q.get("pid_start") or "").split()) == start:
+            started = mono
+            break
+    return True, started
+
+
+def list_walks(sessions: set[str]) -> list[dict]:
+    """Every walk file under the cache root launched by one of `sessions`:
+    `{root, walk_id, journal, session, mtime, live, started}`. A file without
+    `session` or `root`, or that does not parse, is skipped. A cache root that
+    does not exist yet is no walks; one that cannot be listed raises OSError."""
+    base = cache_root()
+    if not base.exists():
+        return []
+    out = []
+    for d in sorted(base.iterdir()):
+        if not d.is_dir():
+            continue
+        try:
+            files = sorted(d.glob("*.walk"))
+        except OSError:
+            continue
+        for wf in files:
+            data = read_walk_data(wf)
+            if not data or not isinstance(data.get("session"), str) or data["session"] not in sessions \
+                    or not isinstance(data.get("root"), str) or not data["root"] \
+                    or not isinstance(data.get("walk_id"), str) or not data["walk_id"]:
+                continue
+            try:
+                mtime = wf.stat().st_mtime_ns // 1_000_000
+            except OSError:
+                continue
+            live, started = walk_liveness(all_rows(wf.with_suffix(".jsonl")), data["walk_id"])
+            out.append({"root": data["root"], "walk_id": data["walk_id"],
+                        "journal": data.get("journal") or "", "session": data["session"],
+                        "mtime": mtime, "live": live, "started": started})
+    return out
+
+
+def goal_reason(rows: list[dict], goal_id: str) -> str:
+    """Why a paused or bounced goal stopped, never empty: (a) the reason of the
+    goal's newest `wake` / `bounced` row that has one, when newer than its
+    newest `walk` / `dispatch` row; else (b) the newest goal-less `wake` with a
+    reason newer than that row (the walker's own stops); else `stopped`."""
+    keyed = ordered(rows)
+    floor = (-1, -1)
+    for k, r in keyed:
+        if r.get("goal_id") == goal_id and r.get("event") in ("walk", "dispatch"):
+            floor = k
+    own = None
+    loose = None
+    for k, r in keyed:
+        reason = str(r.get("reason") or "").strip()
+        if not reason or r.get("event") not in ("wake", "bounced"):
+            continue
+        if r.get("goal_id") == goal_id:
+            own = (k, reason)
+        elif not r.get("goal_id") and r.get("event") == "wake":
+            loose = (k, reason)
+    if own and own[0] > floor:
+        return own[1]
+    if loose and loose[0] > floor:
+        return loose[1]
+    return "stopped"
+
+
 def walk_status(start: Path) -> dict:
     """The goal an orchestrator is running now in the repo holding `start`:
     the newest of `live_goals`, with how many more run beside it (`others`).
@@ -763,7 +918,8 @@ def walk_graph(start: Path) -> dict:
         out[gid] = {"title": g.get("title") or "", "state": state, "waits": waits,
                     "round": s.get("round"), "model": s.get("model"), "fallback": bool(s.get("fallback")),
                     "secs": s.get("secs"), "cost": s.get("cost"),
-                    "phase": live[gid]["phase"] if state == "running" else None}
+                    "phase": live[gid]["phase"] if state == "running" else None,
+                    "reason": goal_reason(rows, gid) if state in ("paused", "bounced") else None}
     layout = lay_out([{"id": gid, "blocked_by": g.get("blocked_by"), "state": out[gid]["state"]}
                       for gid, g in ((g["id"], g) for g in data.get("goals", []))])
     return {"found": True, "dir": str(root), "feature": feature,
@@ -838,6 +994,17 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_walks(args: argparse.Namespace) -> int:
+    try:
+        walks = list_walks({s for s in args.session if s})
+    except OSError as exc:
+        print(f"events.py walks: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(walks) if args.json else "\n".join(
+        f"{w['walk_id']}  {'live' if w['live'] else 'idle'}  {w['root']}" for w in walks))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] == "--self-test":
         return cmd_self_test()
@@ -883,7 +1050,13 @@ def main(argv: list[str]) -> int:
     gr.add_argument("--json", action="store_true")
     gr.add_argument("--dir", default="")
 
+    w = sub.add_parser("walks")
+    w.add_argument("--session", action="append", default=[], required=True)
+    w.add_argument("--json", action="store_true")
+
     args = p.parse_args(argv)
+    if args.cmd == "walks":
+        return cmd_walks(args)
     if args.cmd == "status":
         return cmd_status(args)
     if args.cmd == "graph":

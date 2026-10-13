@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "walk",
-      "description": "The running goal as a prompt-footer label, and /walk: the goal DAG as a live git graph in a pane.",
+      "description": "The walk this session launched as one task per goal in the task list, and /walk: the goal DAG as a live git graph in a pane.",
       "source": "./mods/walk",
       "category": "productivity"
     },

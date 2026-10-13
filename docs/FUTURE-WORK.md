@@ -51,9 +51,11 @@ Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
    rounds, Opus review, tests green; `mods/lessons`, `scripts/lessons.py`.
 5. **Next: the red-black tree dogfood (C)** — the full workflow, crucible
    to walk; also the lessons hook's first real use.
-6. **Item 10: walk progress in the task list; the walk footer dropped
-   (crucible).** (User, 2026-10-13, during the rbtree walk: next house item
-   after the dogfood, ahead of step 3.)
+6. ~~Item 10: walk progress in the task list; the walk footer dropped~~ —
+   done (2026-10-14): `docs/features/walk-tasks/` (PLAN, review log, journal),
+   `VERIFICATION.md` all ticked — scenario tests, randomised invariants, and a
+   live mini dogfood (`~/dogfood/walktasks{,2}`). (User, 2026-10-13, during
+   the rbtree walk: next house item after the dogfood, ahead of step 3.)
 7. **Step 3: a red host proof becomes a fix round (crucible).** Today a
    proof that fails after the implementer's DONE wakes the walk
    (`proof-red`, `scripts/run-goal.sh`); step 3 sends the proof output back
@@ -345,7 +347,16 @@ safe, and `logs.sh` covers today's queries.
 
 Carried inputs for step 5 from the uregex run: the event index keys a repo by
 its cwd (`repo_id`), so worktree goals must report into the main checkout's
-index or the walk pane and footer will not see them.
+index or the walk pane will not see them.
+
+Carried input from item 10 (walk tasks, 2026-10-14): the footer is gone; the
+`walk` mod's task list replaces it. A walk's tasks come from the walk file the
+launching session owns (`events.py walks`, `session` / `root` in the walk
+file) and the graph of that root, so worktree goals must also report into the
+main checkout's index and walk file. Parallel goals each read `running`, so
+several tasks are `in_progress` at once (the reconcile already allows it). The
+list follows one walk per session; `walks`' `live` is the walker pid, so a
+parallel walker must keep a `walk` row with a live pid while any goal runs.
 
 ## 7. House defects found by the uregex dogfood run (2026-10-11)
 

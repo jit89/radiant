@@ -1,6 +1,6 @@
 {
   "name": "lessons",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Failures and corrections that repeat across sessions become reminders in the system prompt, once you approve them with /lessons.",
   "author": {
     "name": "Soumyajit Chatterjee"

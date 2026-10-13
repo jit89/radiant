@@ -28,7 +28,8 @@ check() {
     fails=$((fails + 1))
   fi
 }
-mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || echo missing; }
+# Python, not stat: GNU stat reads -f as --file-system and prints junk before failing.
+mode() { python3 -c 'import os,sys; p=sys.argv[1]; print(format(os.stat(p).st_mode & 0o777, "o") if os.path.exists(p) else "missing")' "$1"; }
 # jq-free reads of the store: q FILE PYTHON-EXPR (d is the JSON)
 q() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2"; }
 proj() { echo "$LD/projects/$K.json"; }
