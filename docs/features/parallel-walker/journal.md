@@ -26,3 +26,9 @@ Grok REVISE: 1 finding, taken (current attempt defined once; a recut goal starts
 
 ## 2026-10-14T20:22:03Z — ARCHITECT sign-off
 User signed off the plan after 6 Grok rounds (findings 9, 6, 6, 3, 4, 1; every one taken). Plan and log committed alone. Next: step 0 measurements, then the build.
+
+## 2026-10-14T20:28:10Z — ARCHITECT step 0
+Measured in ~/dogfood/pw0 (git 2.54.0, Claude Code 2.1.299); EVIDENCE.md. 0(a): 24 bypass attempts against the deny list all refused (incl. lock-and-rename, rm, symlink, parent-folder renames); own commits and gc --auto fine. 0(b): 120 concurrent worktree commits + 8 worktree add/remove + 9 merges, fsck clean. Gap: a refused lock-and-rename leaves <ref>.lock, a DoS on the walker. Denying the .lock paths works, but packed-refs.lock denied makes every commit print a false error (git 2.54 takes it on commit). Proposed amendment for the user: deny every .lock except packed-refs.lock; the walker stops git-lock-stray on a stray lock.
+
+## 2026-10-14T20:29:04Z — ARCHITECT amendment 1
+User approved amendment 1 (deny every .lock except packed-refs.lock; walker stops git-lock-stray on a stray lock). Committing PLAN amendment, EVIDENCE.md and journal; build starts at step 1.

@@ -576,3 +576,24 @@ work and nothing is locked, because only one process changes walk state.
 - Any change to the `--jobs 1` path beyond the atomic `GOALS.md` write and
   the refusal to run a goal that has a `cw/<goal>` branch or worktree
   (step 2).
+
+## Amendment 1 — step 0 results (user-approved, 2026-10-15)
+
+Step 0 passed (`EVIDENCE.md`): no bypass of the deny list, and the shared
+object store is clean under concurrency. It found one denial-of-service gap,
+and this amendment closes it. It changes step 6's deny list and adds one
+walker check:
+
+- **Lock paths:**
+  - add `<path>.lock` to the deny list for every denied file except
+    `packed-refs`: `HEAD.lock`, `index.lock`, `logs/HEAD.lock`, the walk
+    branch's ref and reflog `.lock`, and each other member's ref and reflog
+    `.lock`;
+  - `packed-refs.lock` stays writable. In git 2.54, denying it makes every
+    implementer commit print a false `error:`, although the commit
+    succeeds.
+- **Stray locks:** before each of its own git writes, the walker checks that
+  no `packed-refs.lock`, and none of the denied `.lock` paths, exists. If
+  one does, it wakes `git-lock-stray`, naming the file, and deletes nothing.
+  `git-lock-stray` joins step 10's list of reasons. A test plants a
+  `packed-refs.lock` and a `refs/heads/<walk>.lock`.
