@@ -90,8 +90,9 @@ assertions, missing plan cases) is a Phase 3 failure, not a Phase 4 problem.
 with every body a trap carrying a unique message (C/C++ write it, flush
 stdout and stderr, then `abort()`); existing API is the real code. Run the
 goal's **`proof`** command — the command the host runs — with
-`PYTHONDONTWRITEBYTECODE=1`. Pass bar (GOAL-FORMAT.md, "Prove the oracle is
-satisfiable before committing it — the tiers", has the per-language notes):
+`PYTHONDONTWRITEBYTECODE=1` (TypeScript: TYPESCRIPT.md). Pass bar
+(GOAL-FORMAT.md, "Prove the oracle is satisfiable before committing it — the
+tiers", has the per-language notes):
 
 - stubbed API: nonzero exit, the trap message in the output, and the test
   source shows this goal's assertion after the call;
@@ -108,11 +109,12 @@ filtered to this goal's case, like any other.
 
 **3. Tier 2 — computed expectations.** Any expected value the plan does not
 state verbatim is checked against an existing reference with the same
-semantics, or a small brute-force model of the spec, in the scratchpad.
-**Tier 3, last resort:** a full scratch implementation only when no reference
-exists and brute force is infeasible — tell the user first; boxed to 30
-minutes unless they extend it; never committed, never shown to the
-implementer; when the box ends, stop and journal the claims left unproven.
+semantics, or a small brute-force model of the spec, in the scratchpad
+(TypeScript: TYPESCRIPT.md). **Tier 3, last resort:** a full scratch
+implementation only when no reference exists and brute force is infeasible —
+tell the user first; boxed to 30 minutes unless they extend it; never
+committed, never shown to the implementer; when the box ends, stop and journal
+the claims left unproven.
 
 **4. Self-review**, with the tier results in hand, against PLAN.md and the
 oracle failure classes (GOAL-FORMAT.md). Record a checklist in the journal's

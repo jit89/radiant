@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "verbatimModuleSyntax": true,
+    "incremental": true,
+    "noEmit": true
+  },
+  "include": [
+    "src/duration.ts",
+    "tests/acceptance/duration.test.ts"
+  ]
+}

@@ -73,9 +73,12 @@ Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
    step now watches END records for repeated notes, the trigger for the next
    audit. (User, 2026-10-11: the lessons hook and the prompt audit come
    before the parallel walker.)
-9. Item 9: TypeScript tier rules — before the TypeScript project's Phase 3
-   (user, 2026-10-12: the dogfood after the red-black tree is in TypeScript,
-   run in a separate session).
+9. ~~Item 9: TypeScript tier rules~~ — done (2026-10-14):
+   `skills/to-goals/TYPESCRIPT.md`, proved in `docs/features/ts-tier-rules/`
+   (PLAN, review log, EVIDENCE, `fixture/run-plants.sh`: 72 cases). Vitest
+   and node:test only. Carried inputs for the TypeScript project are in §9.
+   (User, 2026-10-12: the dogfood after the red-black tree is in TypeScript,
+   run in a separate session.)
 10. Item 6 / step 5: the parallel walker (crucible); the one change big
    enough that a bootstrap might be reconsidered.
 
@@ -447,6 +450,27 @@ node:test recipes, the Tier 2 list) and the matching lines in
 `skills/to-goals/SKILL.md` §4; prove it on a tiny throwaway TypeScript repo
 the way the C rules were proved: plant each oracle defect class and show the
 recipe turns it red. Done before the TypeScript project's Phase 3.
+
+**Carried inputs for the TypeScript project's Phase 1 recon** (item 9, Q3;
+measured on `~/dogfood/ts-tiers`, 2026-10-14). Item 1 stops every goal when
+the walk's `PATH` lacks Node; item 2 stops any goal that needs an install:
+1. *The host proof may not find Node.* `run-goal.sh` runs the `proof` with
+   `bash -c` (no login shell) in the walk's environment minus credential
+   variables, so an `fnm`/`nvm` Node is on `PATH` only if the walk's `PATH`
+   has it — this session's Bash did not — and a `node_modules/.bin` shim
+   starts with `#!/usr/bin/env node`, which looks Node up on `PATH` again. What worked: the `proof` calls Node by absolute
+   path and every tool by its script (`node_modules/vitest/vitest.mjs`,
+   `node_modules/typescript/lib/tsc.js`), proved under `env -i
+   PATH=/usr/bin:/bin bash -c`. The implementer's own shell needs the same
+   (its launcher's `PATH`); decide how the target pins that path.
+2. *The implementer's sandbox has no network*, so `npm install` cannot run
+   during a goal. What worked: dependencies pinned in a committed lockfile and
+   installed once (`npm ci`) before any dispatch, `node_modules/` ignored. A
+   goal that needs a new dependency is a plan decision, installed by the
+   Architect before that goal.
+Also from item 9: TypeScript 7.0.2 was current (the research assumed 5); the
+rules name the versions they were proved on, and `run-plants.sh all` reruns
+them after an upgrade.
 
 ## 10. Walk progress in the task list; the walk footer dropped (2026-10-13)
 

@@ -1,0 +1,1 @@
+( grep -rlE 'assert\.snapshot\(' --include='*.ts' tests/acceptance; test $? -eq 1 ) && TZ=UTC "$NODE" --test --test-reporter=spec tests/acceptance/duration.test.ts

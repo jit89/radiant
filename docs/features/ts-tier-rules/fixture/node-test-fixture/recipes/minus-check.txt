@@ -1,0 +1,1 @@
+TZ=UTC "$NODE" "$REPO/node_modules/typescript/lib/tsc.js" --noEmit --incremental false -p tier.tsconfig.json && TZ=UTC "$NODE" --test --test-reporter=spec tests/acceptance/duration.test.ts

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": [
+    "src/duration.ts",
+    "tests/acceptance/duration.test.ts"
+  ]
+}

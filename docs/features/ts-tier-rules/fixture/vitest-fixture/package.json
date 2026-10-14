@@ -1,0 +1,9 @@
+{
+  "name": "vitest-fixture",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}
