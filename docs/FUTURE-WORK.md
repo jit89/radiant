@@ -56,19 +56,13 @@ Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
    `VERIFICATION.md` all ticked — scenario tests, randomised invariants, and a
    live mini dogfood (`~/dogfood/walktasks{,2}`). (User, 2026-10-13, during
    the rbtree walk: next house item after the dogfood, ahead of step 3.)
-7. **Step 3: a red host proof becomes a fix round (crucible).** Today a
-   proof that fails after the implementer's DONE wakes the walk
-   (`proof-red`, `scripts/run-goal.sh`); step 3 sends the proof output back
-   as a fix round within `MAX_FIX_ROUNDS`, so an implementer slip no longer
-   stops an unattended walk or spends an Opus review on a red diff. The
-   crucible has to tell causes apart: wrong implementation (fix round), wrong
-   oracle (still a wake: the implementer may not edit it), host/sandbox
-   difference, timeout or tamper (wakes, as today). (User, 2026-10-12: moved
-   ahead of the prompt audit and the walker. Before the walker because the
-   walker builds on how a hop ends; before the audit because it adds an
-   implementer message the audit should cover; after the red-black tree,
-   which may give the first real proof-red case: uregex had none, since
-   Haiku runs the proof itself before DONE.)
+7. ~~Step 3: a red host proof becomes a fix round~~ — done (2026-10-14):
+   `docs/features/proof-fix/` (PLAN, review log, journal), ADR 0002. A red
+   proof that clears the mechanical checks is a proof fix round inside the
+   shared `MAX_FIX_ROUNDS`; a round with no change outside the journal wakes
+   `proof-red`; a resume after it proves first. Still no real red-proof case
+   from a dogfood: the evidence is planted (`scripts/tests/proof-fix-test.sh`).
+   Parked from it: item 12 (sandbox the host proof).
 8. ~~Item 3: implementer-prompt audit against the uregex and red-black tree
    evidence~~ — done (2026-10-14), run alongside step 3: `docs/features/prompt-audit/`
    (AUDIT.md, journal). Two follow-ups stay open: a live fix round on a mini
@@ -365,6 +359,17 @@ several tasks are `in_progress` at once (the reconcile already allows it). The
 list follows one walk per session; `walks`' `live` is the walker pid, so a
 parallel walker must keep a `walk` row with a live pid while any goal runs.
 
+Carried input from step 3 (proof fix rounds, 2026-10-14): how a hop ends
+changed. A red host proof is a proof fix round, not a stop; fix lines carry
+`source=review|proof` and, for a proof fix, `head=<sha>`; `resume-state.py`
+prints three more fields (`PENDING_FIX_SOURCE`, `PENDING_FIX_HEAD`,
+`PENDING_FIX_STUCK`), and a resume after a no-progress `proof-red` proves
+before it dispatches. The no-progress rule diffs the tree outside the journal
+and `GOALS.md` against `head=`; a worktree goal must diff its own worktree, and
+the journal it excludes is the main checkout's. Implementer handoffs live in
+`$RUN_DIR/implementer/`, the only run-folder path its Read, Edit and Write
+tools are given (its shell still reads `$RUN_DIR`, item 12).
+
 ## 7. House defects found by the uregex dogfood run (2026-10-11)
 
 1. **Grok rounds outrun the 10-minute foreground call.** Measured from the
@@ -479,3 +484,23 @@ separate one. If either fails, stop and tell the user before building.
    arrays are 1-indexed (a Tier 1 loop mislabelled every goal).
 3. The rbtree DAG is the first real case for item 6: after g3, g4 / g5 / g7 are
    independent.
+
+## 12. Sandbox the host proof (2026-10-14)
+
+The host proof runs implementer-written code unsandboxed, with network and the
+person's files readable (`run-goal.sh`, credential-named variables unset).
+Step 3 (ADR 0002) feeds its output back to the implementer, so a test that
+prints a secret could reach a model provider; the excerpt is redacted
+(`redact_proof`) and the implementer's handoffs moved to their own folder,
+which narrows it but does not close it. The real fix: run the proof under the
+same kind of sandbox as the implementer (reads denied outside the repo and the
+toolchain, no network unless the plan names hosts), with a measured list of
+what a C, Python and TypeScript proof legitimately needs.
+Known limits in the same area: the implementer's shell (Bash is allowed, and
+the sandbox's read denials are paths, not the run folder) can still read the
+raw proof logs in `$RUN_DIR`; only its Read, Edit and Write tools are confined
+to `$RUN_DIR/implementer/`. Deny reads of `$RUN_DIR` outside that subfolder
+in the launcher's sandbox settings, once a path rule that excepts a
+subfolder is measured to work. The legacy `IMPLEMENTER=codex` launcher
+(`deepseek-code.sh`, sandbox `workspace-write`) reads outside its handoff
+folder the same way.

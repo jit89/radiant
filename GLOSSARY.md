@@ -67,6 +67,10 @@ Not: "scratch run" (that is Tier 3 alone)
 One defect the goal reviewer wants fixed, emitted as a `FIX: <path>:<line> — <defect> — <what to change>` line. The path it opens with is the file the implementer must change; naming the oracle there bounces the goal.
 Not: a numbered analysis heading in the reviewer's prose
 
+**Proof fix round**
+A fix round whose findings are the host proof's output (redacted, the first 40 and last 160 lines, at most 16 KiB), not a reviewer's: issued when the proof is red after an implementer pass and clears every mechanical check, inside the shared `MAX_FIX_ROUNDS`. One that changes nothing outside the journal and `GOALS.md` stops as `proof-red`.
+Not: a review FIX; "retry"
+
 **Implementer fallback**
 The one model switch the implementer makes: Haiku's safeguards flag the pass, or it ends `IMPLEMENTER_STATUS: DECLINED`, and the launcher reruns it once on DeepSeek in a fresh session, journaled as `FALLBACK=`. Never on a rate limit.
 Not: "retry", "quota fallback"

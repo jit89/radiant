@@ -198,7 +198,7 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `DEEPSEEK_LOCK_WAIT` | `1800` | Codex launcher only: seconds to wait for its home lock |
 | `DEEPSEEK_REQUIRE_GIT` | `1` | Codex launcher only: require a git repo |
 | `MAX_ROUNDS` | `5` | Plan-attack rounds (skill) |
-| `MAX_FIX_ROUNDS` | `3` | Repair passes after the first implementation: `N` lets up to `N` FIX handoffs be implemented and reviewed (`0` wakes on the first FIX) |
+| `MAX_FIX_ROUNDS` | `3` | Repair passes after the first implementation: `N` lets up to `N` FIX handoffs be implemented, review fixes and proof fix rounds alike (`0` wakes on the first FIX or red proof) |
 | `IMPLEMENTER_TIMEOUT` | `1200` | Seconds per implementer pass (`DEEPSEEK_TIMEOUT` still honoured) |
 | `CLAUDE_REVIEW_TIMEOUT` | `600` | Seconds per review |
 | `PROOF_TIMEOUT` | `600` | Seconds for the host proof |
@@ -210,7 +210,11 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 
 Where files live: a goal's run dir (stop file, diff, proof output, the
 launchers' output) is `~/.cache/claude-coding-workflow/runs/run-goal-<id>-*`,
-removed when the goal lands and kept on a wake; Grok verdicts are in
+removed when the goal lands and kept on a wake. The implementer's Read, Edit
+and Write tools are given only its `implementer/` subfolder (handoffs, return
+documents, the frozen plan), not the raw proof output beside it; its shell can
+still read the run folder until the host proof and the run folder are
+sandboxed (FUTURE-WORK item 12); Grok verdicts are in
 `~/.cache/claude-coding-workflow/grok/`. Both folders are 0700 and pruned
 past `CW_PRUNE_DAYS`. Run the tests with `scripts/tests/run-all.sh [-j N]`:
 four at a time by default (`CW_TEST_JOBS`), each in its own `TMPDIR` and

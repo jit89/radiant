@@ -164,9 +164,20 @@ check "python proof: not tamper" "reviewer-error" "$reason"
 check "python proof: no bytecode under the contract" "" \
   "$(find tests/acceptance -name '*.pyc' 2>/dev/null)"
 
-# 13. Red proof still red.
+# 13. A red proof is a proof fix round (docs/features/proof-fix): the fix is
+#     dispatched; this stub changes nothing on it, so the round then stops as
+#     proof-red (no progress). With no repair budget the first red stops.
 proof 'exit 3'
-check "red: proof-red" "proof-red" "$reason"
+check "red: a proof fix is issued" "yes" \
+  "$(grep -q 'ORCHESTRATOR fix g1-store r0 count=1 .*source=proof' docs/journal/example.md && echo yes || echo no)"
+check "red: the fix round is dispatched" "yes" \
+  "$(grep -q 'ORCHESTRATOR dispatch g1-store r1 ' docs/journal/example.md && echo yes || echo no)"
+check "red: no change, so proof-red" "proof-red" "$reason"
+check "red: names the no-progress rule" "yes" "$(has 'no change since the red proof at r0')"
+check "red: no review" "no" "$reviewed"
+MAX_FIX_ROUNDS=0 proof 'exit 3'
+check "red, no budget: max-fix-rounds" "max-fix-rounds" "$reason"
+check "red, no budget: after a red proof" "yes" "$(has 'after a red proof')"
 
 if [[ "$fails" -eq 0 ]]; then
   echo "proof: OK"

@@ -82,6 +82,15 @@ PHASE="gate"
 CHILD_PID=""
 PENDING_FIX_ROUND=""
 PENDING_FIX_HASH=""
+PENDING_FIX_SOURCE=""
+PENDING_FIX_HEAD=""
+PENDING_FIX_STUCK=0
+# The fix the round now running answers: its source (review|proof) and, for a
+# proof fix, the HEAD it was issued at (the no-progress rule, PLAN step 2).
+CUR_FIX_SOURCE=""
+CUR_FIX_HEAD=""
+# 1 on a resume after a proof fix's no-progress stop: prove before dispatching.
+PROOF_FIRST=0
 # 1 once GOALS.md and the journal hold nothing this workflow did not write;
 # -1 when they were refused (then the stop leaves them, and HEAD, untouched).
 ORCH_FILES_OK=0
@@ -460,6 +469,17 @@ tree_snapshot() {
     { grep '^!! ' || true; }
 }
 
+# no_change_since SHA — true when nothing outside GOALS.md and the journal
+# changed between SHA and HEAD. Journal-only commits (the implementer's
+# checkpoints, the host's stop commit) are not progress. An empty or unknown
+# SHA counts as a change: there is nothing to judge against.
+no_change_since() {
+  [[ -n "$1" ]] || return 1
+  local rc=0
+  git diff --quiet "$1" HEAD -- . ':!GOALS.md' ":!${JOURNAL}" 2>/dev/null || rc=$?
+  [[ "$rc" -eq 0 ]]
+}
+
 tracked_in_head() {
   git cat-file -e "HEAD:$1" 2>/dev/null
 }
@@ -507,15 +527,17 @@ journal_line() {
 }
 
 # Where this in_progress goal stopped, from the journal (lib/resume-state.py).
-# Sets BASE_SHA, ROUND, THREAD_ID, SESSION_ID, PENDING_FIX_ROUND and
-# PENDING_FIX_HASH (the last two empty when no FIX is owed).
+# Sets BASE_SHA, ROUND, THREAD_ID, SESSION_ID, PENDING_FIX_ROUND,
+# PENDING_FIX_HASH, PENDING_FIX_SOURCE and PENDING_FIX_HEAD (empty when no FIX
+# is owed) and PENDING_FIX_STUCK (1 when a proof fix's no-progress stop fired).
 load_resume_state() {
   local state
   state="$(python3 "$HERE/lib/resume-state.py" "$JOURNAL" "$1")" || return 1
   [[ -n "$state" ]] || return 1
-  IFS=$'\t' read -r BASE_SHA ROUND THREAD_ID SESSION_ID PENDING_FIX_ROUND PENDING_FIX_HASH <<<"$state"
+  IFS=$'\t' read -r BASE_SHA ROUND THREAD_ID SESSION_ID PENDING_FIX_ROUND PENDING_FIX_HASH \
+    PENDING_FIX_SOURCE PENDING_FIX_HEAD PENDING_FIX_STUCK <<<"$state"
   local v
-  for v in BASE_SHA THREAD_ID SESSION_ID PENDING_FIX_ROUND PENDING_FIX_HASH; do
+  for v in BASE_SHA THREAD_ID SESSION_ID PENDING_FIX_ROUND PENDING_FIX_HASH PENDING_FIX_SOURCE PENDING_FIX_HEAD; do
     [[ "${!v}" != "-" ]] || printf -v "$v" '%s' ""
   done
   [[ -n "$BASE_SHA" ]]
@@ -577,6 +599,11 @@ cw_cache_init || die_gate "cannot create $CW_CACHE"
 cw_prune
 RUN_DIR="$(mktemp -d "$CW_CACHE/runs/run-goal-${GOAL_ID}-XXXXXX")"
 chmod 700 "$RUN_DIR"
+# The implementer's handoffs, and its return documents beside them. The
+# launcher gives the implementer this folder (--add-dir of the handoff's
+# folder), not RUN_DIR, which holds the raw proof logs, briefs and diffs.
+IMPL_DIR="$RUN_DIR/implementer"
+mkdir -m 700 "$IMPL_DIR"
 STOP_FILE="$RUN_DIR/stop.md"
 ART_DIR="$HOME/.cache/claude-coding-workflow/run-goal-${GOAL_ID}"
 mkdir -p "$ART_DIR"
@@ -711,7 +738,7 @@ PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'impo
 # file is contract (contract_drift), and an edit to it must not become the
 # spec the reviewer judges that same edit against.
 PLAN_PATH="$("$GOALS_PY" "$RUN_DIR/goals-base.md" meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("plan") or "")')"
-PLAN_FROZEN="$RUN_DIR/plan-at-base-$(basename "$PLAN_PATH")"
+PLAN_FROZEN="$IMPL_DIR/plan-at-base-$(basename "$PLAN_PATH")"
 git cat-file -e "$BASE_SHA:$PLAN_PATH" 2>/dev/null && git show "$BASE_SHA:$PLAN_PATH" >"$PLAN_FROZEN" ||
   die_gate "plan $PLAN_PATH is not committed at BASE_SHA ${BASE_SHA:0:12}"
 chmod 400 "$PLAN_FROZEN"
@@ -749,87 +776,104 @@ if [[ "$RESUME" -eq 1 && -n "$PENDING_FIX_ROUND" ]]; then
   if [[ ! -f "$pending_fix" || "$pending_hash" != "$PENDING_FIX_HASH" ]]; then
     die_gate "FIX findings for r${PENDING_FIX_ROUND} are missing or do not match the journaled hash ($pending_fix). Resuming would drop them; re-review instead: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
   fi
+  CUR_FIX_SOURCE="${PENDING_FIX_SOURCE:-review}"
+  CUR_FIX_HEAD="$PENDING_FIX_HEAD"
   # ROUND is the pending repair's number (resume-state.py): same rule as the loop.
   if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
+    if [[ "$CUR_FIX_SOURCE" == proof ]]; then
+      wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; proof fix r${PENDING_FIX_ROUND} still pending, after a red proof: $pending_fix. Rerun with a higher MAX_FIX_ROUNDS to apply it."
+    fi
     wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; FIX r${PENDING_FIX_ROUND} still pending. Rerun with a higher MAX_FIX_ROUNDS to apply it."
   fi
-  FIX_HANDOFF="$RUN_DIR/handoff-${GOAL_ID}-fix-r${PENDING_FIX_ROUND}.md"
+  FIX_HANDOFF="$IMPL_DIR/handoff-${GOAL_ID}-fix-r${PENDING_FIX_ROUND}.md"
   cp "$pending_fix" "$FIX_HANDOFF"
+  # A resume after the no-progress stop proves before it dispatches (PLAN 2a):
+  # a person may have fixed the host; if not, another pass would change nothing.
+  if [[ "$CUR_FIX_SOURCE" == proof && "$PENDING_FIX_STUCK" == 1 ]]; then
+    PROOF_FIRST=1
+  fi
 fi
 
 # --- implement / review loop ----------------------------------------------
 while :; do
-  if [[ -n "$FIX_HANDOFF" ]]; then
-    HAND="$FIX_HANDOFF"
-    FIX_HANDOFF=""
+  if [[ "$PROOF_FIRST" -eq 1 ]]; then
+    # PLAN 2a: a resume after the no-progress stop dispatches nothing this
+    # time round. The checks and the proof below judge the tree that stuck
+    # proof fix left; FIX_HANDOFF stays pending for the red case.
+    IMPL_STATUS=""
   else
-    HAND="$RUN_DIR/handoff-${GOAL_ID}-r${ROUND}.md"
-    {
-      echo "# Handoff: $GOAL_ID"
-      echo
-      echo "- Goal id: \`$GOAL_ID\`"
-      echo "- PLAN (signed, frozen at BASE_SHA): \`$PLAN_FROZEN\` — read this copy. \`$PLAN_PATH\` in the repo is READ-ONLY."
-      echo "- GOALS: GOALS.md (read fence from BASE_SHA)"
-      echo "- Journal: \`$JOURNAL\` — stage it by path with each checkpoint commit"
-      echo "- Oracle (READ-ONLY): \`$ORACLE\`"
-      echo "- tests/acceptance/ is READ-ONLY, every file in it. One that looks wrong is a blocker to report, not an edit."
-      echo "- BASE_SHA: \`$BASE_SHA\`"
-      echo "- Proof: \`$PROOF\`"
-      echo "- Suggested skills: tdd"
-      echo
-      "$GOALS_PY" "$RUN_DIR/goals-base.md" body "$GOAL_ID" 2>/dev/null || \
-        echo "(no markdown body for $GOAL_ID in goals-base.md)"
-    } >"$HAND"
-  fi
+    if [[ -n "$FIX_HANDOFF" ]]; then
+      HAND="$FIX_HANDOFF"
+      FIX_HANDOFF=""
+    else
+      HAND="$IMPL_DIR/handoff-${GOAL_ID}-r${ROUND}.md"
+      {
+        echo "# Handoff: $GOAL_ID"
+        echo
+        echo "- Goal id: \`$GOAL_ID\`"
+        echo "- PLAN (signed, frozen at BASE_SHA): \`$PLAN_FROZEN\` — read this copy. \`$PLAN_PATH\` in the repo is READ-ONLY."
+        echo "- GOALS: GOALS.md (read fence from BASE_SHA)"
+        echo "- Journal: \`$JOURNAL\` — stage it by path with each checkpoint commit"
+        echo "- Oracle (READ-ONLY): \`$ORACLE\`"
+        echo "- tests/acceptance/ is READ-ONLY, every file in it. One that looks wrong is a blocker to report, not an edit."
+        echo "- BASE_SHA: \`$BASE_SHA\`"
+        echo "- Proof: \`$PROOF\`"
+        echo "- Suggested skills: tdd"
+        echo
+        "$GOALS_PY" "$RUN_DIR/goals-base.md" body "$GOAL_ID" 2>/dev/null || \
+          echo "(no markdown body for $GOAL_ID in goals-base.md)"
+      } >"$HAND"
+    fi
 
-  journal_line "## $(utc) — ORCHESTRATOR dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA} THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
-  JOURNALED_IDS="THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
-  events_append --event dispatch --severity info --goal "$GOAL_ID" --round "$ROUND" \
-    --base-sha "$BASE_SHA" \
-    --summary "dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA}" \
-    --payload "$(printf '{"thread_id":"%s","session_id":"%s",%s}' "${THREAD_ID:--}" "${SESSION_ID:--}" "$(events_pid_json)")"
+    journal_line "## $(utc) — ORCHESTRATOR dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA} THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
+    JOURNALED_IDS="THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
+    events_append --event dispatch --severity info --goal "$GOAL_ID" --round "$ROUND" \
+      --base-sha "$BASE_SHA" \
+      --summary "dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA}" \
+      --payload "$(printf '{"thread_id":"%s","session_id":"%s",%s}' "${THREAD_ID:--}" "${SESSION_ID:--}" "$(events_pid_json)")"
 
-  DS_OUT="$RUN_DIR/implementer-r${ROUND}.out"
-  PHASE="implementer r${ROUND}"
-  set +e
-  if [[ -n "$THREAD_ID" ]]; then
-    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" --resume "$THREAD_ID" "$HAND"
-  else
-    run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "$HAND"
-  fi
-  ds_rc=$?
-  set -e
-  PHASE="assess r${ROUND}"
-  verify_git_meta "during implementer r${ROUND}"
-  LAST_IMPL="$(kv "$DS_OUT" "$IMPL_KEY")"
-  kv_keep THREAD_ID "$DS_OUT" THREAD_ID
-  journal_ids
-  RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
-  IMPL_LOG="$(kv "$DS_OUT" LOG)"
-  IMPL_ERR="$(kv "$DS_OUT" stderr)"
-  IMPL_MODEL="$(kv "$DS_OUT" IMPLEMENTER_MODEL)"
-  IMPL_FALLBACK="$(kv "$DS_OUT" IMPLEMENTER_FALLBACK)"
-  IMPL_STATUS="$(kv "$DS_OUT" IMPLEMENTER_STATUS)"
-  [[ -s "$DS_OUT.wrap" ]] && cat "$DS_OUT.wrap" >&2 || true
-  verify_claude_meta "during implementer r${ROUND}"
+    DS_OUT="$RUN_DIR/implementer-r${ROUND}.out"
+    PHASE="implementer r${ROUND}"
+    set +e
+    if [[ -n "$THREAD_ID" ]]; then
+      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" --resume "$THREAD_ID" "$HAND"
+    else
+      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "$HAND"
+    fi
+    ds_rc=$?
+    set -e
+    PHASE="assess r${ROUND}"
+    verify_git_meta "during implementer r${ROUND}"
+    LAST_IMPL="$(kv "$DS_OUT" "$IMPL_KEY")"
+    kv_keep THREAD_ID "$DS_OUT" THREAD_ID
+    journal_ids
+    RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
+    IMPL_LOG="$(kv "$DS_OUT" LOG)"
+    IMPL_ERR="$(kv "$DS_OUT" stderr)"
+    IMPL_MODEL="$(kv "$DS_OUT" IMPLEMENTER_MODEL)"
+    IMPL_FALLBACK="$(kv "$DS_OUT" IMPLEMENTER_FALLBACK)"
+    IMPL_STATUS="$(kv "$DS_OUT" IMPLEMENTER_STATUS)"
+    [[ -s "$DS_OUT.wrap" ]] && cat "$DS_OUT.wrap" >&2 || true
+    verify_claude_meta "during implementer r${ROUND}"
 
-  # Only the result line is required; the other lines are diagnostics.
-  if [[ "$ds_rc" -eq 124 ]]; then
-    wake "implementer-timeout" "no result after ${IMPL_SECS}s (IMPLEMENTER_TIMEOUT). stderr: $DS_OUT.wrap"
+    # Only the result line is required; the other lines are diagnostics.
+    if [[ "$ds_rc" -eq 124 ]]; then
+      wake "implementer-timeout" "no result after ${IMPL_SECS}s (IMPLEMENTER_TIMEOUT). stderr: $DS_OUT.wrap"
+    fi
+    if [[ "$ds_rc" -eq 75 || "$LAST_IMPL" == rate_limited* ]]; then
+      wake "rate_limited" "${IMPL_KEY}=$LAST_IMPL"
+    fi
+    if [[ "$ds_rc" -eq 76 || "$LAST_IMPL" == declined* || "$LAST_IMPL" == flagged* ]]; then
+      wake "implementer-declined" "${IMPL_KEY}=$LAST_IMPL — the implementer refused or declined this goal and no fallback was left (IMPLEMENTER_FALLBACK, a DeepSeek key). Nothing was assessed. Report: $(kv "$DS_OUT" REPORT)"
+    fi
+    if [[ -z "$LAST_IMPL" ]]; then
+      wake "implementer-error" "no ${IMPL_KEY} line (rc=$ds_rc). stderr: $DS_OUT.wrap"
+    fi
+    if [[ "$ds_rc" -ne 0 || "$LAST_IMPL" != ok ]]; then
+      wake "implementer-error" "rc=$ds_rc ${IMPL_KEY}=$LAST_IMPL"
+    fi
+    journal_implemented "$DS_OUT"
   fi
-  if [[ "$ds_rc" -eq 75 || "$LAST_IMPL" == rate_limited* ]]; then
-    wake "rate_limited" "${IMPL_KEY}=$LAST_IMPL"
-  fi
-  if [[ "$ds_rc" -eq 76 || "$LAST_IMPL" == declined* || "$LAST_IMPL" == flagged* ]]; then
-    wake "implementer-declined" "${IMPL_KEY}=$LAST_IMPL — the implementer refused or declined this goal and no fallback was left (IMPLEMENTER_FALLBACK, a DeepSeek key). Nothing was assessed. Report: $(kv "$DS_OUT" REPORT)"
-  fi
-  if [[ -z "$LAST_IMPL" ]]; then
-    wake "implementer-error" "no ${IMPL_KEY} line (rc=$ds_rc). stderr: $DS_OUT.wrap"
-  fi
-  if [[ "$ds_rc" -ne 0 || "$LAST_IMPL" != ok ]]; then
-    wake "implementer-error" "rc=$ds_rc ${IMPL_KEY}=$LAST_IMPL"
-  fi
-  journal_implemented "$DS_OUT"
 
   # --- host assess --------------------------------------------------------
   git status --porcelain
@@ -943,12 +987,65 @@ while :; do
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
     fi
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
-      if [[ "$LAST_IMPL" == ok* ]]; then
-        wake "proof-red" "host proof exit $PROOF_EXIT after ${IMPL_KEY}=ok"
+      # A proof fix round that changed nothing outside the journal: the
+      # implementer saw nothing to change (its sandboxed proof is likely
+      # green), so another round cannot help (PLAN step 2).
+      if [[ "$CUR_FIX_SOURCE" == proof ]] && no_change_since "$CUR_FIX_HEAD"; then
+        wake "proof-red" "no change since the red proof at r$((ROUND - 1)); the host and the sandbox may disagree. Output: $PROOF_FILE"
       fi
-      wake "proof-red" "host proof exit $PROOF_EXIT"
+      if [[ "$PROOF_FIRST" -eq 1 ]]; then
+        # Changed since the stuck fix (PLAN 2a): dispatch the pending fix.
+        PROOF_FIRST=0
+        continue
+      fi
+      # Red: a proof fix round, inside the shared MAX_FIX_ROUNDS (PLAN 3-7).
+      FINDINGS="$RUN_DIR/findings-r${ROUND}.txt"
+      # Bounded like the proof: a pathological log must not stall the walk.
+      set +e
+      run_step "$PROOF_SECS" "$FINDINGS" "$FINDINGS.err" \
+        python3 "$HERE/lib/proof-excerpt.py" "$PROOF_FILE" "$PROOF" "$PROOF_EXIT"
+      excerpt_rc=$?
+      set -e
+      if [[ "$excerpt_rc" -ne 0 ]]; then
+        wake "proof-excerpt-error" "host proof exit $PROOF_EXIT; the excerpt for a proof fix could not be built (rc=$excerpt_rc, $FINDINGS.err). Output: $PROOF_FILE"
+      fi
+      FIX_HEAD="$(git rev-parse HEAD)"
+      FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
+      FIXH="$IMPL_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
+      {
+        echo "# Fix handoff: $GOAL_ID (after round $ROUND: red host proof)"
+        echo
+        echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\` or tests/acceptance/."
+        echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
+        echo
+        echo "The host ran the goal's proof after your last pass and it failed. Make it pass"
+        echo "without changing any contract file. If you believe the oracle or the case table"
+        echo "is wrong, do not work around it: report BLOCKED with the exact question (the"
+        echo "blocker rule). If the proof passes in your sandbox and you have nothing to"
+        echo "change, say so in the journal END record and the return handoff and report"
+        echo "DONE without changing any file."
+        echo
+        echo "## Findings"
+        cat "$FINDINGS"
+      } >"$FIXH"
+      # Saved before the journal names their hash, as for a review fix.
+      cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
+      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof head=${FIX_HEAD}"
+      events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
+        --verdict FIX --base-sha "$BASE_SHA" \
+        --summary "fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof" \
+        --payload "$(printf '{"fix_count":1,"fix_hash":"%s","source":"proof"}' "$FIX_HASH")"
+      ROUND=$((ROUND + 1))
+      if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
+        wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; after a red proof; output: $PROOF_FILE"
+      fi
+      FIX_HANDOFF="$FIXH"
+      CUR_FIX_SOURCE=proof
+      CUR_FIX_HEAD="$FIX_HEAD"
+      continue
     fi
   fi
+  PROOF_FIRST=0
 
   DIFF="$RUN_DIR/diff-${GOAL_ID}-r${ROUND}.patch"
   git diff --no-ext-diff --no-textconv "$BASE_SHA"..HEAD -- . ':!GOALS.md' ":!${JOURNAL}" >"$DIFF"
@@ -1059,7 +1156,7 @@ EOF
         wake "blocked-oracle-edit" "a FIX finding names the oracle / tests/acceptance"
       fi
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
-      FIXH="$RUN_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
+      FIXH="$IMPL_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
       {
         echo "# Fix handoff: $GOAL_ID (round $ROUND)"
         echo
@@ -1073,11 +1170,11 @@ EOF
       # fix round from these (never from the journal, which the implementer
       # reads and which must not carry finding text).
       cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
-      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}"
+      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH} source=review"
       events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
         --verdict FIX --base-sha "$BASE_SHA" \
         --summary "fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}" \
-        --payload "$(printf '{"fix_count":%s,"fix_hash":"%s"}' "$FIX_COUNT_N" "$FIX_HASH")"
+        --payload "$(printf '{"fix_count":%s,"fix_hash":"%s","source":"review"}' "$FIX_COUNT_N" "$FIX_HASH")"
       ROUND=$((ROUND + 1))
       # ROUND is now the number of the repair these findings need; the first
       # implementation is round 0, not a repair. MAX_FIX_ROUNDS=N allows
@@ -1086,6 +1183,8 @@ EOF
         wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS"
       fi
       FIX_HANDOFF="$FIXH"
+      CUR_FIX_SOURCE=review
+      CUR_FIX_HEAD=""
       continue
       ;;
     BLOCKED)

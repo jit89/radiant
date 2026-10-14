@@ -180,6 +180,39 @@ run
 check "6: altered findings: gate" "gate" "$reason"
 check "6: nothing dispatched" "2" "$(calls ds)"
 
+# 7. The pending fix's source, head and stuck flag (docs/features/proof-fix
+#    step 7): fields 7-9, read straight from journals written here.
+state() {
+  local j="$TMP/state-journal.md"
+  printf '%s\n' "$@" >"$j"
+  python3 "$HERE/lib/resume-state.py" "$j" g1-store | cut -f7-9
+}
+D0='## t — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=abc THREAD_ID=- SESSION_ID=-'
+D1='## t — ORCHESTRATOR dispatch g1-store r1 BASE_SHA=abc THREAD_ID=t1 SESSION_ID=-'
+PF='## t — ORCHESTRATOR fix g1-store r0 count=1 hash=h0 source=proof head=h3ad'
+check "7: an old fix line: no source, head or stuck" $'-\t-\t0' \
+  "$(state "$D0" '## t — ORCHESTRATOR fix g1-store r0 count=2 hash=h0')"
+check "7: a review fix" $'review\t-\t0' \
+  "$(state "$D0" '## t — ORCHESTRATOR fix g1-store r0 count=2 hash=h0 source=review')"
+check "7: a proof fix" $'proof\th3ad\t0' "$(state "$D0" "$PF")"
+check "7: implemented is not stuck" $'proof\th3ad\t0' \
+  "$(state "$D0" "$PF" "$D1" '## t — ORCHESTRATOR implemented g1-store r1 STATUS=DONE MODEL=m COST_USD=-')"
+check "7: a blocked stop is not stuck" $'proof\th3ad\t0' \
+  "$(state "$D0" "$PF" "$D1" '## t — ORCHESTRATOR wake g1-store r1 reason=implementer-blocked')"
+check "7: a proof-red stop of r1 is stuck" $'proof\th3ad\t1' \
+  "$(state "$D0" "$PF" "$D1" '## t — ORCHESTRATOR wake g1-store r1 reason=proof-red')"
+check "7: a proof-red stop of another round is not" $'proof\th3ad\t0' \
+  "$(state "$D0" "$PF" '## t — ORCHESTRATOR wake g1-store r0 reason=proof-red')"
+check "7: a review clears it" $'-\t-\t0' \
+  "$(state "$D0" "$PF" "$D1" '## t — ORCHESTRATOR wake g1-store r1 reason=proof-red' \
+    '## t — ORCHESTRATOR review g1-store r1 VERDICT=DONE MODEL=m')"
+check "7: a later dispatch clears stuck (the pending fix ran again)" $'proof\th3ad\t0' \
+  "$(state "$D0" "$PF" "$D1" '## t — ORCHESTRATOR wake g1-store r1 reason=proof-red' "$D1" \
+    '## t — ORCHESTRATOR wake g1-store r1 reason=implementer-blocked')"
+check "7: a newer fix resets stuck" $'proof\thn3w\t0' \
+  "$(state "$D0" "$PF" "$D1" '## t — ORCHESTRATOR wake g1-store r1 reason=proof-red' \
+    '## t — ORCHESTRATOR fix g1-store r1 count=1 hash=h1 source=proof head=hn3w')"
+
 if [[ "$fails" -eq 0 ]]; then
   echo "resume-state: OK"
 else

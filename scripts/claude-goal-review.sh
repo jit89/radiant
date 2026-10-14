@@ -18,7 +18,7 @@
 #
 # Brief SHOULD contain:
 #   GOAL: <id>
-#   PLAN: <run dir>/plan-at-base-PLAN.md   (the signed plan, frozen at BASE_SHA)
+#   PLAN: <run dir>/implementer/plan-at-base-PLAN.md   (the signed plan, frozen at BASE_SHA)
 #   GOALS: GOALS.md
 #   ORACLE: <path|inline>
 #   DIFF_FILE: <path>        # Architect-written git diff (read this)

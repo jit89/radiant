@@ -101,43 +101,8 @@ def is_child():
 
 # ---------------------------------------------------------------- redaction
 
-# The secret word must end a component of the name (GROK_API_KEY, auth-token,
-# PGPASSWORD, AUTHTOKEN), so KeyError: or max_tokens= are left alone.
-_SECRET_NAME = (r"(?:[A-Za-z0-9]+[_.-])*[A-Za-z0-9]*?(?:api[_-]?key|key|token|secret|password|passwd|credentials?)"
-                r"(?:[_.-][A-Za-z0-9]+)*(?![A-Za-z0-9])")
-REDACTIONS = [
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)", re.S), "[REDACTED]"),
-    (re.compile(r"\b(?:sk|xai|sk-ant|sk-proj)-[A-Za-z0-9_-]{8,}"), "[REDACTED]"),
-    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"), "[REDACTED]"),
-    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{16,}"), "[REDACTED]"),
-    (re.compile(r"\bAKIA[0-9A-Z]{12,}"), "[REDACTED]"),
-    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"), "Bearer [REDACTED]"),
-    # "api_key": "value" / 'token': 'value' (JSON, Python dicts)
-    (re.compile(r"""(?i)(["']""" + _SECRET_NAME + r"""["']\s*:\s*)(["'])[^"'\n]*\2"""), r"\1\2[REDACTED]\2"),
-    # export NAME=value, NAME=value, .env lines, YAML name: value
-    (re.compile(r"(?i)\b(" + _SECRET_NAME + r")(\s*[=:]\s*)(?![\s\"']*\[REDACTED\])(\"[^\"\n]*\"|'[^'\n]*'|[^\s\"',;]+)"), r"\1\2[REDACTED]"),
-    (re.compile(r"\b[0-9a-fA-F]{32,}\b"), "[REDACTED]"),
-]
-_LONG = re.compile(r"[A-Za-z0-9+/_-]{40,}={0,2}")
-
-
-def _opaque(m):
-    """A 40+ char run is redacted when it looks like a key (base64/base64url:
-    upper, lower and digits mixed in), not a path or a long word."""
-    s = m.group(0)
-    if "/" in s and all(re.fullmatch(r"[A-Za-z0-9._-]{0,39}", part) for part in s.split("/")):
-        if sum(c.isdigit() for c in s) < 6:
-            return s
-    upper = sum(c.isupper() for c in s)
-    lower = sum(c.islower() for c in s)
-    digits = sum(c.isdigit() for c in s)
-    return "[REDACTED]" if upper >= 3 and lower >= 3 and digits >= 3 else s
-
-
-def redact(text):
-    for pattern, repl in REDACTIONS:
-        text = pattern.sub(repl, text)
-    return _LONG.sub(_opaque, text)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from redact import redact  # noqa: E402  (one redactor, shared with proof-excerpt.py)
 
 
 def clip(text, limit=FIELD_MAX):

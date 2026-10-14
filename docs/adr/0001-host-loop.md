@@ -7,3 +7,5 @@ Grok-in-the-loop was the v1 orchestrator because the launchers are one-shot. Tha
 **Rejected:** DeepSeek finishes → Opus reviews implementer-authored output → DeepSeek reads the Opus essay. That lets both models grade their own work and turns BLOCKED into another implementer pass.
 
 **Consequence:** dirty trees fail closed (wake) rather than auto-commit, because the shared working tree may hold Architect WIP.
+
+**Amended:** red host proof — by [0002](0002-red-proof-fix-round.md): a red proof that clears the mechanical checks is a proof fix round; `proof-red` now wakes on a round that changed nothing.

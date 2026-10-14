@@ -17,3 +17,21 @@ Grok APPROVED (round 4 of 5). Plan to the user for sign-off.
 
 ## 2026-10-14T12:34:13Z — ARCHITECT sign-off
 User signed off the plan (Grok APPROVED r4). Next: commit plan and log, then build in-session.
+
+## 2026-10-14T14:54:38Z — ARCHITECT build
+Built in-session: scripts/lib/redact.py (moved from lessons.py, plus redact_proof), scripts/lib/proof-excerpt.py, resume-state.py fields SOURCE/HEAD/STUCK, run-goal.sh (implementer/ folder, proof fix branch, no_change_since, proof-first resume, source= on fix lines, cap detail), tests (proof-fix-test.sh new; proof-test case 13; resume-state-test case 7), ADR 0002 + 0001 amendment, GLOSSARY, run-goal skill, README, FUTURE-WORK (carried input to item 6; item 12 host-proof sandbox). Note: a transient slowdown of this machine made run-goal tests take minutes per run for a while (HEAD run-goal too: resume-state-test 2574s); later runs were normal. Opus review r1 dispatched.
+
+## 2026-10-14T15:09:41Z — REVIEWER review r1
+Opus (fresh, read-only): VERDICT FIX, 10 findings — frozen plan unreadable by the Read tool; stuck not cleared by a later dispatch; README overclaims what the implementer cannot read; 16 KiB cut drops the tail; a vacuous redaction test; missing plan tests (resumed head, dirty kill, review-fix folder, resume cap); double count; PEM spanning two blocks; NUL bytes break the resume hash; unbounded excerpt time.
+
+## 2026-10-14T15:09:41Z — ARCHITECT review r1 response
+All ten taken (#3 as a doc correction: only Read/Edit/Write are confined; Bash reads are parked with item 12). Details in the review folder response; affected tests pass. Narrow Opus r2 dispatched (fixes touch the redaction and the implementer folder).
+
+## 2026-10-14T15:18:02Z — REVIEWER review r2
+Opus narrow r2: VERDICT FIX, 5 findings — output of 200 lines or fewer still lost its tail on the cut; the PEM-straddle test dropped its own last line; the excerpt failure reused proof-red (stuck semantics); the skill lacked it; one FUTURE-WORK line overstated the implementer folder.
+
+## 2026-10-14T15:18:02Z — ARCHITECT review r2 response
+All five taken: always split head/tail; tests for 150 wide lines and the PEM case keeping the last line; new wake reason proof-excerpt-error with proof-fix-test 18 (stubbed excerpt exit 1); skill and FUTURE-WORK wording. No round 3: no security gate touched. Planted 5 bugs in scratch copies (journal counted as progress, redaction skipped, proof-first never armed, dispatch not clearing stuck, cut dropping the tail): all caught (8, 11, 4, 3, 1 failures).
+
+## 2026-10-14T15:27:25Z — ARCHITECT end
+Checks: run-all -j 8 23/23, events.py --self-test, install.sh --check all pass. Committed on the user OK. Step 3 done.
