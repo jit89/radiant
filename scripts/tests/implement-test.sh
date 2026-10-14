@@ -276,7 +276,26 @@ check "new thread id" yes "$([[ "$OUT" == *"THREAD_ID: haiku:"* && "$OUT" != *"T
 
 echo "== 8d. the prompt asks for a status line the parser accepts =="
 check "example line parses" DONE "$(printf 'IMPLEMENTER_STATUS: DONE\n' >"$TMP/st" && python3 "$HOUSE/scripts/lib/verdict.py" --key IMPLEMENTER_STATUS "$TMP/st" DONE BLOCKED DECLINED)"
-check "prompt ends on that exact line" yes "$([[ "$(cat "$FAKE_DIR/prompt.1")" == *$'\nIMPLEMENTER_STATUS: DONE' ]] && echo yes || echo no)"
+check "prompt ends on that exact line" yes "$([[ "$(cat "$FAKE_DIR/prompt.2")" == *$'\nIMPLEMENTER_STATUS: DONE' ]] && echo yes || echo no)"
+
+echo "== 8e. a resumed pass gets the new handoff, not the whole prompt again =="
+check "resume names the handoff" yes "$(has "Read the handoff: $HANDOFF" "$(cat "$FAKE_DIR/prompt.1")")"
+check "resume names the return handoff" yes "$(has "$RUN_DIR/return-handoff-g1-store-r0.md" "$(cat "$FAKE_DIR/prompt.1")")"
+check "resume restates the status line" yes "$(has "End your reply with one line IMPLEMENTER_STATUS: DONE, BLOCKED or DECLINED" "$(cat "$FAKE_DIR/prompt.1")")"
+check "resume restates the journal records" yes "$(has "Append a new START record for this pass" "$(cat "$FAKE_DIR/prompt.1")")"
+check "resume keeps the rules by reference" yes "$(has "The rules from your first message still apply" "$(cat "$FAKE_DIR/prompt.1")")"
+check "resume omits the numbered steps" yes "$(lacks "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.1")")"
+check "fresh session keeps them" yes "$(has "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.2")")"
+check "the sandbox line names \$TMPDIR, unexpanded" yes "$(has 'under $TMPDIR; put' "$(cat "$FAKE_DIR/prompt.2")")"
+
+echo "== 8f. a resumed Haiku pass that declines falls back with the full prompt =="
+reset "$DECLINED" "$DONE"
+run -- --resume haiku:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee "$HANDOFF"
+check "two calls" 2 "$(calls)"
+check "call 1 short" yes "$(lacks "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.1")")"
+check "call 2 on DeepSeek" deepseek-v4-flash "$(call_field 2 model)"
+check "call 2 told of the decline" yes "$(has "A previous implementer declined this goal" "$(cat "$FAKE_DIR/prompt.2")")"
+check "call 2 has the full prompt" yes "$(has "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.2")")"
 
 echo "== 9. a thread with no provider prefix is not ours =="
 reset "$DONE"

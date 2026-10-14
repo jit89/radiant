@@ -24,7 +24,7 @@ Do not re-enter between goals.
 
 ## After the script exits
 
-- **0** — every goal is `done`. Report the graph. Stop.
+- **0** — every goal is `done`. Report the graph, then read the walk's IMPLEMENTER END records in the journal. A note repeated across goals (the same caveat, defence or unanswered question) means the implementer prompt no longer fits: say so, and propose an implementer-prompt audit (`docs/features/prompt-audit/AUDIT.md` is the last one). Stop.
 - **nonzero** — a **wake**. Read `STOP_FILE:` (the walker reprints the child's). Tell the user. `reason: walk-stuck` means nothing is left to run but goals are bounced or blocked behind one; the stop file lists each and why. `reason: orchestration-files-dirty` / `orchestration-files-changed` means GOALS.md or the journal held edits the workflow did not make; nothing was committed — ask the user to commit or restore them. `scripts/logs.sh errors --last 20` (or `since walk`) for the machine index; do not invent SQL. Do not start the next goal yourself. Do not swap implementer by hand.
 
 - **A wake the Architect (this session) diagnosed by hand:** ask whether a measurable check would have caught it. If so, the Architect adds that check before resuming, and journals it. A defect in the house: a test under `scripts/tests/` (house work is in-session). A defect in the target: an acceptance case under `tests/acceptance/`, committed before resuming and listed under the goal's **Acceptance edits** (a new goal if this one is done) — never a file in the target's `tests/regression/`, which is the implementer's.

@@ -446,8 +446,10 @@ You are the IMPLEMENTATION agent. You implement one goal; planning and review be
    Every record you append (start, checkpoint, end) is a heading in exactly that shape,
    naming THIS goal id, followed by its own lines. Under START write your understanding of
    the goal. When you finish or stop, append an END record: outcome, commit shas, test
-   result, blockers. The host commits the journal only when it grew by whole records of
-   this goal, so keep every line you add inside one of your records.
+   result, blockers. Keep every line you add inside one of your records. Stage the journal
+   by path in each checkpoint commit; lines other agents added ride along, which is
+   expected. The host commits whatever you leave uncommitted, so the END record needs no
+   commit of its own.
 4. CHECKPOINT YOUR WORK. Commit after every green test with a "wip(<goal-id>): <behavior>"
    message, staging only the files you created or modified for this goal, by explicit
    path (git add <path>...). Staging everything (git add -A, git add ., git commit -a)
@@ -460,8 +462,10 @@ You are the IMPLEMENTATION agent. You implement one goal; planning and review be
          tests via TDD, with the cases as given.
    Everything under tests/acceptance/ stays exactly as you found it. A contract test that
    looks wrong is a blocker to report (step 8). Your own finer unit tests sit on top.
-6. STRICT TDD: red, then green, ONE test at a time, testing behavior through the seams
-   the handoff names. You are headless, so take those seams as agreed. Stop at green:
+6. TDD: see each test or check fail before the code that makes it pass, in small steps,
+   testing behavior through the seams the handoff names. Where the oracle is one
+   executable, the next failing check is the next red. You are headless, so take those
+   seams as agreed. Stop at green:
    refactoring belongs to the review stage. Write the least code that passes: reuse,
    then stdlib, then native, then an already-installed dependency, then a one-liner,
    then minimal new code. Keep input validation at trust boundaries, error handling that
@@ -491,8 +495,11 @@ You are the IMPLEMENTATION agent. You implement one goal; planning and review be
 11. When finished, finalize ${RETURN_DOC} (changes, decisions, deviations, test summary,
     open questions and blockers, secrets redacted).
 
-You run in a sandbox: writes outside the repo, to .git/hooks, .git/config and .claude/ are
-blocked, and network access is off. That is expected, not a blocker to report.
+You run in a sandbox. Shell commands can write inside the repo and under \$TMPDIR; put
+scratch drivers, copies and planted-bug builds under \$TMPDIR. Writes to .git/hooks,
+.git/config and .claude/ are blocked, and network access is off. The Read, Edit and Write
+tools reach only the repo and the handoff's folder, so handle scratch files from the shell.
+None of this is a blocker to report.
 
 End your reply with one line of the form IMPLEMENTER_STATUS: <WORD>, nothing after it.
 WORD is DONE when the goal's proof passes, BLOCKED when you stopped on a step 8 blocker
@@ -524,7 +531,17 @@ else
   MODE=new
 fi
 
-run_pass "$PROVIDER" "$MODE" "$SID" "$PROMPT" "$TOOLS"
+# A resumed thread already holds the full instructions; it needs only the new handoff.
+PASS_PROMPT="$PROMPT"
+if [[ "$MODE" == resume ]]; then
+  PASS_PROMPT="Next pass for the same goal. Read the handoff: ${HANDOFF_ABS}
+Keep the return handoff at ${RETURN_DOC}. The rules from your first message still apply.
+Append a new START record for this pass and an END record when you stop, in the same
+heading shape, naming the goal id. Run the goal's proof before claiming DONE.
+End your reply with one line IMPLEMENTER_STATUS: DONE, BLOCKED or DECLINED (after
+DECLINED add \" — \" and one line saying why), nothing after it."
+fi
+run_pass "$PROVIDER" "$MODE" "$SID" "$PASS_PROMPT" "$TOOLS"
 
 # A thread whose first request never landed (a rate limit, a crash) was never
 # saved, and resuming it fails the same way every time. Start the same

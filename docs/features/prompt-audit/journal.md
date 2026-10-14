@@ -1,0 +1,7 @@
+# Journal: prompt-audit
+
+## 2026-10-14T12:13:19Z — ARCHITECT audit
+House item 3, run alongside step 3 (proof-fix) during its Grok waits, on the user's OK. claude-api prompt-audit on claude-implement.sh's implementer prompt and the run-goal.sh handoff text; target claude-haiku-5-5 xhigh; evidence the uregex and rbtree journals (14 goals). Findings: H1 sandbox line contradicted ($TMPDIR writes work; Read tool denied outside repo), H2 journal commit ownership stated two ways (14/14 ENDs reconcile it), M1 "ONE test at a time" vs single-executable oracles, M2 full prompt re-sent on resume; flags L1, F1-F3. Guard for step 3: steps 5/8/9, their numbers and DONE/BLOCKED stay. Report and proposed diff in AUDIT.md; nothing applied.
+
+## 2026-10-14T12:22:24Z — ARCHITECT build
+Applied hunks 1, 2a, 2b, 3, 4 (user OK). Opus review r1 (fresh, read-only): FIX x3, all taken — resume message restates the START/END records, the proof-before-DONE rule and the IMPLEMENTER_STATUS line (a compacted thread may lose the first message); tests pin the handoff and return paths; new case 8f, a resumed Haiku decline falls back to DeepSeek with the full prompt. No second Opus round: no security gate touched. Planted: resume sending the full prompt (6 fails), fallback sending the short one (1 fail); restored green. run-all -j 8: 22/22. Remaining: a live fix round on a mini dogfood (M2), and the short pass on step 3 fix-handoff wording once built.

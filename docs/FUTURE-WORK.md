@@ -69,8 +69,15 @@ Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
    implementer message the audit should cover; after the red-black tree,
    which may give the first real proof-red case: uregex had none, since
    Haiku runs the proof itself before DONE.)
-8. Item 3: implementer-prompt audit against the uregex and red-black tree
-   evidence. (User, 2026-10-11: the lessons hook and the prompt audit come
+8. ~~Item 3: implementer-prompt audit against the uregex and red-black tree
+   evidence~~ — done (2026-10-14), run alongside step 3: `docs/features/prompt-audit/`
+   (AUDIT.md, journal). Two follow-ups stay open: a live fix round on a mini
+   dogfood to check the short resume message (M2), and a short pass on step 3's
+   fix-handoff wording once built. Parked from its flags: Haiku's non-blocking
+   questions ("Open for the Architect") reach nobody; a `question` record that
+   the walk-end review lists would surface them. The run-goals skill's walk-end
+   step now watches END records for repeated notes, the trigger for the next
+   audit. (User, 2026-10-11: the lessons hook and the prompt audit come
    before the parallel walker.)
 9. Item 9: TypeScript tier rules — before the TypeScript project's Phase 3
    (user, 2026-10-12: the dogfood after the red-black tree is in TypeScript,

@@ -770,7 +770,7 @@ while :; do
       echo "- Goal id: \`$GOAL_ID\`"
       echo "- PLAN (signed, frozen at BASE_SHA): \`$PLAN_FROZEN\` — read this copy. \`$PLAN_PATH\` in the repo is READ-ONLY."
       echo "- GOALS: GOALS.md (read fence from BASE_SHA)"
-      echo "- Journal: \`$JOURNAL\` — git add this path on every checkpoint"
+      echo "- Journal: \`$JOURNAL\` — stage it by path with each checkpoint commit"
       echo "- Oracle (READ-ONLY): \`$ORACLE\`"
       echo "- tests/acceptance/ is READ-ONLY, every file in it. One that looks wrong is a blocker to report, not an edit."
       echo "- BASE_SHA: \`$BASE_SHA\`"
