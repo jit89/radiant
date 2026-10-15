@@ -79,8 +79,13 @@ Order (revised after the uregex walk, 2026-10-11; reordered 2026-10-12):
    and node:test only. Carried inputs for the TypeScript project are in §9.
    (User, 2026-10-12: the dogfood after the red-black tree is in TypeScript,
    run in a separate session.)
-10. Item 6 / step 5: the parallel walker (crucible); the one change big
-   enough that a bootstrap might be reconsidered.
+10. ~~Item 6 / step 5: the parallel walker~~ — built (2026-10-15), in-session
+   (user, Q1: no bootstrap): `docs/features/parallel-walker/` (PLAN, six Grok
+   rounds, EVIDENCE with the step 0 sandbox measurements, journal).
+   `run-goals.sh --jobs N` runs fork-join waves in worktrees
+   (`scripts/lib/wave-walk.sh`); `--jobs 1` is the old loop. Live dogfood:
+   an rbtree replay with `--jobs 3` (PLAN step 12). Follow-ups: items 13
+   and 14.
 
 uregex walk evidence (for items 3 and 5): 7/7 goals done, 21:42Z-22:52Z;
 Haiku 5.5 on every pass, no DECLINED, no DeepSeek fallback; 1 FIX round (g3,
@@ -467,7 +472,8 @@ the walk's `PATH` lacks Node; item 2 stops any goal that needs an install:
    during a goal. What worked: dependencies pinned in a committed lockfile and
    installed once (`npm ci`) before any dispatch, `node_modules/` ignored. A
    goal that needs a new dependency is a plan decision, installed by the
-   Architect before that goal.
+   Architect before that goal. A parallel walk does this through GOALS.md's
+   `worktree_setup:` key (item 6), in every worktree and after every merge.
 Also from item 9: TypeScript 7.0.2 was current (the research assumed 5); the
 rules name the versions they were proved on, and `run-plants.sh all` reruns
 them after an upgrade.
@@ -528,3 +534,50 @@ in the launcher's sandbox settings, once a path rule that excepts a
 subfolder is measured to work. The legacy `IMPLEMENTER=codex` launcher
 (`deepseek-code.sh`, sandbox `workspace-write`) reads outside its handoff
 folder the same way.
+
+## 13. Parallel walker: dynamic dispatch (2026-10-15)
+
+Item 6 ships fork-join waves (user's choice): a goal that finishes early waits
+at the join for the slowest member of its wave. Each wave writes one
+walker-owned `join_wait` event (`events.py`), with each goal's seconds of
+waiting in its payload. If real walks show that idle time matters, those rows
+are the case for dynamic dispatch: start the next frontier goal as soon as a
+slot frees. It needs polling for whichever child exited (bash 3.2 has no
+`wait -n`), integrations interleaved with running goals, and a drain policy
+for a stop mid-flight, all of which waves avoid today.
+
+## 14. Parallel walker: an integration-red as a fix round (2026-10-15)
+
+A goal green on its own but red once merged (`integration-red`) stops the walk
+in item 6: the walker resets its merge, the goal stays `in_progress` with its
+branch and worktree, and the Architect decides. Turning it into a fix round
+would mean moving the goal's base onto the new walk tip, which puts other
+goals' changes into the review diff. Revisit with real cases; none exist yet.
+
+## 15. A "simpler?" question in the goal review (2026-10-15)
+
+User proposal: enforce simplicity from the start, per goal, not with a pass
+after the walk. The implementer prompt already says "Stop at green:
+refactoring belongs to the review stage. Write the least code that passes"
+(`claude-implement.sh`), and "allow refactor after green" was withdrawn on
+2026-10-10. The goal reviewer has only "SMELLS — Fowler list as judgement
+calls". Add a seventh heading to `claude-goal-review.sh`'s prompt: **SIMPLER**
+— could this diff be materially smaller or plainer with the same behaviour,
+the same tests passing and the same scope (dead code, duplicated logic, an
+abstraction with one caller, a hand-rolled stdlib function)? A FIX only when
+the simpler form is concrete and the saving real, otherwise a note: each FIX
+spends one of the shared `MAX_FIX_ROUNDS`. A FIX becomes a fix round inside
+the goal, re-proved and re-reviewed by the hop before anything is merged. Not
+an end-of-walk pass: that would rework reviewed, merged code and, in a
+parallel walk, several goals' code at once; cross-goal cleanup stays in
+Phase A. Order (user, 2026-10-15): right after item 6's live dogfood, before
+item 12, so the next real walk measures the extra fix rounds it causes.
+
+## 16. Porcelain parsing in run-goal.sh (2026-10-16)
+
+From the parallel walker's seventh Opus review: `run-goal.sh` reads `git status
+--porcelain` lines as `${line:3}` with surrounding quotes stripped. A path with
+`"`, `\` or a control character (still C-escaped with `core.quotePath=false`)
+or a rename (`old -> new`) is misread. `git status --porcelain -z` removes the
+whole class. Low priority: such a journal or contract path is exotic.
+

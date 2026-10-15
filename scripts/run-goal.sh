@@ -7,6 +7,15 @@
 #
 # Usage (from the target repo):
 #   run-goal.sh <goal-id>
+#   run-goal.sh --worktree <main-root> --base <sha> --result <file> <goal-id>
+#                                          (run-goals.sh --jobs N only)
+#
+# Worktree mode: the goal runs in its own fresh worktree of a parallel walk
+# (docs/features/parallel-walker/PLAN.md, Amendment 3). It writes no status
+# (the walker is the single writer of GOALS.md; status is read from
+# <main-root>/GOALS.md), never resumes, and exits 0 done, 3 bounced, 1 any
+# other stop. On done it writes "reviewed=<sha>" and "done=<sha>" to <file>:
+# the tip the reviewer judged and the journal-only commit on top of it.
 #
 # Exit 0 = goal DONE. Any other exit is a wake; last line is STOP_FILE:.
 # Do not fork launcher prompts.
@@ -28,6 +37,9 @@ source "$HERE/lib/git-guard.sh"
 source "$HERE/lib/orch-files.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/cache.sh"
+# run_step, proof_exec, tree_snapshot, proof_moved: shared with run-goals.sh.
+# shellcheck disable=SC1091
+source "$HERE/lib/proof.sh"
 
 GOALS_PY="$HERE/goals.py"
 # IMPLEMENTER=claude (default): claude-implement.sh, Haiku 5.5 with a DeepSeek
@@ -49,7 +61,18 @@ IMPL_SECS="${IMPLEMENTER_TIMEOUT:-${DEEPSEEK_TIMEOUT:-1200}}"
 REVIEW_SECS="${CLAUDE_REVIEW_TIMEOUT:-600}"
 PROOF_SECS="${PROOF_TIMEOUT:-600}"
 
-GOAL_ID="${1:-}"
+GOAL_ID=""
+# Worktree mode: the main checkout of the parallel walk (empty otherwise), the
+# wave base the worktree was cut from, and the walker's result file.
+WT_MAIN=""
+WT_BASE_SHA=""
+WT_RESULT=""
+# HEAD when the review diff was cut: the only tip a DONE can stand for.
+REVIEWED_HEAD=""
+# Exit status of a wake: 1, or 3 for a bounce in worktree mode.
+WAKE_RC=1
+# --deny-write arguments for the implementer launcher (worktree mode).
+DENY_ARGS=()
 RUN_DIR=""
 STOP_FILE=""
 ART_DIR=""
@@ -91,12 +114,15 @@ CUR_FIX_SOURCE=""
 CUR_FIX_HEAD=""
 # 1 on a resume after a proof fix's no-progress stop: prove before dispatching.
 PROOF_FIRST=0
+# The proof's private TMPDIR in worktree mode (parallel goals side by side);
+# empty otherwise, which leaves the proof's environment as it always was.
+PROOF_TMP=""
 # 1 once GOALS.md and the journal hold nothing this workflow did not write;
 # -1 when they were refused (then the stop leaves them, and HEAD, untouched).
 ORCH_FILES_OK=0
 
 usage() {
-  echo "usage: run-goal.sh <goal-id>" >&2
+  echo "usage: run-goal.sh [--worktree <main-root>] <goal-id>" >&2
   exit 2
 }
 
@@ -249,7 +275,7 @@ record_wake() {
 wake() {
   write_stop "$1" "${2:-}"
   record_wake "$1"
-  exit 1
+  exit "$WAKE_RC"
 }
 
 succeed() {
@@ -294,35 +320,10 @@ is_non_command_proof() {
   esac
 }
 
-# run_step SECS OUT ERR CMD... — CMD under a timeout (0 = none), in its own
-# process group, in the background. Waiting with `wait` rather than in the
-# foreground is what lets INT/TERM act now instead of when CMD ends. ERR equal
-# to OUT merges the streams.
-run_step() {
-  local secs="$1" out="$2" err="$3"
-  shift 3
-  local timer=(python3 "$HERE/lib/run-timeout.py" "$secs")
-  if command -v gtimeout >/dev/null 2>&1; then
-    timer=(gtimeout --kill-after=5 "$secs")
-  elif command -v timeout >/dev/null 2>&1; then
-    timer=(timeout --kill-after=5 "$secs")
-  fi
-  if [[ "$err" == "$out" ]]; then
-    "${timer[@]}" "$@" >"$out" 2>&1 &
-  else
-    "${timer[@]}" "$@" >"$out" 2>"$err" &
-  fi
-  CHILD_PID=$!
-  local rc=0
-  wait "$CHILD_PID" || rc=$?
-  CHILD_PID=""
-  return "$rc"
-}
-
 # Wake if .git config/hooks/info differ from the saved manifest. git_meta_verify
 # has already disabled host git by then, so the wake path runs none.
 verify_git_meta() {
-  git_meta_verify "$GIT_META_SAVED" && return 0
+  git_meta_verify "$GIT_META_SAVED" && gitfile_verify && return 0
   wake "git-metadata-tamper" "changed $1: ${GIT_META_CHANGED}— $(git_meta_help)"
 }
 
@@ -376,17 +377,17 @@ contract_drift() {
   # GOALS.md as the index holds it: staged is neither HEAD nor the worktree.
   if git cat-file -e :GOALS.md 2>/dev/null; then
     git show :GOALS.md >"$RUN_DIR/goals-index.md"
-    if ! drift="$("$GOALS_PY" "$RUN_DIR/goals-index.md" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
-      CONTRACT_STAGED="${CONTRACT_STAGED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
+    if ! drift="$(goals_drift "$RUN_DIR/goals-index.md")"; then
+      CONTRACT_STAGED="${CONTRACT_STAGED}"$'\n'"GOALS.md ($drift)"
     fi
   fi
   git show HEAD:GOALS.md >"$RUN_DIR/goals-head.md"
-  if ! drift="$("$GOALS_PY" "$RUN_DIR/goals-head.md" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
-    CONTRACT_COMMITTED="${CONTRACT_COMMITTED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
+  if ! drift="$(goals_drift "$RUN_DIR/goals-head.md")"; then
+    CONTRACT_COMMITTED="${CONTRACT_COMMITTED}"$'\n'"GOALS.md ($drift)"
     goals_commit=1
   fi
-  if ! drift="$("$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)"; then
-    CONTRACT_UNSTAGED="${CONTRACT_UNSTAGED}"$'\n'"GOALS.md ($(sed 1d <<<"$drift" | paste -sd ';' -))"
+  if ! drift="$(goals_drift GOALS.md)"; then
+    CONTRACT_UNSTAGED="${CONTRACT_UNSTAGED}"$'\n'"GOALS.md ($drift)"
   fi
   CONTRACT_COMMITTED="$(sed '/^$/d' <<<"$CONTRACT_COMMITTED" | sort -u | paste -sd ',' -)"
   CONTRACT_STAGED="$(sed '/^$/d' <<<"$CONTRACT_STAGED" | sort -u | paste -sd ',' -)"
@@ -399,6 +400,22 @@ contract_drift() {
     [[ "$goals_commit" -eq 0 ]] || log_paths+=(GOALS.md)
     CONTRACT_COMMITS="$(git log --format=%h "$BASE_SHA"..HEAD -- "${log_paths[@]}" | paste -sd ' ' -)"
   fi
+}
+
+# goals_drift FILE — print why FILE (a GOALS.md copy) is drift against the
+# base, and return 1; nothing and 0 when it is not. Outside worktree mode only
+# this goal's status may differ (status-only-id). In worktree mode the walker
+# owns every status, so any difference at all is drift.
+goals_drift() {
+  if [[ -n "$WT_MAIN" ]]; then
+    cmp -s "$1" "$RUN_DIR/goals-base.md" && return 0
+    echo "differs from BASE_SHA (worktree mode: the walker writes every status)"
+    return 1
+  fi
+  local out
+  out="$("$GOALS_PY" "$1" status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" 2>&1)" && return 0
+  sed 1d <<<"$out" | paste -sd ';' -
+  return 1
 }
 
 # True when any category of contract drift has something in it.
@@ -434,39 +451,6 @@ contract_report() {
   [[ -z "$CONTRACT_IGNORED" ]] ||
     out="${out}ignored but under a contract path, so absent from the review diff: ${CONTRACT_IGNORED} (delete it, or take the path out of .gitignore)$(contract_ignored_hint); "
   printf '%s' "${out%; }"
-}
-
-# `env -u` arguments for every exported variable named like a credential — a
-# whole _-separated part KEY, APIKEY, TOKEN, SECRET, PASSWORD, PASSWD or
-# CREDENTIAL(S) — except names in PROOF_ENV_KEEP and git's own GIT_CONFIG_*.
-# The proof runs implementer-written code on the host; it gets PATH and the
-# rest, not the keys.
-proof_env_unsets() {
-  local name keep=" ${PROOF_ENV_KEEP:-} "
-  for name in $(compgen -e); do
-    [[ "$keep" != *" $name "* && "$name" != GIT_CONFIG_* ]] || continue
-    if grep -qiE '(^|_)(API)?KEY(_|$)|(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)' <<<"$name"; then
-      printf '%s\n' -u "$name"
-    fi
-  done
-}
-
-# HEAD, tracked and staged changes, and every untracked path not ignored —
-# what a proof must leave as it found. Artifact policy: output a project
-# declares in .gitignore (caches, reports, coverage) is the proof's to write,
-# and the next goal's clean-tree gate does not see it. Anything else a proof
-# creates — source, config, a symlink — nobody reviews and it can steer the
-# proof, so it is tampering. Under a contract path that policy does not
-# apply: ignored files there are listed too, or a proof could drop an
-# ignored script into tests/acceptance/ that no check and no reviewer sees.
-tree_snapshot() {
-  git rev-parse HEAD
-  git status --porcelain --untracked-files=all
-  local guarded=(tests/acceptance .claude .mcp.json)
-  [[ -z "${ORACLE:-}" || "$ORACLE" == inline ]] || guarded+=("$ORACLE")
-  [[ -z "${PLAN_PATH:-}" ]] || guarded+=("$PLAN_PATH")
-  { git status --porcelain --ignored=matching -- "${guarded[@]}" || true; } |
-    { grep '^!! ' || true; }
 }
 
 # no_change_since SHA — true when nothing outside GOALS.md and the journal
@@ -580,7 +564,45 @@ journal_ids() {
 }
 
 # --- start -----------------------------------------------------------------
-[[ -n "$GOAL_ID" && "$GOAL_ID" != "-h" && "$GOAL_ID" != "--help" ]] || usage
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --worktree)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      WT_MAIN="$2"
+      shift 2
+      ;;
+    --base)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      WT_BASE_SHA="$2"
+      shift 2
+      ;;
+    --result)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      WT_RESULT="$2"
+      shift 2
+      ;;
+    -h | --help) usage ;;
+    -*) usage ;;
+    *)
+      [[ -z "$GOAL_ID" ]] || usage
+      GOAL_ID="$1"
+      shift
+      ;;
+  esac
+done
+[[ -n "$GOAL_ID" ]] || usage
+if [[ -n "$WT_MAIN$WT_BASE_SHA$WT_RESULT" ]]; then
+  [[ -n "$WT_MAIN" && -n "$WT_BASE_SHA" && -n "$WT_RESULT" ]] ||
+    { echo "--worktree, --base and --result go together" >&2; exit 2; }
+  [[ -f "$WT_MAIN/GOALS.md" ]] || { echo "--worktree $WT_MAIN has no GOALS.md" >&2; exit 2; }
+  WT_MAIN="$(cd "$WT_MAIN" && pwd -P)"
+  # Events go to the walk's index and walk file, keyed on the main checkout.
+  export CW_EVENTS_ROOT="$WT_MAIN"
+  # Host git pinned before its first call (Amendment 5), to the admin folder
+  # and common dir the walker recorded when it cut this worktree.
+  gitfile_pin "${CW_PIN_ADMIN:-}" "${CW_PIN_COMMON:-}" "$PWD" ||
+    { echo "worktree mode needs CW_PIN_ADMIN and CW_PIN_COMMON from the walker (an admin folder under <common>/worktrees/)" >&2; exit 2; }
+fi
 
 trap on_exit EXIT
 trap 'on_signal INT 130' INT
@@ -604,6 +626,14 @@ chmod 700 "$RUN_DIR"
 # folder), not RUN_DIR, which holds the raw proof logs, briefs and diffs.
 IMPL_DIR="$RUN_DIR/implementer"
 mkdir -m 700 "$IMPL_DIR"
+if [[ -n "$WT_MAIN" ]]; then
+  # Proofs of a wave run side by side: each gets its own TMPDIR.
+  PROOF_TMP="$RUN_DIR/tmp"
+  # The worktree's link files, saved before any implementer runs and checked
+  # before every host git call from here on (lib/git-guard.sh, Amendment 4).
+  [[ "$(pwd -P)" == "$GIT_PIN_TREE" ]] || die_gate "worktree mode: the toplevel $ROOT is not the pinned worktree $GIT_PIN_TREE"
+  gitfile_init "$ROOT" || die_gate "worktree mode: $ROOT/.git does not name the admin folder the walker recorded ($GIT_PIN_DIR)"
+fi
 STOP_FILE="$RUN_DIR/stop.md"
 ART_DIR="$HOME/.cache/claude-coding-workflow/run-goal-${GOAL_ID}"
 mkdir -p "$ART_DIR"
@@ -629,10 +659,28 @@ if ! tracked_in_head GOALS.md || ! tracked_in_head "$JOURNAL"; then
   die_gate "commit GOALS.md, oracles, and the journal first"
 fi
 
+# Worktree mode: status comes from the main checkout's GOALS.md (read-only).
+STATUS_SRC=GOALS.md
+if [[ -n "$WT_MAIN" ]]; then
+  [[ "$WT_MAIN" != "$(pwd -P)" ]] || die_gate "--worktree names this checkout itself; worktree mode runs in a goal's own worktree"
+  [[ "$IMPLEMENTER" == claude ]] || die_gate "IMPLEMENTER=$IMPLEMENTER cannot run worktree mode: only claude-implement.sh takes the parallel walk's --deny-write list"
+  STATUS_SRC="$WT_MAIN/GOALS.md"
+  # The walker's deny list: shared .git paths that are the walker's or the
+  # other wave members' (lib/proof.sh's sibling, run-goals.sh resolves them).
+  [[ -n "${CW_DENY_WRITE_FILE:-}" && -f "$CW_DENY_WRITE_FILE" ]] ||
+    die_gate "worktree mode needs CW_DENY_WRITE_FILE (the walker's deny list)"
+  while IFS= read -r dw; do
+    [[ -z "$dw" ]] || DENY_ARGS+=(--deny-write "$dw")
+  done <"$CW_DENY_WRITE_FILE"
+fi
+
 # Before the first write to either orchestration file. A fresh run needs both
 # as committed; a resume may carry what its stopped run left: this goal set
 # in_progress, and the run's own ORCHESTRATOR lines.
-if [[ "$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')" == in_progress ]]; then
+if [[ -n "$WT_MAIN" ]]; then
+  # A fresh cut: no status is ever written here, and nothing was left.
+  orch_preflight "" --none || ORCH_FILES_OK=-1
+elif [[ "$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')" == in_progress ]]; then
   orch_preflight "$GOAL_ID=*:in_progress" --records "$GOAL_ID" || ORCH_FILES_OK=-1
 else
   orch_preflight "" --none || ORCH_FILES_OK=-1
@@ -642,14 +690,21 @@ ORCH_FILES_OK=1
 
 # Cache walk_id until walk-end. Mint → one journal line, fail-closed commit.
 # Before the dirty-tree gate so a later wake still has a walk_id.
-events_ensure_walk
-events_journal_walk_start
-if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
-  orch_commit_journal "chore: orchestrator walk-start" || wake "commit-failed" "walk-start"
+# Worktree mode never mints a walk: the walker did, and events_append finds
+# its walk file through CW_EVENTS_ROOT.
+if [[ -z "$WT_MAIN" ]]; then
+  events_ensure_walk
+  events_journal_walk_start
+  if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
+    orch_commit_journal "chore: orchestrator walk-start" || wake "commit-failed" "walk-start"
+  fi
 fi
 
 # refresh blocked→ready if this id's blockers are done
-STATUS="$("$GOALS_PY" GOALS.md show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+STATUS="$("$GOALS_PY" "$STATUS_SRC" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+if [[ -n "$WT_MAIN" && "$STATUS" != in_progress ]]; then
+  die_gate "$GOAL_ID is $STATUS in $STATUS_SRC; in worktree mode the walker sets in_progress before it starts the goal"
+fi
 if [[ "$STATUS" == "blocked" ]]; then
   "$GOALS_PY" GOALS.md refresh >/dev/null
   orch_commit "chore(${GOAL_ID}): orchestrator refresh" "*=blocked:ready,*=ready:blocked"
@@ -663,7 +718,7 @@ esac
 
 # A status is a cache of the edges, and can be stale or hand-edited. The walker
 # never dispatches past an unfinished blocker; neither does a direct run.
-OPEN_BLOCKERS="$("$GOALS_PY" GOALS.md blockers "$GOAL_ID" | paste -sd ',' -)"
+OPEN_BLOCKERS="$("$GOALS_PY" "$STATUS_SRC" blockers "$GOAL_ID" | paste -sd ',' -)"
 if [[ -n "$OPEN_BLOCKERS" ]]; then
   die_gate "$GOAL_ID has unfinished blockers: ${OPEN_BLOCKERS//,/, }. Finish them first, or remove the edge from blocked_by in GOALS.md and commit that decision."
 fi
@@ -684,7 +739,14 @@ if [[ "$ORACLE" != "inline" ]] && is_non_command_proof "$PROOF"; then
 fi
 
 RESUME=0
-if [[ "$STATUS" == "in_progress" ]]; then
+if [[ -n "$WT_MAIN" ]]; then
+  # Worktree mode never resumes: the walker recuts a stopped goal and starts
+  # it fresh, at the wave base it was cut from, on its own branch.
+  [[ "$(git symbolic-ref -q HEAD || echo detached)" == "refs/heads/cw/$GOAL_ID" ]] ||
+    die_gate "worktree HEAD is not refs/heads/cw/$GOAL_ID"
+  [[ "$(git rev-parse HEAD)" == "$(git rev-parse --verify -q "$WT_BASE_SHA^{commit}" || echo none)" ]] ||
+    die_gate "cw/$GOAL_ID is not at the wave base $WT_BASE_SHA; a fresh start needs a fresh cut"
+elif [[ "$STATUS" == "in_progress" ]]; then
   RESUME=1
 fi
 
@@ -695,7 +757,7 @@ if [[ "$RESUME" -eq 0 ]]; then
     p="${line:3}"
     p="${p#\"}"
     p="${p%\"}"
-    if [[ "$p" == "GOALS.md" ]]; then
+    if [[ "$p" == "GOALS.md" && -z "$WT_MAIN" ]]; then
       tmp="$(mktemp)"
       git show HEAD:GOALS.md >"$tmp"
       if "$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$tmp" >/dev/null; then
@@ -728,7 +790,7 @@ if [[ "$RESUME" -eq 1 ]]; then
 else
   BASE_SHA="$(git rev-parse HEAD)"
   ROUND=0
-  "$GOALS_PY" GOALS.md set "$GOAL_ID" in_progress
+  [[ -n "$WT_MAIN" ]] || "$GOALS_PY" GOALS.md set "$GOAL_ID" in_progress
 fi
 
 git show "$BASE_SHA:GOALS.md" >"$RUN_DIR/goals-base.md"
@@ -836,9 +898,9 @@ while :; do
     PHASE="implementer r${ROUND}"
     set +e
     if [[ -n "$THREAD_ID" ]]; then
-      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" --resume "$THREAD_ID" "$HAND"
+      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" --resume "$THREAD_ID" "$HAND"
     else
-      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "$HAND"
+      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" "$HAND"
     fi
     ds_rc=$?
     set -e
@@ -918,7 +980,7 @@ while :; do
     p="${line:3}"
     p="${p#\"}"
     p="${p%\"}"
-    if [[ "$p" == "GOALS.md" ]]; then
+    if [[ "$p" == "GOALS.md" && -z "$WT_MAIN" ]]; then
       if "$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" >/dev/null; then
         continue
       fi
@@ -949,18 +1011,12 @@ while :; do
   else
     PROOF_NONE=0
     set +e
-    # Plain -c, not -lc: the gate must not depend on the user's interactive
-    # profile (aliases, PATH edits, version managers) being loaded.
     PHASE="proof r${ROUND}"
     event_phase proof
     tree_snapshot >"$RUN_DIR/tree-before-proof.txt"
-    unsets=()
-    while IFS= read -r u; do unsets+=("$u"); done < <(proof_env_unsets)
-    # PYTHONDONTWRITEBYTECODE: a Python proof would otherwise write .pyc files
-    # under tests/acceptance/, which the ignored-file contract rule (rightly)
-    # calls tampering — every Python target would wake on its own test run (D-09).
-    run_step "$PROOF_SECS" "$PROOF_FILE" "$PROOF_FILE" \
-      env "${unsets[@]+"${unsets[@]}"}" PYTHONDONTWRITEBYTECODE=1 bash -c "$PROOF"
+    # lib/proof.sh: plain bash -c, credential variables stripped,
+    # PYTHONDONTWRITEBYTECODE. PROOF_TMP is empty unless worktree mode set it.
+    proof_exec "$PROOF_SECS" "$PROOF_FILE" "$PROOF_TMP" "$PROOF"
     PROOF_EXIT=$?
     set -e
     PHASE="assess r${ROUND}"
@@ -973,15 +1029,9 @@ while :; do
     tree_snapshot >"$RUN_DIR/tree-after-proof.txt"
     contract_drift
     moved=()
-    if [[ "$(head -n1 "$RUN_DIR/tree-before-proof.txt")" != "$(head -n1 "$RUN_DIR/tree-after-proof.txt")" ]]; then
-      moved+=("HEAD moved: $(git log --format=%h "$(head -n1 "$RUN_DIR/tree-before-proof.txt")"..HEAD | paste -sd ' ' -)")
-    fi
-    changed="$({ diff <(sed 1d "$RUN_DIR/tree-before-proof.txt") <(sed 1d "$RUN_DIR/tree-after-proof.txt") || true; } |
-      sed -n 's/^[<>] //p' | sort -u)"
-    created="$({ grep '^?? ' <<<"$changed" || true; } | cut -c4- | paste -sd ',' -)"
-    changed="$({ grep -v '^?? ' <<<"$changed" || true; } | cut -c4- | sed '/^$/d' | sort -u | paste -sd ',' -)"
-    [[ -z "$changed" ]] || moved+=("tracked changes: $changed")
-    [[ -z "$created" ]] || moved+=("new files not in .gitignore: $created (declare build output in .gitignore; anything else is unreviewed code)")
+    while IFS= read -r m; do
+      [[ -z "$m" ]] || moved+=("$m")
+    done < <(proof_moved "$RUN_DIR/tree-before-proof.txt" "$RUN_DIR/tree-after-proof.txt")
     contract_any && moved+=("contract — $(contract_report)")
     if ((${#moved[@]})); then
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
@@ -1048,7 +1098,8 @@ while :; do
   PROOF_FIRST=0
 
   DIFF="$RUN_DIR/diff-${GOAL_ID}-r${ROUND}.patch"
-  git diff --no-ext-diff --no-textconv "$BASE_SHA"..HEAD -- . ':!GOALS.md' ":!${JOURNAL}" >"$DIFF"
+  REVIEWED_HEAD="$(git rev-parse HEAD)"
+  git diff --no-ext-diff --no-textconv "$BASE_SHA".."$REVIEWED_HEAD" -- . ':!GOALS.md' ":!${JOURNAL}" >"$DIFF"
   if [[ ! -s "$DIFF" ]]; then
     wake "empty-diff" "no implementer changes in $BASE_SHA..HEAD"
   fi
@@ -1134,12 +1185,32 @@ EOF
       if [[ "${PROOF_NONE:-0}" -eq 1 ]]; then
         wake "done-refused" "PROOF: none cannot auto-done. Review: $VERDICT_FILE"
       fi
-      "$GOALS_PY" GOALS.md set "$GOAL_ID" done
-      journal_line "## $(utc) — ORCHESTRATOR done ${GOAL_ID} r${ROUND}"
-      events_append --event done --severity info --goal "$GOAL_ID" --round "$ROUND" \
-        --verdict DONE --base-sha "$BASE_SHA" \
-        --summary "done ${GOAL_ID} r${ROUND}"
-      orch_commit "chore(${GOAL_ID}): orchestrator done" "$GOAL_ID=*:done"
+      if [[ -n "$WT_MAIN" ]]; then
+        # The walker sets done after it integrates this branch. Only the tip the
+        # reviewer judged may be reported: a commit that landed during the
+        # review (a process left running) was never reviewed.
+        [[ "$(git rev-parse HEAD)" == "$REVIEWED_HEAD" ]] ||
+          wake "head-moved-during-review" "HEAD is $(git rev-parse --short HEAD), not ${REVIEWED_HEAD:0:12}, the tip the reviewer judged; $(git log --format=%h "$REVIEWED_HEAD"..HEAD | paste -sd ' ' -) arrived during the review."
+        journal_line "## $(utc) — ORCHESTRATOR done ${GOAL_ID} r${ROUND}"
+        orch_commit "chore(${GOAL_ID}): orchestrator done" ""
+        done_head="$(git rev-parse HEAD)"
+        [[ "$(git rev-parse "$done_head^")" == "$REVIEWED_HEAD" &&
+          "$(git -c core.quotePath=false diff --name-only "$REVIEWED_HEAD" "$done_head")" == "$JOURNAL" ]] ||
+          wake "head-moved-during-review" "the done commit $done_head is not a journal-only commit on ${REVIEWED_HEAD:0:12}"
+        # The walker reads this file, in its own run folder, and checks it
+        # against cw/<goal> before it records the goal as finished.
+        printf 'reviewed=%s\ndone=%s\n' "$REVIEWED_HEAD" "$done_head" >"$WT_RESULT.tmp" &&
+          mv -f "$WT_RESULT.tmp" "$WT_RESULT" || wake "result-write-failed" "$WT_RESULT"
+        # Display only (the /walk pane shows the goal as integrating).
+        event_phase integrate
+      else
+        "$GOALS_PY" GOALS.md set "$GOAL_ID" done
+        journal_line "## $(utc) — ORCHESTRATOR done ${GOAL_ID} r${ROUND}"
+        events_append --event done --severity info --goal "$GOAL_ID" --round "$ROUND" \
+          --verdict DONE --base-sha "$BASE_SHA" \
+          --summary "done ${GOAL_ID} r${ROUND}"
+        orch_commit "chore(${GOAL_ID}): orchestrator done" "$GOAL_ID=*:done"
+      fi
       echo "GOAL $GOAL_ID DONE"
       succeed
       ;;
@@ -1151,8 +1222,15 @@ EOF
         wake "fix-unparseable" "VERDICT=FIX but no FIX: lines. $VERDICT_FILE"
       fi
       if findings_touch_oracle "$TARGETS"; then
-        "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
-        orch_commit "chore(${GOAL_ID}): orchestrator bounced" "$GOAL_ID=*:bounced"
+        if [[ -n "$WT_MAIN" ]]; then
+          # The walker sets bounced; the record ends this attempt (exit 3).
+          journal_line "## $(utc) — ORCHESTRATOR bounced ${GOAL_ID} r${ROUND}"
+          orch_commit "chore(${GOAL_ID}): orchestrator bounced" ""
+          WAKE_RC=3
+        else
+          "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
+          orch_commit "chore(${GOAL_ID}): orchestrator bounced" "$GOAL_ID=*:bounced"
+        fi
         wake "blocked-oracle-edit" "a FIX finding names the oracle / tests/acceptance"
       fi
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
@@ -1188,12 +1266,18 @@ EOF
       continue
       ;;
     BLOCKED)
-      "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
+      [[ -n "$WT_MAIN" ]] || "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
       journal_line "## $(utc) — ORCHESTRATOR bounced ${GOAL_ID} r${ROUND}"
       events_append --event bounced --severity error --goal "$GOAL_ID" --round "$ROUND" \
         --verdict BLOCKED --base-sha "$BASE_SHA" \
         --summary "bounced ${GOAL_ID} r${ROUND}"
-      orch_commit "chore(${GOAL_ID}): orchestrator bounced" "$GOAL_ID=*:bounced"
+      if [[ -n "$WT_MAIN" ]]; then
+        # The walker sets bounced from the exit status.
+        orch_commit "chore(${GOAL_ID}): orchestrator bounced" ""
+        WAKE_RC=3
+      else
+        orch_commit "chore(${GOAL_ID}): orchestrator bounced" "$GOAL_ID=*:bounced"
+      fi
       wake "blocked" "reviewer BLOCKED. $VERDICT_FILE"
       ;;
     *)

@@ -38,8 +38,21 @@ The DAG for a signed-off plan: YAML preamble plus per-goal bodies and oracles.
 A true gate — the blocked goal is a lie until those ids are done.
 
 **conflicts_with**
-A merge hazard, not a gate. Recorded for a future parallel walker.
-v1 of Phase 5 runs sequentially and ignores it for scheduling.
+A merge hazard, not a gate. A parallel walk never puts two goals in one
+**wave** when either names the other; the one-at-a-time walk ignores it.
+
+**Wave**
+In a parallel walk (`run-goals.sh --jobs N`), the up-to-N frontier goals
+started together, each in its own worktree on `cw/<goal>`, and waited for
+together (fork-join) before the next wave is planned.
+
+**Integration**
+The walker landing one finished goal of a wave on the walk branch. In a
+scratch worktree: journal check, `merge --no-ff` of the commit the goal
+reported after its review, `worktree_setup`, the merged proofs of every goal
+done in the walk, then `done`; only when all of it is green does the walk
+branch fast-forward to the result. Nothing is ever reset. A goal is done only
+once integrated.
 
 **frontier**
 The goals that may start now: `ready` or `in_progress`, every

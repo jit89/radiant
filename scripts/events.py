@@ -33,6 +33,7 @@ import re
 import sys
 import shutil
 import tempfile
+import fcntl
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -50,6 +51,10 @@ EVENTS = (
     "fix",
     "bounced",
     "wake",
+    # Parallel walker: the walker merging a goal (it names the goal and carries
+    # the walker's pid), and one walker-owned row per wave with no goal.
+    "integrate",
+    "join_wait",
 )
 SEVERITIES = ("info", "warning", "error")
 SUMMARY_MAX = 200
@@ -67,6 +72,12 @@ def cache_root() -> Path:
 
 
 def git_root() -> Path:
+    """The repo an event belongs to. A goal of a parallel walk runs in its own
+    worktree; the walker sets CW_EVENTS_ROOT to the main checkout so its
+    events land in the walk's index, where the pane and the task list read."""
+    raw = os.environ.get("CW_EVENTS_ROOT")
+    if raw:
+        return Path(raw).resolve()
     return Path.cwd().resolve()
 
 
@@ -224,7 +235,9 @@ def append_event(
         raise ValueError(f"unknown severity {severity}")
     jsonl, walk_path = paths_for(journal)
     walk_id = read_walk_file(walk_path) or ""
-    if not head_sha:
+    # A goal of a parallel walk (CW_EVENTS_ROOT) makes no git call here: its
+    # host git is pinned to recorded paths, and this one would not be.
+    if not head_sha and not os.environ.get("CW_EVENTS_ROOT"):
         head = Path.cwd() / ".git"
         if head.exists():
             try:
@@ -254,8 +267,17 @@ def append_event(
         "payload": payload or {},
     }
     jsonl.parent.mkdir(parents=True, exist_ok=True)
-    with jsonl.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n")
+    data = (json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+    # One locked write per line: in a parallel walk N goals and the walker
+    # append at once, and a torn line is dropped by every reader.
+    fd = os.open(jsonl, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+    finally:
+        os.close(fd)
 
 
 def parse_since(spec: str) -> tuple[bool, datetime | None]:
@@ -461,7 +483,8 @@ def cmd_self_test() -> int:
 
 
 # What a running goal is doing, by the last event naming it.
-PHASE_OF = {"walk": "start", "dispatch": "implement", "implemented": "proof", "fix": "fix"}
+PHASE_OF = {"walk": "start", "dispatch": "implement", "implemented": "proof", "fix": "fix",
+            "integrate": "integrate"}
 # Events after which no orchestrator process is working on that goal.
 TERMINAL = {"done", "bounced", "wake", "walk_end"}
 
@@ -537,7 +560,20 @@ def live_goals(rows: list[dict]) -> dict[str, dict]:
     killed outright leaves no wake, and a row from before pids were recorded
     never reads as running. Each goal is judged by its own rows, so goals run
     side by side (a parallel walk) each read as running.
+
+    One exception: a goal of a parallel walk that finished writes `phase
+    integrate` and exits, then waits for the wave's join. While the walker is
+    alive (the newest `walk` row's pid, no `walk_end` after it), such a goal
+    still reads as running, in phase `integrate`, not as paused.
     """
+    walker_alive = False
+    for r in reversed(rows):
+        if r.get("event") == "walk_end":
+            break
+        if r.get("event") == "walk":
+            p = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+            walker_alive = bool(p.get("pid")) and pid_alive(p["pid"], p.get("pid_start"))
+            break
     last: dict[str, dict] = {}
     owner: dict[str, dict] = {}
     for r in reversed(rows):
@@ -552,7 +588,9 @@ def live_goals(rows: list[dict]) -> dict[str, dict]:
     for gid, r in last.items():
         if r.get("event") in TERMINAL or gid not in owner:
             continue
-        if pid_alive(owner[gid]["pid"], owner[gid].get("pid_start")):
+        if pid_alive(owner[gid]["pid"], owner[gid].get("pid_start")) or (
+            walker_alive and phase_of(r) == "integrate"
+        ):
             live[gid] = {"round": r.get("round"), "phase": phase_of(r)}
     return live
 

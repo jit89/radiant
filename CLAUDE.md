@@ -33,8 +33,9 @@ do a direct edit.
 | 5 Orchestrate the DAG (`run-goals`) | shipped |
 | A Architecture health (periodic) | existing `improve-codebase-architecture` skill |
 
-`/run-goals` walks the frontier sequentially. After the walk ends,
-stop. Parallel worktrees are not in this slice.
+`/run-goals` walks the frontier one goal at a time, or with `--jobs N`
+(2-4) in fork-join waves, each goal in its own worktree. After the walk
+ends, stop.
 
 ## The workflow
 
@@ -128,8 +129,18 @@ on a nonzero exit, reads `STOP_FILE:`. Do not restate the hop here.
 
 ### Phase 5 — Orchestrate
 
-From the target repo: `scripts/run-goals.sh`. Sequential. Keys on
+From the target repo: `scripts/run-goals.sh`, one goal at a time. Keys on
 `run-goal.sh`'s exit code. `scripts/goals.py` is the DAG reader.
+
+`scripts/run-goals.sh --jobs N` (N from 2 to 4) walks in **waves**: up to N
+frontier goals that do not name each other in `conflicts_with`, each in its
+own worktree on `cw/<goal>`, joined before the next wave. The walker alone
+writes `GOALS.md` and the walk branch; at the join it **integrates** each
+finished goal one at a time in a scratch worktree (journal check,
+`merge --no-ff` of the reviewed commit, `worktree_setup`, the merged proofs of
+every goal done in the walk) and fast-forwards the walk branch only when all
+of it is green. A stopped goal is recut and runs fresh. The contract is
+`docs/features/parallel-walker/PLAN.md`; do not restate it here.
 
 ### Phase A — Architecture health
 
@@ -176,6 +187,7 @@ Run from the **target repo**:
 ```bash
 ~/claude-coding-workflow/scripts/run-goal.sh <id>
 ~/claude-coding-workflow/scripts/run-goals.sh
+~/claude-coding-workflow/scripts/run-goals.sh --jobs 3   # parallel waves
 ```
 
 While a walk runs, the `walk` mod (`mods/walk/`, installed by

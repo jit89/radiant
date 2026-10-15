@@ -201,6 +201,23 @@ check "thread keyed to deepseek" "deepseek:$(call_field 2 sid)" "$(line THREAD_I
 check "notice on stderr" yes "$(has "running it once on deepseek-v4-flash" "$(cat "$TMP/stderr")")"
 check "no key file left" 0 "$(keys_left)"
 
+echo "== 2b. --deny-write reaches every pass, the fallback included =="
+reset "$REFUSAL" "$DONE"
+run -- --deny-write /x/.git/refs/heads/walk --deny-write /x/.git/packed-refs "$HANDOFF"
+check "deny-write: exit 0" 0 "$RC"
+check "deny-write on the Haiku pass" '["/x/.git/refs/heads/walk", "/x/.git/packed-refs"]' \
+  "$(setting 1 sandbox.filesystem.denyWrite)"
+check "deny-write on the DeepSeek fallback" '["/x/.git/refs/heads/walk", "/x/.git/packed-refs"]' \
+  "$(setting 2 sandbox.filesystem.denyWrite)"
+check "deny-write keeps the read denials" yes "$(has "$HOUSE/.env" "$(setting 1 sandbox.filesystem.denyRead)")"
+reset "$DONE"
+run -- --deny-write relative/path "$HANDOFF"
+check "deny-write: a relative path is refused" 2 "$RC"
+check "deny-write: refused before any call" 0 "$(calls)"
+reset "$DONE"
+run -- "$HANDOFF"
+check "no --deny-write: no denyWrite key" null "$(setting 1 sandbox.filesystem.denyWrite)"
+
 echo "== 3. DECLINED -> fallback =="
 reset "$DECLINED" "$DONE"
 run -- "$HANDOFF"

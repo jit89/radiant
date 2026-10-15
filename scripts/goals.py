@@ -27,8 +27,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 # TodoWrite statuses. House statuses map onto these.
@@ -147,8 +150,31 @@ def dump_yaml(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def atomic_write(path: Path, text: str) -> None:
+    """Replace the file whole: a temp file beside it, flushed and fsynced, then
+    os.replace. A concurrent reader (the /walk pane, a goal starting) sees the
+    old file or the new one, never half. Written through a symlink, as
+    write_text did, and with the file's mode kept."""
+    real = path.resolve()
+    mode = stat.S_IMODE(real.stat().st_mode) if real.exists() else 0o644
+    fd, tmp = tempfile.mkstemp(dir=real.parent, prefix=f".{real.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, real)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_fence(path: Path, text: str, start: int, end: int, data: dict) -> None:
-    path.write_text(text[:start] + dump_yaml(data) + text[end:])
+    atomic_write(path, text[:start] + dump_yaml(data) + text[end:])
 
 
 def by_id(data: dict) -> dict[str, dict]:
@@ -360,6 +386,9 @@ def validate(data: dict) -> list[str]:
         errors.append("missing top-level journal:")
     if not data.get("goals"):
         errors.append("zero goals — empty fence is not a valid DAG")
+    setup = data.get("worktree_setup")
+    if setup is not None and (not isinstance(setup, str) or not setup.strip()):
+        errors.append("worktree_setup: must be one shell command (a non-empty string)")
     ids = [g.get("id") for g in data["goals"]]
     if len(ids) != len(set(ids)):
         errors.append("duplicate goal ids")
@@ -509,7 +538,7 @@ def cmd_refresh(path, data, text, start, end, **_):
     for g in data["goals"]:
         if g.get("status") != before.get(g["id"]):
             blob = rewrite_goal_status(blob, g["id"], g["status"])
-    path.write_text(text[:start] + blob + text[end:])
+    atomic_write(path, text[:start] + blob + text[end:])
     for g in data["goals"]:
         if g.get("status") != before.get(g["id"]):
             assert_status(path, g["id"], g["status"])
@@ -532,7 +561,7 @@ def cmd_set(path, data, text, start, end, extra, **_):
         raise SystemExit(f"unknown goal {gid}")
     old = g.get("status")
     blob = rewrite_goal_status(text[start:end], gid, status)
-    path.write_text(text[:start] + blob + text[end:])
+    atomic_write(path, text[:start] + blob + text[end:])
     assert_status(path, gid, status)
     print(f"{gid}: {old} → {status}")
     return 0
@@ -588,6 +617,7 @@ def cmd_meta(data, **_):
                 "plan": data.get("plan"),
                 "log": data.get("log"),
                 "journal": data.get("journal"),
+                "worktree_setup": data.get("worktree_setup"),
             },
             indent=2,
         )

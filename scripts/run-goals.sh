@@ -4,7 +4,9 @@
 # Keys on exit code only. Stop file is payload, not a walk signal.
 #
 # Usage (from the target repo):
-#   run-goals.sh
+#   run-goals.sh              one goal at a time, in the main checkout
+#   run-goals.sh --jobs N     N from 2 to 4: fork-join waves, each goal in its
+#                             own worktree (lib/wave-walk.sh)
 
 set -euo pipefail
 
@@ -20,6 +22,21 @@ source "$HERE/lib/git-guard.sh"
 source "$HERE/lib/orch-files.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/cache.sh"
+
+JOBS=1
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --jobs)
+      [[ $# -ge 2 && "$2" =~ ^[1-4]$ ]] || { echo "--jobs takes an integer from 1 to 4" >&2; exit 2; }
+      JOBS="$2"
+      shift 2
+      ;;
+    *)
+      echo "usage: run-goals.sh [--jobs N]   (N from 1 to 4)" >&2
+      exit 2
+      ;;
+  esac
+done
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "not a git repo" >&2
@@ -140,12 +157,35 @@ commit_journal() {
 meta_stop "since the last run in this repo"
 JOURNAL_EXPECT="$(mktemp "${TMPDIR:-/tmp}/run-goals-journal-XXXXXX")"
 trap 'rm -f "$JOURNAL_EXPECT"' EXIT
-orch_baseline start
 
-events_ensure_walk
-events_journal_walk_start
-if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
-  commit_journal "chore: orchestrator walk-start"
+# A parallel walk's worktrees: ~/.cache/claude-coding-workflow/worktrees/<id>/,
+# <id> hashed from the main checkout's physical path (lib/wave-walk.sh too).
+REPO_ID="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:16])' "$(pwd -P)")"
+
+# A parallel walk that stopped leaves goals in their own worktrees; this
+# one-at-a-time loop would implement them again in the main checkout.
+parallel_left=()
+while IFS= read -r g; do
+  [[ -n "$g" ]] || continue
+  if git show-ref --verify --quiet "refs/heads/cw/$g" || [[ -e "$CW_CACHE/worktrees/$REPO_ID/$g" ]]; then
+    parallel_left+=("$g")
+  fi
+done < <("$GOALS_PY" GOALS.md graph | awk '$2 == "in_progress" { print $1 }')
+if [[ "$JOBS" -eq 1 ]] && ((${#parallel_left[@]})); then
+  walk_stop orchestration-files-dirty "a parallel walk stopped here: ${parallel_left[*]} in_progress with a cw/<goal> branch or worktree. Rerun with --jobs N (N from 2 to 4), which re-attaches them."
+fi
+
+# --jobs N > 1 does its own start (lib/wave-walk.sh): it commits every status
+# itself, so it allows no in-flight edit and as many in_progress goals as it
+# left worktrees for.
+if [[ "$JOBS" -eq 1 ]]; then
+  orch_baseline start
+
+  events_ensure_walk
+  events_journal_walk_start
+  if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
+    commit_journal "chore: orchestrator walk-start"
+  fi
 fi
 
 RG_PID=""
@@ -213,6 +253,12 @@ print_status() {
   echo "=== graph ==="
   "$GOALS_PY" GOALS.md graph
 }
+
+if [[ "$JOBS" -gt 1 ]]; then
+  # shellcheck disable=SC1091
+  source "$HERE/lib/wave-walk.sh"
+  exit 1  # wave-walk.sh exits itself; reaching here is a bug
+fi
 
 while :; do
   "$GOALS_PY" GOALS.md refresh

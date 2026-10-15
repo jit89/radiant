@@ -9,7 +9,7 @@
 # This file owns the implementer prompt. Do not fork it.
 #
 # Usage:
-#   claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... <handoff.md>
+#   claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... [--deny-write PATH]... <handoff.md>
 #   claude-implement.sh --smoke     (IMPLEMENTER_SMOKE_PROVIDER=haiku|deepseek)
 #
 # Optional env:
@@ -83,9 +83,14 @@ SMOKE=0
 RESUME_ID=""
 HANDOFF=""
 ADD_DIRS=()
+# Absolute paths the sandbox must not write (sandbox.filesystem.denyWrite): in a
+# parallel walk, the shared .git paths that belong to the walker and to the
+# other goals of the wave (run-goals.sh resolves them). Every pass of this run,
+# the DeepSeek fallback included, gets the same list.
+DENY_WRITES=()
 
 usage() {
-  echo "usage: claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... <handoff.md>" >&2
+  echo "usage: claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... [--deny-write PATH]... <handoff.md>" >&2
   echo "       claude-implement.sh --smoke" >&2
   exit 2
 }
@@ -101,6 +106,11 @@ while [[ $# -gt 0 ]]; do
     --add-dir)
       [[ $# -ge 2 ]] || usage
       ADD_DIRS+=("$2")
+      shift 2
+      ;;
+    --deny-write)
+      [[ $# -ge 2 && "$2" == /* ]] || usage
+      DENY_WRITES+=("$2")
       shift 2
       ;;
     -h|--help) usage ;;
@@ -172,9 +182,10 @@ new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 # apiKeyHelper when KEYFILE is set.
 settings_json() {
   python3 - "$1" "${IMPLEMENTER_ALLOWED_DOMAINS:-}" \
+    "$(printf '%s\n' "${DENY_WRITES[@]+"${DENY_WRITES[@]}"}")" \
     "$HOUSE/.env" "$HOME/.config/watch/.env" "$KEYS_DIR" <<'PY'
 import json, os, shlex, sys
-key_file, domains, *secrets = sys.argv[1:]
+key_file, domains, deny_writes, *secrets = sys.argv[1:]
 deny = []
 for p in secrets:
     deny.append(f"Read(/{p})")
@@ -190,6 +201,9 @@ settings = {
     },
     "permissions": {"deny": deny},
 }
+writes = [p for p in deny_writes.splitlines() if p]
+if writes:
+    settings["sandbox"]["filesystem"]["denyWrite"] = writes
 if key_file:
     settings["apiKeyHelper"] = "/bin/cat " + shlex.quote(key_file)
 print(json.dumps(settings))
@@ -425,7 +439,13 @@ HANDOFF_ABS="$HANDOFF_DIR/$(basename "$HANDOFF")"
 RETURN_DOC="$HANDOFF_DIR/return-$(basename "$HANDOFF")"
 ADD_DIRS=("$HANDOFF_DIR" "${ADD_DIRS[@]+"${ADD_DIRS[@]}"}")
 
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+# A goal of a parallel walk: pinned like run-goal.sh's own git (Amendment 5).
+if [[ -n "${CW_PIN_ADMIN:-}" ]]; then
+  inside() { GIT_DIR="$CW_PIN_ADMIN" GIT_COMMON_DIR="$CW_PIN_COMMON" GIT_WORK_TREE="$PWD" git rev-parse --is-inside-work-tree; }
+else
+  inside() { git rev-parse --is-inside-work-tree; }
+fi
+if ! inside >/dev/null 2>&1; then
   echo "IMPLEMENTER_RESULT: error (not inside a git repo; checkpoints need commits)"
   exit 1
 fi

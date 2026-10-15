@@ -63,18 +63,21 @@ goals:
 If the target has no test harness, set `oracle: inline` and `proof: (case table)`.
 The case table in the body *is* the oracle.
 
+`worktree_setup:` (optional) is one shell command that makes a fresh checkout able to run the proofs: `npm ci`, `uv sync --frozen`. A parallel walk runs it in each goal's new worktree before dispatch (which has no ignored `node_modules` or `.venv`, and the implementer's sandbox has no network) and in the scratch worktree where each finished goal is merged and proved, on the host, with network and with credential variables stripped. It must leave only ignored files behind. Omit it when a clean checkout already runs every proof (a C project built by the proof itself).
+
 `plan:` names the signed plan, committed. A goal's run freezes it at the goal's base commit: both agents read that copy, and a change to the live file during the run stops the goal as contract tampering, like an oracle edit.
 
 ## Field rules
 
 - `id` — `g<n>-<slug>`, numbered in dependency order (blockers first). Stable once written.
 - `blocked_by` — ids that must be **done** before this goal can start. A true gate: B is a lie until A exists.
-- `conflicts_with` — ids that are not gates but share an area hard enough that Phase 5 must not merge them in parallel. Same-`area` is not automatic conflict; only declare it when a parallel merge would actually collide.
+- `conflicts_with` — ids that are not gates but share an area hard enough that Phase 5 must not merge them in parallel. Same-`area` is not automatic conflict; only declare it when a parallel merge would actually collide. A parallel walk (`run-goals.sh --jobs N`) never puts two goals in one wave when either names the other. Also declare it when two goals' proofs would collide running side by side: a fixed port, or a fixed path outside the repo (each proof gets its own `TMPDIR`, nothing else is separated).
 - `area` — coarse module lock (`mailer/inbound`, not a file path). File paths go stale.
 - `proof` — exact command that counts as done. Architect runs it, not the implementer's word. It must leave the repo as it found it: every file it writes (caches, reports, coverage) must match `.gitignore`, or the goal stops as `proof-tamper`. `.gitignore` does not excuse a path under `tests/acceptance/` or the plan: an ignored file there is tampering, because the reviewer's diff would never show it. Python bytecode is the common case: the host runs the implementer and the proof with `PYTHONDONTWRITEBYTECODE=1`, so run your own Phase 3 checks the same way (or delete `tests/acceptance/**/__pycache__` before committing), or the first goal wakes `contract-tamper-ignored`.
 - `oracle` — path of the Architect-authored acceptance file, or `inline`.
 - `status` — `ready` (no unfinished blockers) or `blocked` when first
-  written. Phase 4 sets `in_progress`, then `done` or `bounced`.
+  written. Phase 4 sets `in_progress`, then `done` or `bounced` (in a
+  parallel walk the walker sets all three).
 
 `blocked_by` and `conflicts_with` in the markdown body must match the YAML. The YAML wins if they drift.
 
