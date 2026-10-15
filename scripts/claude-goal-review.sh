@@ -308,12 +308,13 @@ Then read GOALS.md (that goal only), the PLAN file the brief names (the signed p
 4. FAKE SUCCESS — weakened/skipped/deleted tests, assert-true, over-mocking.
 5. CEILINGS — load-bearing simplifications missing a ponytail comment.
 6. SMELLS — Fowler list as judgement calls, never hard violations; coding-standards.md overrides.
+7. SIMPLER — could the diff be materially smaller or plainer with the same behaviour, the same tests passing and the same scope (dead code, duplicated logic, an abstraction with one caller, a hand-rolled standard-library function)? Never against structure the PLAN prescribes. A FIX only when you can name the simpler form concretely and the saving is real: a SIMPLER-only FIX turns a DONE into a whole fix round, and the goal has few. Otherwise a note in the prose.
 
 You are read-only. Do not edit files.
 
 OUTPUT FORMAT — the Orchestrator parses this mechanically, so follow it exactly.
 
-Write your analysis in prose first. You may number the six headings above; those
+Write your analysis in prose first. You may number the seven headings above; those
 numbered lines are NOT findings and are ignored.
 
 Then, if and only if the verdict is FIX, list each defect on its own line

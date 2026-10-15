@@ -573,6 +573,14 @@ parallel walk, several goals' code at once; cross-goal cleanup stays in
 Phase A. Order (user, 2026-10-15): right after item 6's live dogfood, before
 item 12, so the next real walk measures the extra fix rounds it causes.
 
+**Done (2026-10-16):** heading 7 in `claude-goal-review.sh`'s fresh-review
+prompt (the re-review reuses "the same rules"); pinned in
+`review-fallback-test.sh`, and `findings-test.sh` shows a SIMPLER analysis line
+is not a finding, even with a `FIX:` inside the line. The rbtree parallel re-run
+measures the fix rounds it adds; if re-reviews burn rounds on new SIMPLER points
+against code already passed, limit SIMPLER on a re-review to what changed since
+the last round (Opus review note, 2026-10-16).
+
 ## 16. Porcelain parsing in run-goal.sh (2026-10-16)
 
 From the parallel walker's seventh Opus review: `run-goal.sh` reads `git status

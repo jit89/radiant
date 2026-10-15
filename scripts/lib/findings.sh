@@ -5,7 +5,7 @@
 # findings_touch_oracle reads $ORACLE from the caller's environment.
 
 # Findings are the reviewer's "FIX: <path>:<line> — ..." lines and nothing
-# else. The reviewer also numbers its six analysis headings (1. SPEC,
+# else. The reviewer also numbers its analysis headings (1. SPEC,
 # 2. ORACLE, ...); scraping "^N." swept those up as defects and — because the
 # ORACLE heading names the oracle — bounced clean reviews as oracle tampering.
 # Writes the renumbered findings to $2 and the target path of each to $3.

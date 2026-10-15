@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Self-test for lib/findings.sh — the reviewer-verdict parser.
-# Regression: the six numbered analysis headings the reviewer prompt asks for
+# Regression: the numbered analysis headings the reviewer prompt asks for
 # used to be scraped as defects, and the "2. ORACLE — tests/acceptance/... is
 # untouched" heading bounced clean reviews as oracle tampering.
 set -euo pipefail
@@ -33,6 +33,7 @@ cat >"$TMP/verdict-clean-fix.md" <<'MD'
 4. FAKE SUCCESS — none observed.
 5. CEILINGS — no unmarked load-bearing simplification.
 6. SMELLS — long method in parse(), judgement call only.
+7. SIMPLER — inlining the one-caller helper is a note, not a FIX: it saves three lines.
 
 FIX: src/parse.py:42 — off-by-one on the final chunk — use `<=`
 FIX: src/parse.py:88 — missing validation — reject empty input to satisfy tests/acceptance/test_parse.py

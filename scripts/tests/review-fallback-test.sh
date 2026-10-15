@@ -43,6 +43,7 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 done
 pm="$(printf '%s' "${args[1]:-}" | grep -o '(model: [a-z0-9.-]*)' | head -n1 || true)"
 echo "model=$model sid=$sid resume=$res prompt=$pm" >>"$d/calls"
+printf '%s' "${args[1]:-}" >"$d/prompt.$n"
 [[ -f "$d/resp.$n" ]] || { echo "no canned response $n" >&2; exit 9; }
 cat "$d/resp.$n"
 [[ -f "$d/rc.$n" ]] && exit "$(cat "$d/rc.$n")"
@@ -93,6 +94,8 @@ check "a fresh review retries on a NEW session" yes \
   "$([[ -n "$(call_field 1 sid)" && "$(call_field 1 sid)" != "$(call_field 2 sid)" ]] && echo yes || echo no)"
 check "the prompt names the model that is actually judging" '(model:' "$(call_field 2 prompt | cut -c1-8)"
 check "  ...and it is the fallback" yes "$(has 'opus-4-8' "$(sed -n 2p "$FAKE_DIR/calls")")"
+check "the fresh prompt asks the SIMPLER question" yes "$(has '7. SIMPLER — could the diff be materially smaller' "$(cat "$FAKE_DIR/prompt.1")")"
+check "  ...and counts seven headings" yes "$(has 'number the seven headings' "$(cat "$FAKE_DIR/prompt.1")")"
 check "the notice reaches stderr" yes "$(has 'retrying once on claude-opus-4-8' "$(cat "$TMP/stderr")")"
 
 echo "== 2. the cybersecurity wording and a bare stop_reason also count =="
