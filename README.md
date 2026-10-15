@@ -48,7 +48,8 @@ runs in another that never sees the Architect's conversation.
 - `mods/walk/` — Claude Code mod: the walk this session launched as one task per
   goal in the session's task list (ctrl+t), kept current by a reconcile every
   3 s, and `/walk [dir]`, a pane with every goal
-  of GOALS.md as a live git graph (state, round, phase, model, time, cost; a
+  of GOALS.md (bare, outside a repo with one: the walk this session launched)
+  as a live git graph (state, round, phase, model, time, cost; a
   sidebar beside the transcript in the fullscreen layout). It polls
   `scripts/events.py walks` and `graph`, found beside the mod, else in
   `$CLAUDE_CODING_WORKFLOW`, else `~/claude-coding-workflow`. Installed

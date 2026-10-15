@@ -1,6 +1,6 @@
 {
   "name": "walk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The walk this session launched as one task per goal in the task list, kept current, and /walk: every goal of GOALS.md as a live git graph in a pane.",
   "types": "./types/index.d.ts",
   "author": {

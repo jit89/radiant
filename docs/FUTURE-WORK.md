@@ -613,3 +613,13 @@ file). When the working folder has no GOALS.md, default to the walk this
 session launched (`events.py walks --session`), as the task list does.
 `/walk <dir>` works today.
 
+**Done (2026-10-16):** `mods/walk` 0.3.1. A bare `/walk` whose working folder
+has no GOALS.md reads `walks` for every session id the task poll has kept plus
+the current one, and shows the walk `chooseWalk` picks with the task list's
+remembered walk (live first, else the remembered one, else the newest). The
+task poll runs first in each tick, so the fallback sees the walk the list
+chose. The reply names the folder. `/walk <dir>` never falls back. Six tests
+in `register.test.tsx`, seven plants red. Opus noted the extra `walks` scan per
+tick while the pane shows a fallback walk: acceptable, reuse the task poll's
+result if it ever matters.
+

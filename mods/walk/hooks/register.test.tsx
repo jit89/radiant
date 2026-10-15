@@ -33,11 +33,11 @@ type On = Parameters<Parameters<typeof test>[1]>[1]
 
 // The engine's session start, working directory, the surfaces drawing it and
 // its panes, standing beneath the mod.
-function engine(on: On, surfaces: readonly ('terminal' | 'desktop')[] = ['terminal'], tools: string[] = []) {
+function engine(on: On, surfaces: readonly ('terminal' | 'desktop')[] = ['terminal'], tools: string[] = [], id = () => 'S1') {
   const panes: string[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'S1' }))
+  on('session.id', () => ({ value: id() }))
   on('tool.list', () => ({ value: tools.map(name => ({ name })) as never }))
   on('session.surfaces', () => ({ value: surfaces }))
   on('ui.log', () => ({ value: undefined }))
@@ -143,17 +143,10 @@ test('a session no surface draws never polls', async ($, on) => {
   expect(calls).toBe(0)
 })
 
-test('the poll keeps the task list for the walk this session launched', async ($, on) => {
-  const clock = mock.clock(on)
-  const argvs: string[][] = []
+// The Task* tools over an in-memory list.
+function taskStore(on: On) {
   const store = new Map<string, Record<string, unknown>>()
   let next = 1
-  const WALK = { root: '/target', walk_id: 'cfcda33d-1111-4000-8000-000000000001', journal: 'docs/journal/x.md', session: 'S1', mtime: 1, live: true, started: 5 }
-  on('process.run', async ($, e) => {
-    argvs.push([...e.argv])
-    const stdout = e.argv.includes('walks') ? JSON.stringify([WALK]) : JSON.stringify(GRAPH)
-    return { value: { exitCode: 0, stdout, stderr: '' } }
-  })
   on('tool.call', ($, e) => {
     const input = e as unknown as Record<string, unknown>
     if (input.tool === 'TaskList') return { result: { tasks: [...store.values()] } } as never
@@ -167,6 +160,19 @@ test('the poll keeps the task list for the walk this session launched', async ($
     if (input.status === 'deleted') store.delete(String(input.taskId))
     else for (const k of ['subject', 'status', 'owner', 'activeForm']) if (input[k] !== undefined) t[k] = input[k]
     return { result: { success: true } } as never
+  })
+  return store
+}
+
+test('the poll keeps the task list for the walk this session launched', async ($, on) => {
+  const clock = mock.clock(on)
+  const argvs: string[][] = []
+  const store = taskStore(on)
+  const WALK = { root: '/target', walk_id: 'cfcda33d-1111-4000-8000-000000000001', journal: 'docs/journal/x.md', session: 'S1', mtime: 1, live: true, started: 5 }
+  on('process.run', async ($, e) => {
+    argvs.push([...e.argv])
+    const stdout = e.argv.includes('walks') ? JSON.stringify([WALK]) : JSON.stringify(GRAPH)
+    return { value: { exitCode: 0, stdout, stderr: '' } }
   })
   engine(on, ['terminal'], ['TaskCreate', 'TaskUpdate', 'TaskList'])
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
@@ -239,4 +245,121 @@ test('a repo with no GOALS.md says so', () => {
 
 test('a parallel walk counts the other running goals in the header', () => {
   expect(text(paneLines({ ...GRAPH, others: 2 }, 90))[0]).toBe('mailer · 1/3 done · g2-ack r1 · review +2')
+})
+
+// Outside a repo with a GOALS.md, a bare /walk shows the walk this session
+// launched (as the task list chooses it); /walk DIR never falls back.
+function noGoalsHere(walks: unknown[], argvs: string[][]) {
+  return async ($: unknown, e: { argv: readonly string[] }) => {
+    argvs.push([...e.argv])
+    if (e.argv.includes('graph')) {
+      const at = e.argv.at(-1)
+      const graph = at === '/target' ? { ...GRAPH, dir: '/target' } : { found: false, dir: at }
+      return { value: { exitCode: 0, stdout: JSON.stringify(graph), stderr: '' } }
+    }
+    return { value: { exitCode: 0, stdout: JSON.stringify(walks), stderr: '' } }
+  }
+}
+const LIVE = { root: '/target', walk_id: 'cfcda33d-1111-4000-8000-000000000001', journal: 'docs/journal/x.md', session: 'S1', mtime: 1, live: true, started: 5 }
+
+test('a bare /walk with no GOALS.md here shows the session\'s walk', async ($, on) => {
+  mock.clock(on)
+  const argvs: string[][] = []
+  on('process.run', noGoalsHere([LIVE], argvs))
+  engine(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const ran = await $.command.run({ command: 'walk', args: '' })
+  expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
+  const walks = argvs.find(a => a.includes('walks')) ?? []
+  expect(walks.slice(walks.indexOf('walks'))).toEqual(['walks', '--session', 'S1', '--json'])
+  const ui = await $.ui.mount(pane('terminal', 100))
+  expect((await ui.find({ key: 'head' }))?.text).toBe('mailer · 1/3 done · g2-ack r1 · review')
+})
+
+test('a bare /walk with no GOALS.md and no walk says so', async ($, on) => {
+  mock.clock(on)
+  const argvs: string[][] = []
+  on('process.run', noGoalsHere([], argvs))
+  engine(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const ran = await $.command.run({ command: 'walk', args: '' })
+  expect(ran.text).toBe('Walk pane opened for this repo.')
+  const ui = await $.ui.mount(pane('terminal', 100))
+  expect((await ui.find({ key: 'none' }))?.text).toBe('No GOALS.md at or above /repo')
+})
+
+test('/walk DIR with no GOALS.md never falls back', async ($, on) => {
+  mock.clock(on)
+  const argvs: string[][] = []
+  on('process.run', noGoalsHere([LIVE], argvs))
+  engine(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const ran = await $.command.run({ command: 'walk', args: '/elsewhere' })
+  expect(ran.text).toBe('Walk pane opened for /elsewhere.')
+  expect(argvs.some(a => a.includes('graph') && a.at(-1) === '/target')).toBe(false)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  expect((await ui.find({ key: 'none' }))?.text).toBe('No GOALS.md at or above /elsewhere')
+})
+
+test('with no walk live, a bare /walk keeps the walk the task list follows', async ($, on) => {
+  const clock = mock.clock(on)
+  const argvs: string[][] = []
+  const newer = { ...LIVE, root: '/newer', walk_id: 'dbdbdbdb-2222-4000-8000-000000000002', live: false, started: null, mtime: 9 }
+  let walks: unknown[] = [LIVE]
+  const answer = noGoalsHere([], argvs)
+  on('process.run', async ($, e) => {
+    if (e.argv.includes('walks')) {
+      argvs.push([...e.argv])
+      return { value: { exitCode: 0, stdout: JSON.stringify(walks), stderr: '' } }
+    }
+    return answer($, e)
+  })
+  taskStore(on)
+  engine(on, ['terminal'], ['TaskCreate', 'TaskUpdate', 'TaskList'])
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000) // the task list takes the live walk in /target
+  // It ends; a newer idle walk file in /newer is left over.
+  walks = [{ ...LIVE, live: false, started: null }, newer]
+  const ran = await $.command.run({ command: 'walk', args: '' })
+  expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
+})
+
+test('after /clear, a bare /walk still finds the walk the old session id launched', async ($, on) => {
+  const clock = mock.clock(on)
+  const argvs: string[][] = []
+  let sid = 'S0'
+  const answer = noGoalsHere([], argvs)
+  on('process.run', async ($, e) => {
+    if (e.argv.includes('walks')) {
+      argvs.push([...e.argv])
+      // events.py lists only the walks the ids it is given launched.
+      const walks = e.argv.includes('S0') ? [{ ...LIVE, session: 'S0' }] : []
+      return { value: { exitCode: 0, stdout: JSON.stringify(walks), stderr: '' } }
+    }
+    return answer($, e)
+  })
+  // TaskList fails, so the poll keeps the session ids but never a walk.
+  on('tool.call', () => ({ result: {}, isError: true }) as never)
+  engine(on, ['terminal'], ['TaskCreate', 'TaskUpdate', 'TaskList'], () => sid)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000) // the task poll has stored S0
+  sid = 'S1' // /clear: a new id, no session.start
+  const ran = await $.command.run({ command: 'walk', args: '' })
+  expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
+})
+
+test('after a restart, a bare /walk shows the walk whose tasks are listed, as the task list does', async ($, on) => {
+  mock.clock(on)
+  const argvs: string[][] = []
+  const older = { ...LIVE, live: false, started: null, mtime: 1 }
+  const newer = { ...LIVE, root: '/newer', walk_id: 'dbdbdbdb-2222-4000-8000-000000000002', live: false, started: null, mtime: 9 }
+  const answer = noGoalsHere([older, newer], argvs)
+  on('process.run', async ($, e) => answer($, e))
+  // The older walk's tasks are on the list; nothing is remembered yet.
+  const store = taskStore(on)
+  store.set('7', { id: '7', subject: 'g1-store — Persist inbound mail', status: 'completed', owner: 'walk:cfcda33d' })
+  engine(on, ['terminal'], ['TaskCreate', 'TaskUpdate', 'TaskList'])
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const ran = await $.command.run({ command: 'walk', args: '' })
+  expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
 })

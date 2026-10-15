@@ -194,7 +194,8 @@ While a walk runs, the `walk` mod (`mods/walk/`, installed by
 `install.sh`) keeps the session's task list current: one task per goal of the
 walk this session launched (in any repo), ticked as it runs, a stopped goal
 titled `PAUSED:` / `BOUNCED: <reason>`. Write no walk tasks yourself. `/walk`
-opens every goal as a live git graph; `scripts/events.py walks` and `graph`
+opens every goal as a live git graph (with no argument, outside a repo with
+a GOALS.md, the walk this session launched); `scripts/events.py walks` and `graph`
 give the same from a shell.
 
 Run both with the Bash tool's `run_in_background: true`. A goal takes

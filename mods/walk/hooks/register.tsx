@@ -1,20 +1,22 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { WalkView } from '../types'
+import type { WalkGraph, WalkView, WalkWalk } from '../types'
+import { chooseWalk } from './reconcile'
 import { EMPTY_TASKS, makeTaskPoller } from './tasks'
 import { paneLines } from './view'
 import type { Tone } from './view'
 
 // The walk this session launched, as one task per goal in the session's task
 // list, kept current by a reconcile on every poll (reconcile.ts); and `/walk
-// [dir]`, a pane with every goal of that repo's GOALS.md as a git graph. The
+// [dir]`, a pane with every goal of that repo's GOALS.md as a git graph (bare,
+// outside a repo with one: the walk this session launched). The
 // walker runs as a background shell process, not as a subagent, so this reads
 // what it writes: `scripts/events.py walks` (the walks this session's ids
 // launched, in any repo) and `graph` (each goal's state). The task list is
 // written through the Task* tools; every task the mod owns carries the owner
 // `walk:<id8>`, and no other task is touched.
-const view = atom({ plugin: 'walk', key: 'view' } as const, { graph: null, error: null, dir: null } as WalkView)
+const view = atom({ plugin: 'walk', key: 'view' } as const, { graph: null, error: null, dir: null, via: null } as WalkView)
 const tasks = atom({ plugin: 'walk', key: 'tasks' } as const, EMPTY_TASKS)
 
 const PANE = 'walk'
@@ -81,18 +83,32 @@ export const register: Register = on => {
       // sessions as an SDK client (not "interactive") and still draws one.
       if ((await $.session.surfaces()).length === 0) return
       const cwd = await $.session.cwd()
+      // The task poll first, so a bare /walk's fallback sees the walk it chose.
+      await pollTasks()
       if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
         const { dir } = await read($, view)
         try {
-          const graph = await events(['graph', '--json', '--dir', dir ?? cwd], cwd)
+          let graph = (await events(['graph', '--json', '--dir', dir ?? cwd], cwd)) as WalkGraph
+          let via: string | null = null
+          // A bare /walk where the working folder has no GOALS.md shows the walk
+          // this session launched, chosen as the task list chooses it.
+          if (dir === null && !graph.found) {
+            const { sessions, last } = await read($, tasks)
+            const ids = [...new Set([...sessions, await $.session.id()])]
+            const walks = (await events(['walks', ...ids.flatMap(s => ['--session', s]), '--json'], cwd)) as WalkWalk[]
+            const root = chooseWalk(walks, [], last)?.root ?? null
+            if (root) {
+              graph = (await events(['graph', '--json', '--dir', root], cwd)) as WalkGraph
+              via = root
+            }
+          }
           // A read for a repo /walk has since moved away from is dropped.
-          await update($, view, v => (v.dir === dir ? { ...v, graph: graph as WalkView['graph'], error: null } : v))
+          await update($, view, v => (v.dir === dir ? { ...v, graph, error: null, via } : v))
         } catch (error) {
           // The pane keeps the last graph and says why it is not current.
           await update($, view, v => (v.dir === dir ? { ...v, error: String(error) } : v))
         }
       }
-      await pollTasks()
     }
     // One poll at a time: a tick during one is skipped, and /walk waits for it
     // and then reads again, so the pane it opened is filled at once.
@@ -120,10 +136,11 @@ export const register: Register = on => {
 
   on('command.run', { command: 'walk' }, async ($, e) => {
     const dir = e.args.trim() || null
-    await update($, view, v => ({ ...v, dir, ...(dir === v.dir ? {} : { graph: null, error: null }) }))
+    await update($, view, v => ({ ...v, dir, ...(dir === v.dir ? {} : { graph: null, error: null, via: null }) }))
     await $.ui.open({ id: PANE, title: 'walk' })
     await pollNow?.()
-    return { text: `Walk pane opened for ${dir ?? 'this repo'}.` }
+    const { via } = await read($, view)
+    return { text: `Walk pane opened for ${dir ?? (via ? `this session's walk in ${via}` : 'this repo')}.` }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
