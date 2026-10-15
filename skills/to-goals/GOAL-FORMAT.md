@@ -81,6 +81,30 @@ The case table in the body *is* the oracle.
 
 `blocked_by` and `conflicts_with` in the markdown body must match the YAML. The YAML wins if they drift.
 
+### Registration points
+
+A parallel walk merges each goal's branch into the walk branch at the join.
+Goals that each add one line to the same list, or edit the same line, always
+conflict in git, even when all their own code is in separate files. Seen on
+the first live parallel walk (rbtree, 2026-10-16): three goals each appended
+their source file to one `add_library(...)` line and registered their test at
+the same place in `CMakeLists.txt`. The first goal merged; the other two
+stopped `merge-conflict`.
+
+For every shared registration point in the plan's harness (a build source
+list, a test list, a module, export or route table), choose one:
+
+- **The harness picks the files up itself**, so no goal edits the list. For
+  example `file(GLOB rbtree_src CONFIGURE_DEPENDS src/*.c)`, plus a
+  `foreach` over `tests/acceptance/*.c` that registers one test per file;
+  Python packages that import nothing by name in `__init__.py`. Prefer this:
+  it keeps goals truly parallel.
+- **The goals that edit it name each other in `conflicts_with`**, so they run
+  in different waves. Correct, but those goals no longer run side by side.
+
+The scaffold goal is the natural owner of a picking-up harness: it lands
+before the goals that add files to it.
+
 Each goal has exactly one `## <id> — <title>` section: the id, then a space or end of line (`## g1-store:` does not count). `goals.py validate` rejects duplicates, and a goal with no section, whatever its oracle: the section is the handoff's spec, and for `oracle: inline` its case table is the oracle.
 
 ## Slice rules

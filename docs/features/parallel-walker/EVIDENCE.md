@@ -98,3 +98,55 @@ No command failed. `git fsck --full` is clean. The commit counts are exact:
 - the walker checks, before each of its own git writes, that no
   `packed-refs.lock` (and none of the denied `.lock` paths) exists. If one
   does, it stops `git-lock-stray`, naming the file, and deletes nothing.
+
+## Step 12: the first live parallel walk (2026-10-16)
+
+The rbtree DAG of 2026-10-13 replayed in `~/dogfood/rbtree-par`, cloned at
+`02f35a4`, which is the signed plan, goals and oracles before the sequential
+walk. It ran `run-goals.sh --jobs 3` with real Haiku 5.5 implementers and Opus
+5.5 reviewers, at house commit `68069f4`. C11 with CMake; no
+`worktree_setup`, because the proofs build from scratch.
+
+| Wave | Goals | Start → integrated (UTC) | Notes |
+|---|---|---|---|
+| 1 | g1-scaffold | 20:30:24 → 20:35:13 | review DONE r0 |
+| 2 | g2-validate | 20:35:15 → 20:41:56 | review DONE r0 |
+| 3 | g3-insert | 20:41:58 → 20:47:15 | review DONE r0 |
+| 4 | g4-walk, g5-search, g7-teardown | 20:47:18 → all three finished 20:51:21; g4 integrated 20:51:49 | g5 and g7 stopped `merge-conflict` |
+
+- **Every goal reviewed DONE on its first pass.** No fix rounds, no
+  fallback.
+- **Haiku cost:** g1 0.055, g2 0.175, g3 0.055, g4 0.036, g5 0.033,
+  g7 0.045 USD (client-side estimates).
+- **Integrations** (merge, merged proofs of every goal done in the walk,
+  fast-forward) took 8–28 s each. The walker's overhead per wave was about
+  2 s.
+- **`join_wait`, wave 4:** g4 waited 46 s, g5 37 s, g7 0 s (the slowest).
+  Waves 1–3 had one goal each.
+- **Against the sequential walk** (2026-10-13, 33 min for 7 goals): the
+  linear part g1–g4 took 21m27s here against 20m25s there. Wave 4 ran three
+  goals in 4m03s, where the sequential walk spent about 11 min on g4, g5 and
+  g7. Had they integrated, this DAG would have saved about 7 min.
+
+**The stop.** g4, g5 and g7 each put their code in a new file, but each also
+appended that file to the one `add_library(rbtree STATIC …)` line in
+`CMakeLists.txt` and registered its test at the same place. g4 integrated
+first; g5 and g7 conflicted on that line. The walker behaved as designed:
+- the merge was aborted in a scratch worktree, kept as evidence;
+- the walk branch was not moved and nothing was reset;
+- both goals stayed recorded `finished` (reviewed);
+- one combined stop listed both.
+
+Handing them back would recut them, but they would conflict with each other,
+and later with g6, on the same line. Shipped from this:
+- the planning rule in GOAL-FORMAT.md, "Registration points": a harness that
+  picks goal files up itself, or `conflicts_with`;
+- a to-goals quiz question.
+
+Logged for later:
+- FUTURE-WORK item 17: an automatic recut after a merge conflict;
+- item 18: `/walk` with no argument outside the target repo. The task list
+  followed the walk correctly; `/walk ~/dogfood/rbtree-par` worked.
+
+Not yet measured: a full parallel walk to the end. That needs a harness that
+globs its sources and tests, per the new rule.

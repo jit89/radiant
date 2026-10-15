@@ -43,6 +43,12 @@ Ask:
 2. Are the blocking edges true gates — and are `conflicts_with` only
    merge hazards, not fake dependencies?
 3. Should any goals be merged or split?
+4. Can goals that would run side by side (`run-goals.sh --jobs N`) land
+   without touching the same lines? Name every shared registration point the
+   plan's harness has (a source list, a test list, a module or export list)
+   and, for each, either make the harness pick the goals' files up itself
+   (a glob, a loop over `tests/acceptance/`) or declare `conflicts_with`
+   between the goals that edit it (GOAL-FORMAT.md, "Registration points").
 
 Iterate until the user approves the breakdown. Then write files.
 

@@ -581,3 +581,27 @@ From the parallel walker's seventh Opus review: `run-goal.sh` reads `git status
 or a rename (`old -> new`) is misread. `git status --porcelain -z` removes the
 whole class. Low priority: such a journal or contract path is exotic.
 
+## 17. Parallel walker: recut a goal after a merge conflict (2026-10-16)
+
+From the first live parallel walk (rbtree replay, `--jobs 3`): g4, g5 and g7
+ran side by side; g4 integrated, g5 and g7 stopped `merge-conflict` on the
+same `add_library(...)` line in `CMakeLists.txt`. Handing them back (`set
+ready`) recuts them, but parallel siblings that edit one line conflict again,
+so each wave integrates one of them. The planning fix shipped first
+(GOAL-FORMAT.md "Registration points"; a to-goals quiz question). The walker
+fix, decided with this evidence: on a plain `merge-conflict` (no tamper, the
+reviewed SHA verified), recut the goal once and run it fresh from the new walk
+tip in the next wave instead of stopping. It costs one more implementer pass
+and review per conflicted goal, and every wave still integrates at least one
+goal, so the walk finishes. It touches the integration and recut state the
+item 6 reviews hardened over five rounds: its own crucible.
+
+## 18. `/walk` with no argument outside the target repo (2026-10-16)
+
+`/walk` opens the pane for the session's working folder; from the house repo
+it showed "No GOALS.md at or above …" while this session's own walk ran in
+`~/dogfood/rbtree-par` (the task list followed it correctly, through the walk
+file). When the working folder has no GOALS.md, default to the walk this
+session launched (`events.py walks --session`), as the task list does.
+`/walk <dir>` works today.
+

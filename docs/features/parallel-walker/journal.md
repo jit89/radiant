@@ -107,3 +107,6 @@ Opus 5.5 narrow round (100-line delta): VERDICT DONE. r6 FIX and notes closed; q
 
 ## 2026-10-15T20:27:39Z — ARCHITECT commit
 User approved the commit after Opus r7 DONE and the final gate (run-all -j 8: 25 scripts, 0 fails; install.sh --check OK; events self-test OK). Two commits: the plan amendments 2-5 and review log alone, then the build.
+
+## 2026-10-15T20:54:54Z — ARCHITECT step 12 live dogfood
+rbtree replay (~/dogfood/rbtree-par at 02f35a4) with --jobs 3, real Haiku and Opus: waves 1-3 one goal each, wave 4 g4/g5/g7 in parallel; every goal DONE on its first review; integrations 8-28 s; join_wait 46/37/0 s. g4 integrated; g5 and g7 stopped merge-conflict on the shared add_library(...) line in CMakeLists.txt (each goal registered its own source there). The walker stopped as designed. User chose: fix 1 now (GOAL-FORMAT.md "Registration points" rule and a to-goals quiz question), fix 2 (automatic recut after a merge conflict) as FUTURE-WORK item 17; item 18 /walk default folder. Evidence in EVIDENCE.md.
