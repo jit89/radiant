@@ -189,3 +189,52 @@ Addendum (Architect, after logging round 6): steps 4 and 8 said "ends its curren
 
 ## Resolution
 Signed off by the user after 6 Grok rounds (round 6 authorised past MAX_ROUNDS=5). Last verdict REVISE with 1 finding, taken; findings 9, 6, 6, 3, 4, 1. No point left unresolved between Grok and the Architect.
+
+## Round 7 — Grok (amendment 3; authorised by the user's choice of the redesign, "one Grok round")
+
+The last review left one hole: a recut goal resumes a closed attempt. I am re-reading the revised plan against that, and against the resume rules, before judging anything new.The closed-attempt resume loop is fixed. A current attempt is the last `dispatch <id> r0` only when no `done <id>` or `bounced <id>` follows it, a recut goal therefore starts fresh at the wave base (`PLAN.md:208-216`, test at `:434-437`), and Amendment 3 goes further: worktree mode never resumes, and a goal with no walker-written `finished` record is recut from the wave base (`:668-670`, `:711-727`).
+
+Four new holes, all in Amendment 3:
+
+1. Recut copies the goal branch's journal suffix into the walk journal when it passes the journal check (`:718-721`). `orch-files.py --records` allows an `ORCHESTRATOR` line that names this goal (`scripts/lib/orch-files.py:51-56`), so the implementer can plant `ORCHESTRATOR finished <goal> head=<sha>`. The plan appends that suffix and only then removes the branch (`:718-722`). A crash after the append commit and before `git worktree remove` leaves the planted line after the goal's last wave membership, with `cw/<goal>` still at that SHA. The next start treats it as the walker-written record and merges it without dispatch (`:714-716`). Fix: a suffix that contains `finished` or `recut` is `journal-tamper` and is not appended; only the walker writes those lines.
+
+2. `finished` is committed on the walk branch before the scratch integration (`:685-687`), and any later failure leaves that line in place while the fast-forward does not happen (`:704-707`). A sibling that exited 0 and has no `finished` line yet is listed as `finished-not-integrated` (`:740-741`) and on the next start is recut, which deletes its reviewed branch (`:718-722`). Fix: write `finished` for every verified exit-0 goal before integrating the first of them, and integrate a `finished-not-integrated` goal from that record instead of recutting it.
+
+3. After a failed integration the recorded SHA is sticky: if `cw/<goal>` is anything other than that SHA, the rerun stops `integration-unverified` (`:717-718`). The risks section still says the Architect fixes the goal and reruns (`:559-560`). A fix commit on the goal branch is a moved branch, and there is no recut path once a `finished` line exists. Fix: if the branch is a descendant of the recorded SHA, merge the new tip and re-prove; reserve `integration-unverified` for a tip that is not that SHA and not a descendant of it.
+
+4. Amendment 3 says it wins over steps 7–9 and Amendment 2 only (`:660-661`). Step 6 still says a current attempt resumes (`:208-212`), and step 11 still requires the ancestor skip, the reset to the integrate commit's first parent, and the old dirty-tree cleanup (`:401-402`, `:407-409`, `:421-423`), which Amendment 3 removes (`:706-709`). The scratch path `.integrate-<goal>-<n>` is kept on failure (`:689-690`, `:704-706`) and is not given a fresh name, so the retry's `git worktree add` hits the kept directory. Fix: extend the precedence sentence to steps 6 and 11, replace those tests with the scratch worktree, the `finished` record, and recut-on-no-record, and give each integration attempt its own scratch path.
+
+VERDICT: REVISE
+
+### Architect's response
+
+All four taken; 3 in modified form.
+
+1. A planted `finished` line copied by a recut — taken. `journal-merge.py` refuses any goal suffix holding a walker-only record (finished, recut, integrated, wave, wave-stop, walk, walk-start, walk-end, walk-stuck), for integrate, bounce and recut.
+2. A sibling's reviewed branch recut after another goal's integration failed — taken. Every verified exit-0 goal gets its `finished` record in one walker commit before any integration starts; a rerun integrates from the record.
+3. No path for a goal whose integration failed — taken, modified. Rejected: merging a descendant of the recorded SHA (a commit after the review is unreviewed code, the thing the amendment exists to keep out). The paths: fix the walk branch and rerun (the same SHA is integrated again), or hand the goal back with `set ready`, which recuts it for a fresh implementation and review. The stop file names both.
+4. Stale steps 6 and 11; a reused scratch path — taken. The amendment now wins over steps 6-9 and step 11's test list (resume, ancestor, reset and dirty-cleanup tests replaced). Each integration attempt gets its own `mktemp -d` scratch folder.
+
+## Round 8 — Grok (amendment 3, user-authorised)
+
+The last review left four holes in Amendment 3. I am re-reading the revised plan against those, and against the journal checks, before judging anything new.The four earlier holes are closed. A goal suffix that contains a walker-only record (`finished`, `recut`, `integrated`, `wave`, and the walk-level names) is `journal-tamper` and is not appended (`PLAN.md:738-743`). Every verified exit 0 gets a `finished` line in one commit before any integration, and a sibling whose integration never started is integrated from that record (`:684-691`). A later commit on `cw/<goal>` is not merged; the Architect sets the goal back to `ready` and the walker recuts it (`:714-721`). Amendment 3 now wins over steps 6–9 and the step 11 tests, and each scratch worktree is a new `mktemp -d` directory (`:659-663`, `:692-695`).
+
+Three new holes:
+
+1. The `finished` commit is a walker git write, so a stray `packed-refs.lock` (left writable on purpose, Amendment 1) wakes `git-lock-stray` and the commit does not land (`:595-597`, `:684-689`). The verified result lives only in that commit and in the run folder. On the next start those goals are `in_progress` with no `finished` record, so C recuts them and deletes the reviewed branches (`:732-736`). Clearing the lock and rerunning still loses the work. Fix: keep the result files with the stop, and on the next start, before any recut, re-check the branch and write `finished` from those files when the branch still matches.
+
+2. A failed integration says the walk branch is never touched (`:710-712`). The `finished` commit has already landed (`:687-691`). Resetting the branch to honor that sentence deletes every sibling's `finished` line, and the next start recuts them. Fix: a failed integration does not fast-forward and does not reset; the `finished` commit stays.
+
+3. `integration-dirty` is now a dirty main checkout before the fast-forward, and the cleanup text was removed (`:706-713`, `:722-723`). The `finished` lines for the whole wave sit in one commit on that checkout. A `reset` to the commit's parent drops all of them, and C then recuts every one of those goals. Fix: the stop names `git status` and restoring the worktree to `HEAD` (that `finished` commit), and it says not to move `HEAD`.
+
+VERDICT: REVISE
+
+### Architect's response
+
+All three taken.
+
+1. Verified results lost when the `finished` commit cannot land — taken. Each verified result file is copied to `<wt-base>/.results/<goal>`; the next start re-verifies the branch against it and writes `finished` before anything else for that goal; the copy is deleted once the goal is integrated or recut.
+2. "The walk branch is never touched" contradicts the landed `finished` commit — taken: a failed integration never moves the walk branch and nothing is reset; the `finished` commit stays.
+3. `integration-dirty` lost its cleanup text — taken: `git status`, restore the working tree to HEAD, do not move HEAD (it holds the wave's `finished` records).
+
+Trend on amendment 3: 4, then 3 findings, now wording and a durability gap; not run again before the build. The build's tests, planted bugs and a narrow Opus round follow.

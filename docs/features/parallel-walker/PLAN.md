@@ -597,3 +597,295 @@ walker check:
   one does, it wakes `git-lock-stray`, naming the file, and deletes nothing.
   `git-lock-stray` joins step 10's list of reasons. A test plants a
   `packed-refs.lock` and a `refs/heads/<walk>.lock`.
+
+## Amendment 2 — the Opus review's trust findings (user-approved, 2026-10-15)
+
+The first Opus review of the build found that the walker trusted state an
+implementer can write. This amendment replaces those trust points:
+
+1. **"Finished" comes from a host-written record.**
+   - When the review passes, `run-goal.sh --worktree` commits its `done`
+     journal line on `cw/<goal>`. It then writes a `phase integrate` event
+     whose payload carries `head`, the reviewed tip SHA. The event goes into
+     the events index under `~/.cache`, outside the implementer's sandbox.
+   - At the join, the walker reads that SHA (`events.py finished`), refuses
+     if `cw/<goal>` no longer equals it (`integration-unverified`), and
+     merges the SHA, not the branch name.
+   - On a rerun, an `in_progress` goal is integrated without dispatch only
+     when such an event follows the goal's last `dispatch` and the branch
+     still matches. If the event exists but the branch has moved, that is
+     `integration-unverified`. The goal branch's journal is no longer read
+     for this (step 8).
+2. **A re-attached goal with no open attempt must have no commits of its own**
+   past its merge base with the walk branch. Otherwise the walker stops
+   `worktree-unreviewed-commits`, naming the recut: remove the worktree and
+   branch, then `goals.py set <id> ready`.
+3. **An integration must not change `GOALS.md`.** If the staged merge
+   differs from HEAD in `GOALS.md`, the walker aborts the merge and stops
+   `integration-goals-edited`.
+4. **Replace refs.** The walker exports `GIT_NO_REPLACE_OBJECTS=1`, which
+   every goal process inherits. `walk_check` stops `git-replace-ref` if any
+   `refs/replace/` entry exists.
+
+Also from that review, within the existing steps:
+- the merge's exit status is checked (0 or 1, with `MERGE_HEAD` present,
+  else `merge-failed`);
+- a bounce reads the walk journal from HEAD, after checking it against the
+  walker's expected copy;
+- a reset happens only when the merge's commit is the sole first-parent
+  commit since the pre-merge SHA; otherwise the walker stops without
+  resetting and names the cleanup;
+- `walk_check` runs before every reset;
+- a walk-level stop raised during a wave goes into the combined stop file;
+- a bounce's stop names the remove and recut commands;
+- the `--jobs 1` refusal also checks for the worktree folder;
+- before running git in a worktree, the walker checks that the worktree's
+  `.git` file still names its own admin folder (`worktree-gitfile-changed`);
+- a failed `git worktree add` is that goal's stop
+  (`worktree-add-failed`).
+
+Known limit, recorded with item 12: the deny list covers only the current
+wave's members. The kept branches of goals outside the wave (a bounced goal,
+an `integration-red` goal, a goal waiting for a slot) are writable by a
+running implementer. An `in_progress` goal outside the wave is still checked
+against its host-recorded reviewed SHA before it is merged. A bounced goal is
+recut from the wave base.
+
+## Amendment 3 — integration by construction (user-approved, 2026-10-15)
+
+The second Opus review found five of its eight defects in fixes for the first
+review's findings, all in the integration and recovery state. That state is
+guarded after the fact today: branch refs, worktree HEADs, an events row,
+and a reset after a merge. This amendment changes the structure instead. Where
+it conflicts with steps 6–9, step 11's test list or Amendment 2, this
+amendment wins: the resume, ancestor-path, reset and dirty-cleanup tests of
+step 11 are replaced by tests of the scratch worktree, the `finished` record,
+recut on no record, and the result file.
+
+**A. The goal reports what was reviewed, through a file the walker owns.**
+- `run-goal.sh --worktree` takes two more arguments from the walker:
+  - `--base <wave-base>`: a fresh start requires HEAD == `cw/<goal>` == that
+    SHA, with `symbolic-ref HEAD` == `refs/heads/cw/<goal>`. Otherwise it is a
+    gate stop.
+  - `--result <file>`: a path in the walker's private run folder.
+- Worktree mode never resumes. It always starts fresh (C below), so it never
+  reads `resume-state.py --open-attempt`; that flag and `lib/attempt-state.py`
+  are removed.
+- `REVIEWED_HEAD` is HEAD at the moment the review diff is cut, each round. On
+  a DONE verdict, HEAD must still equal it; otherwise it wakes
+  `head-moved-during-review` (exit 1). The `done` journal commit must have
+  `REVIEWED_HEAD` as its parent and change only the journal.
+- The goal then writes `reviewed=<sha> done=<sha>` to the result file, as its
+  last act before exit 0.
+- The `phase integrate` event stays, for display only. Nothing trusts it, and
+  `events.py finished` is removed.
+
+**B. The walker records it, and integrates in a scratch worktree.**
+- **At the join, before any integration:** for every goal that exited 0,
+  read its result file and require `cw/<goal>` == `done`, `done^` ==
+  `reviewed`, and `reviewed..done` touching only the journal (otherwise that
+  goal stops `integration-unverified`). Then journal
+  `ORCHESTRATOR finished <goal> head=<done>` for every verified goal, in one
+  walker commit on the walk branch. Those records, in walker-written history,
+  are what a rerun reads, so a wave sibling whose integration never started is
+  integrated from its record, not recut. Each verified result file is also
+  copied to `<wt-base>/.results/<goal>` (walker-owned, outside the repo). If
+  the `finished` commit does not land (a stray lock, a signal), the next start
+  re-verifies the branch against that copy and writes `finished` from it
+  before deciding anything else for the goal. The copy is deleted once the
+  goal is integrated or recut.
+- **Integration happens in a walker-owned scratch worktree,** a new folder
+  per attempt (`mktemp -d` under `<wt-base>/.integrate/`, so a retry never
+  meets a folder kept as evidence):
+  `git worktree add --detach <scratch> <walk tip>`.
+  In it, in order:
+  1. the journal check (Amendment 2);
+  2. `merge --no-ff --no-commit <done>`;
+  3. the checked journal resolution;
+  4. the conflict check and the GOALS.md check;
+  5. the integrate commit;
+  6. `worktree_setup`;
+  7. the merged proofs, with tree snapshots taken in the scratch tree;
+  8. `goals.py set <goal> done` and the `integrated` journal line, committed
+     after a byte check against the expected journal.
+- **Only if all of that is green,** the walker fast-forwards the walk branch
+  in the main checkout: `walk_check`, a clean tree, then
+  `merge --ff-only <scratch tip>`. After that it removes the scratch worktree
+  and the goal's worktree and branch.
+- **Any failure** (conflict, journal check, setup, red, tamper) stops that
+  goal. The integration never moves the walk branch, and nothing is reset:
+  the `finished` commit already on it stays. The scratch worktree is kept as
+  evidence and named in the stop file. Nothing is ever reset, so `safe_reset`,
+  the ancestor path and the "NOT reset" cleanup text are removed.
+- **After a failed integration** the goal's recorded SHA stands: a rerun
+  integrates that same SHA again, which is the path when the Architect fixes
+  the walk branch (another goal, the plan's shared code). A commit added to
+  `cw/<goal>` after the review is never merged, not even a descendant of the
+  recorded SHA: it is unreviewed. To change the goal itself the Architect hands
+  it back (`goals.py set <goal> ready`, committed); the walker then recuts it
+  (C) and it is implemented and reviewed again. The stop file names both
+  paths.
+- `integration-dirty` is now only a dirty main checkout before the
+  fast-forward. Its stop names `git status`, then restoring the working tree
+  to HEAD (`git restore --staged --worktree .` and `git clean -fd`), and says
+  not to move HEAD: HEAD holds the wave's `finished` records, and dropping
+  them would recut those goals.
+
+**C. Stopped goals restart fresh.**
+- At the start of a walk, and at each wave, an `in_progress` goal is handled
+  by what the walk journal (walker-written) says about it:
+  - **A `finished <goal> head=<sha>` record after its last wave membership,
+    with `cw/<goal>` == that SHA:** the walker integrates it without
+    dispatching.
+  - **A `finished` record, but the branch moved:** `integration-unverified`.
+  - **No `finished` record:** the goal is recut. The old branch's journal
+    suffix, if it passes the journal check, is appended to the walk journal as
+    the abandoned attempt's record. The walker journals
+    `ORCHESTRATOR recut <goal>`, removes the old worktree and branch, and the
+    goal joins the wave as a fresh member. The wave commit's allow list
+    permits an already `in_progress` member.
+- **Walker-only records.** A goal's journal suffix may hold only what
+  `run-goal.sh` and the implementer write. `journal-merge.py` refuses a suffix
+  holding any record only the walker writes (`finished`, `recut`,
+  `integrated`, `wave`, `wave-stop`, `walk`, `walk-start`, `walk-end`,
+  `walk-stuck`) as `journal-tamper`, for every use: integrate, bounce and
+  recut. A suffix that fails is not appended.
+- A `ready` goal whose `cw/<goal>` or folder already exists is recut the same
+  way when the walk journal shows it was a member of an earlier wave (a
+  bounce, then the Architect's reset). Otherwise it is `worktree-exists`, as
+  before. The goal branch's journal is never read to decide this.
+- The re-attach checks of Amendment 2 (own commits, the journaled base,
+  `wt_ok`) are removed: the walker never runs git in a leftover worktree
+  except `git worktree remove --force` from the main checkout.
+- The deny list names each member's admin folder as git created it, read
+  from the new worktree's `.git` right after `git worktree add` and before
+  any goal runs. `git worktree prune` runs before cutting worktrees.
+
+**D. One exit path during a wave.**
+- From the wave commit to the end of the join, every stop (a goal's, a
+  walk-level `walk_stop`, `meta_stop`, a signal) goes into the combined stop.
+  `wave_stop`:
+  - clears the INT/TERM traps;
+  - lists every goal that exited 0 and was not integrated as
+    `finished-not-integrated`;
+  - commits its journal line only when every precondition holds (the walk
+    branch and tip, no stray lock or replace ref, the journal as expected,
+    nothing staged, GOALS.md equal to HEAD); otherwise it notes in the stop
+    file why the line is not committed. It never exits any other way.
+- A signal sends TERM only to members that have not exited.
+
+**E. Known limit, stated plainly (item 12).** The host proof and
+`worktree_setup` run unsandboxed, as the user. Code they run can write the
+walker's run folder, the events index and the main repository. Amendments 2
+and 3 defend against the sandboxed implementer, not against that. Closing it
+is item 12.
+
+## Amendment 4 — the third review's findings (user-approved, 2026-10-15)
+
+1. **The scratch integration is checked by commit structure, not by reading
+   the scratch tree's HEAD at the end.** Something left running could repoint
+   the scratch worktree's HEAD or rewrite its index, because its admin folder
+   is created after the deny lists. So:
+   - Right after the integrate commit, the walker captures its SHA, `M`. It
+     requires:
+     - `M^1` == the walk tip and `M^2` == the reviewed `done` SHA, with no
+       third parent;
+     - every path of `M` equals the walk tip's version or the goal's version,
+       except the journal, which must equal the checked resolution;
+     - a clean scratch tree with HEAD == `M` before and after setup and the
+       merged proofs.
+   - After the `integrated` commit it captures `F` and requires:
+     - `F^1` == `M`, with only `GOALS.md` and the journal changed;
+     - the journal blob byte-equal to what the walker wrote;
+     - `GOALS.md` moved only by `<goal>: in_progress → done`.
+   - The walk branch then fast-forwards to the captured `F`, never to
+     whatever the scratch HEAD names. Any mismatch is `integration-tamper`.
+2. **The goal's own worktree link files are protected.**
+   - The implementer could point its worktree's `.git` gitfile, or its admin
+     folder's `commondir` or `gitdir`, at a fake gitdir whose config defines a
+     filter driver. The host's next git call there would then run that program
+     outside the sandbox.
+   - Each goal's deny list now names its own `<worktree>/.git`,
+     `<admin>/commondir` and `<admin>/gitdir`.
+   - `run-goal.sh` in worktree mode saves their bytes at start, before any
+     implementer runs. Before every host git call (the `git()` wrapper) it
+     compares them again, without running git. A difference taints host git,
+     as a `.git` metadata change does (`git-metadata-tamper`).
+   - Amendment 3 E's "defend against the sandboxed implementer" holds only
+     with this in place.
+3. **The join handles every outcome before it integrates:**
+   1. verify each exit-0 goal's result and write its durable copy
+      (temp file, then rename);
+   2. record each stopped goal, and bounce each exit-3 goal;
+   3. write the `finished` records;
+   4. integrate.
+   - A goal whose integration has not finished stays listed
+     `finished-not-integrated`, together with the scratch worktree in use.
+   - On a signal, every member that has already exited is handled the same
+     way, with no git write: an exit-0 goal gets its durable copy and is
+     listed; any other is listed from its own stop file.
+4. **Smaller changes:**
+   - `walk_record` reads the walk journal as bytes, decoded with
+     replacement, and a failure to read it is a stop, never an empty answer.
+   - A member's old result copy is removed at its wave commit.
+   - A copy that no longer verifies at start is reported.
+   - The admin folder path is taken from `git rev-parse --absolute-git-dir`
+     right after the cut, so a relative gitdir works.
+   - Worktree removal uses `remove -f -f`, which also handles a locked
+     worktree.
+   - Walk-end also lists leftover scratch worktrees.
+   - Worktree mode's preflight is `--none`.
+
+## Amendment 5 — the fourth review's findings (user-approved, 2026-10-15)
+
+Round 4 found that Amendment 4's integration check refused correct merges,
+and that the join's bookkeeping still lost goals in some orders. Three
+simplifications replace those parts. Where they conflict with Amendment 4,
+this amendment wins.
+
+1. **One tree comparison, not a path-by-path check.**
+   - The walker computes the expected integration itself:
+     - `git merge-tree --write-tree --merge-base=<base> <walk tip> <done>`;
+     - then, through a temporary index, the journal replaced by the checked
+       resolution.
+   - The integrate commit `M` must have exactly that tree, plus the parents
+     Amendment 4 names (the walk tip and the reviewed `done` SHA).
+   - This accepts every merge git makes cleanly (two goals editing different
+     parts of one file, a rename on one side, non-ASCII paths) and refuses
+     any other tree.
+   - Amendment 4's rule "every path equals one side's version" is withdrawn.
+2. **Host git never reads a worktree's link files.**
+   - Every host git call into a linked worktree runs with `GIT_DIR`,
+     `GIT_COMMON_DIR` and `GIT_WORK_TREE` pinned to the values recorded when
+     the walker created that worktree, before anything else could run in it.
+   - That covers `run-goal.sh`'s `git()` in worktree mode, and the walker's
+     calls into a scratch worktree, including the tree snapshots around the
+     merged proofs.
+   - The `.git` gitfile and the admin folder's `commondir` are then never
+     consulted. Amendment 4's byte check of them stays as a second layer.
+   - In worktree mode `events.py` makes no git call of its own.
+3. **The combined stop derives its list from each member's state.**
+   - `wave_stop` goes through every member of the wave:
+     - integrated (done in GOALS.md): skipped;
+     - already holding its own stop: skipped;
+     - still running: `interrupted`;
+     - exited 0: its result is checked and kept, and it is listed
+       `finished-not-integrated` (or `integration-unverified`);
+     - exited 3 and not bounced: `bounced-not-recorded`;
+     - any other exit: its own stop file.
+   - `JOIN_LEFT`, `HANDLED` and the ordering rules they needed are removed.
+   - The join still records stops before bounces, and bounces before
+     integrations.
+4. **Smaller changes:**
+   - The walk-journal record must match
+     `none | member | finished <sha>`; any other result, or a failed read, is
+     a stop.
+   - `F`'s `GOALS.md` must equal, byte for byte, the walk tip's `GOALS.md`
+     with only `<goal>` set to `done`. The `integrated` record names `M`.
+   - Tests:
+     - a clean merge of a file two goals both edited, which must integrate;
+     - Ctrl-C in wave 2;
+     - the UTF-8 test with a pinned locale, checking that the bytes reached
+       the walk journal;
+     - the reviewed-SHA check reading the record that existed before the
+       rerun.
