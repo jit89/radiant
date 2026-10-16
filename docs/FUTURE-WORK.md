@@ -507,6 +507,15 @@ separate one. If either fails, stop and tell the user before building.
    the Mac slept sat ~5 h with 3.5 s CPU and no output, indistinguishable from a
    slow round. Add a wall-clock cap and/or a no-output-for-N-minutes check that
    fails the round as void; long runs go under `caffeinate -i`.
+   **Done (2026-10-16):** `grok-review.sh` runs Grok under `run-timeout.py
+   --wall` and `caffeinate -i`: a wall-clock cap (`GROK_REVIEW_TIMEOUT`,
+   default 3600 s, exit 124) and a stop when the wall clock jumps more than
+   `GROK_REVIEW_SLEEP_GAP` (120 s) between checks a second apart, i.e. the host
+   slept (exit 125); both print a void `error` result. A no-output check was not
+   built: `--output-format json` prints nothing until the end. A forward clock
+   step of more than the gap, or the caller held stopped that long, also reads
+   as a sleep (a void round, rerun). SIGHUP stops the session too. Tests in
+   `grok-review-test.sh`; seven plants red.
 2. to-goals tips: a planted-bug runner must compile each variant from scratch
    (Apple's `make` compares mtimes at 1 s, so a restored file inside the same
    second keeps the planted object); never splice text with `perl -e "s/…/$x/"`

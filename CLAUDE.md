@@ -178,7 +178,9 @@ oracle session rather than resuming the old one.
 Run each round with the Bash tool's `run_in_background: true`. A first
 round on a ~240-line plan took ~20 minutes at high reasoning effort, past the
 10-minute ceiling on a foreground call; later rounds are shorter. The harness
-re-invokes this session when the round exits; do not poll it.
+re-invokes this session when the round exits; do not poll it. A round past
+`GROK_REVIEW_TIMEOUT` (60 min) or across a host sleep exits
+`error (timed out …)` / `error (host slept)`: void, rerun the same round (a void round 1 reruns fresh, not `--resume`).
 
 ## Dispatching Phase 4 / 5
 

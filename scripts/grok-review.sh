@@ -34,6 +34,13 @@
 #   GROK_REVIEW_MODEL     default: grok-4.7
 #   GROK_REVIEW_EFFORT    default: high
 #   GROK_REVIEW_DRY_RUN=1 print the command, skip the API call
+#   GROK_REVIEW_TIMEOUT   wall-clock cap on a round, seconds (default 3600;
+#                         0 = none). Past it the round is void: exit 124.
+#   GROK_REVIEW_SLEEP_GAP a wall-clock jump of more than this many seconds
+#                         (default 120) means the host slept; a call in flight
+#                         may never return, so the round is void: exit 125.
+#                         0 turns the check off.
+#                         The round runs under `caffeinate -i` where it exists.
 #   GROK_REVIEW_OUT       override the verdict file path
 #   CW_OUT_DIR            write raw, .err and verdict here and delete none of
 #                         them (the caller owns the folder); unset, they go to
@@ -43,6 +50,8 @@
 #
 # Result lines (stdout, parse these):
 #   GROK_REVIEW_RESULT: ok | rate_limited | error | dry_run
+#     (error (timed out after Ns) and error (host slept) are void rounds:
+#     rerun the same round)
 #   SESSION_ID: <uuid>
 #   VERDICT: APPROVED | REVISE | MISSING
 #   VERDICT_FILE: <path>
@@ -178,10 +187,29 @@ run_grok() {
   local raw rc
   raw="$(mktemp "$OUT_DIR/grok-review-raw-XXXXXX")"
   cw_private "${raw}.err"
+  # A round once sat ~5 h after the Mac slept, no output and no CPU, looking
+  # like a slow one (FUTURE-WORK 11.1): a wall-clock cap, a stop on a sleep
+  # gap, and no idle sleep while it runs.
+  local timeout="${GROK_REVIEW_TIMEOUT:-3600}"
+  local run=(python3 "$HERE/lib/run-timeout.py" --wall "${GROK_REVIEW_SLEEP_GAP:-120}" "$timeout")
+  [[ -x /usr/bin/caffeinate ]] && run+=(/usr/bin/caffeinate -i)
   set +e
-  "${cmd[@]}" >"$raw" 2>"${raw}.err"
+  "${run[@]}" "${cmd[@]}" >"$raw" 2>"${raw}.err"
   rc=$?
   set -e
+
+  if [[ $rc -eq 124 || $rc -eq 125 ]]; then
+    if [[ $rc -eq 124 ]]; then
+      echo "GROK_REVIEW_RESULT: error (timed out after ${timeout}s)"
+    else
+      echo "GROK_REVIEW_RESULT: error (host slept)"
+    fi
+    echo "SESSION_ID: ${SESSION_ID}"
+    echo "VERDICT: MISSING"
+    echo "VERDICT_FILE: ${raw}"
+    cat "${raw}.err" >&2 || true
+    exit "$rc"
+  fi
 
   if is_transport_rate_limit "$rc" "${raw}.err" "$raw"; then
     echo "GROK_REVIEW_RESULT: rate_limited (exit ${rc})"

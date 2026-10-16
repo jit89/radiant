@@ -300,6 +300,80 @@ oracle_review docs/feat/PLAN.md >"$TMP/out" 2>&1 && rc=0 || rc=$?
 check "all inline: exit 0" 0 "$rc"
 check "all inline: points at the case tables" yes "$(argv_has "none: every goal's oracle is inline")"
 
+# A hung round is void, not waited on for ever (FUTURE-WORK 11.1). The fake
+# grok leaves a child behind it, which must die with the round.
+hung_grok() {
+  # Hung for 20 s, so a missing stop fails the checks instead of hanging them.
+  printf '#!/usr/bin/env bash\n%s\n' \
+    "echo \$PPID >$(printf %q "$TMP/watcher")" \
+    "sleep 20 & echo \$! >$(printf %q "$TMP/child")" \
+    "for _ in 1 2 3 4 5 6 7 8 9 10; do n=\$(pmset -g assertions 2>/dev/null | grep -c \"on behalf of .*(pid \$\$)\"); [ \"\$n\" -ge 1 ] && break; sleep 0.2; done; echo \$n >$(printf %q "$TMP/awake")" \
+    'wait' >"$TMP/grok"
+  chmod +x "$TMP/grok"
+  rm -f "$TMP/child" "$TMP/awake" "$TMP/watcher"
+}
+child_gone() {
+  local pid; pid="$(cat "$TMP/child" 2>/dev/null)"
+  [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null && echo yes || echo "no: ${pid:-no pid}"
+}
+
+hung_grok
+start=$SECONDS
+GROK_REVIEW_TIMEOUT=2 review >"$TMP/out" 2>&1 && rc=0 || rc=$?
+check "timeout: exit 124" 124 "$rc"
+check "timeout: a void round" "error (timed out after 2s)" "$(line GROK_REVIEW_RESULT)"
+check "timeout: no verdict" MISSING "$(line VERDICT)"
+check "timeout: stopped near the cap" yes "$([[ $((SECONDS - start)) -lt 15 ]] && echo yes || echo no)"
+check "timeout: grok's child is gone" yes "$(child_gone)"
+helper=yes
+for _ in $(seq 25); do
+  pgrep -f "caffeinate -i $TMP/grok" >/dev/null || { helper=gone; break; }
+  sleep 0.2
+done
+check "timeout: caffeinate's helper is gone" gone "$helper"
+
+# The host slept: the watcher is stopped for longer than the gap, as a sleeping
+# Mac stops it, and the round is void when it runs again.
+hung_grok
+(GROK_REVIEW_TIMEOUT=0 GROK_REVIEW_SLEEP_GAP=2 review >"$TMP/out" 2>&1 && rc=0 || rc=$?; echo "$rc" >"$TMP/rc") &
+waiter=$!
+# grok's parent is the watcher (caffeinate execs grok).
+for _ in $(seq 50); do
+  [[ -s "$TMP/child" ]] && break
+  sleep 0.2
+done
+watcher="$(cat "$TMP/watcher")"
+check "slept: the watcher is run-timeout.py" yes "$(ps -o command= -p "$watcher" | grep -q 'run-timeout.py --wall 2 0' && echo yes || echo no)"
+kill -STOP "$watcher"; sleep 4; kill -CONT "$watcher"
+wait "$waiter"
+check "slept: exit 125" 125 "$(cat "$TMP/rc")"
+check "slept: a void round" "error (host slept)" "$(line GROK_REVIEW_RESULT)"
+check "slept: grok's child is gone" yes "$(child_gone)"
+if [[ -x /usr/bin/caffeinate ]]; then
+  # caffeinate execs grok and a helper holds the assertion on its behalf.
+  check "the round runs under caffeinate -i" yes "$([[ "$(cat "$TMP/awake" 2>/dev/null)" -ge 1 ]] 2>/dev/null && echo yes || echo no)"
+fi
+
+# A hangup (the terminal closed) stops the command's whole session too.
+rm -f "$TMP/child"
+python3 "$HERE/lib/run-timeout.py" --wall 0 0 sh -c "sleep 20 & echo \$! >$(printf %q "$TMP/child"); wait" &
+hup=$!
+for _ in $(seq 25); do [[ -s "$TMP/child" ]] && break; sleep 0.2; done
+kill -HUP "$hup"
+wait "$hup" && rc=0 || rc=$?
+check "SIGHUP: exit 129" 129 "$rc"
+check "SIGHUP: the command's child is gone" yes "$(child_gone)"
+
+# GAP 0 turns the sleep check off.
+python3 "$HERE/lib/run-timeout.py" --wall 0 5 sleep 2 && rc=0 || rc=$?
+check "--wall 0: no sleep check, the command's status" 0 "$rc"
+
+# Without --wall, run-timeout.py is unchanged for its other callers.
+python3 "$HERE/lib/run-timeout.py" 1 sleep 5 && rc=0 || rc=$?
+check "run-timeout without --wall: 124 at the cap" 124 "$rc"
+python3 "$HERE/lib/run-timeout.py" 0 sh -c 'exit 3' && rc=0 || rc=$?
+check "run-timeout without --wall: the command's status" 3 "$rc"
+
 if [[ "$fails" -eq 0 ]]; then
   echo "grok-review: OK"
 else
