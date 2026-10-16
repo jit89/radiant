@@ -136,3 +136,91 @@ VERDICT: APPROVED
 ## Resolution
 
 APPROVED in round 5 of 5 (session 2099711b-dab9-41c2-966c-0faa2cbdc389). Findings per round: 11, 5, 2, 1, 0; all taken (round 1 finding 11 with a change). Awaiting user sign-off.
+
+## Round 6 (Amendment 1) — Grok
+
+The last review approved the plan. I'll read the revision and check whether that approval still holds.The amendment changes network rules and hard links. I'll check it against the step 0 evidence and the walk's worktree layout.The earlier approval still holds for the body of the plan: the implementer's `TMPDIR` stays inside its handoff folder, `/private/var/folders` is in the self-test, and the Q3 lockfile sentence is gone. Amendment 1, which wins where it disagrees with that body, opens two holes.
+
+The measured `file-link` rule allows a link whose ends are both inside `--root`. Secret and `.env` denials are reads and writes only, and this profile treats `file-link` as its own operation (`EVIDENCE.md`: `file-write*` does not cover it, which is why it is denied again after the `--tmp` allow). Inside the sandbox, after the pre-check, `ln .env leaked && cat leaked` publishes the secret under a name the regex does not match. The same alias works for a secret-list file planted in the checkout, and for a link into `$TMPDIR`, because the `.env` regex applies only under `--root`. The evidence measured outside-to-inside `ln`, `..`, and a symlink. It did not measure a second name for a read-denied file. The amendment also puts the dependency folder in that allow set, so a proof can link into a folder it is supposed to only read.
+
+Fix: deny `file-link` on every secret-list path and on the `.env` regex, after the internal link allow, and probe `ln .env leaked && cat leaked` and the same link into `$TMPDIR`. Keep each allow to one subpath, as measured (`(allow file-link (subpath ROOT))`), so the two ends cannot sit in different trees.
+
+The `.env` regex covers only `--root`. In the parallel walk that root is the goal worktree or the scratch tree. `git worktree add` does not copy a gitignored `.env`. For a normal clone the file with the secrets is the main checkout's, `dirname(git-common-dir)/.env`, which the proof is allowed to read. `--setup` still has the full network, so that read can be uploaded. On the default case-insensitive volume, a case-sensitive regex also misses `.ENV`.
+
+Fix: apply the same denial, case-insensitively, to the main checkout and to every worktree of the repo, and probe `.ENV` and the main checkout's `.env` from a worktree proof.
+
+Step 7 still requires the old own-port success and "localhost on both addresses", which is the default-open profile this amendment removes. Under `proof_network: loopback` the header only says loopback is open. The measured behavior is a bind on `0.0.0.0` that accepts LAN connections, plus every host loopback service. Nothing in the tests asserts that the loopback profile still refuses a public address.
+
+Fix: point step 7 at the amended self-test, and state those two exposures in the walk header and in the goal-format note for the key.
+
+VERDICT: REVISE
+
+### Architect's response
+
+All three taken; two parts measured first.
+
+1. Link aliasing: measured already closed. With (allow file-link (subpath ROOT)) and the .env read/write denial, `ln .env leaked` is refused (a link's source must be accessible; control: ln of a normal file inside the root works), and ROOT->TMP is refused (each allow is one tree). Taken anyway as a second layer: explicit file-link denials on secret paths and the .env pattern; one subpath per link allow; links in the dependency folder only under --setup.
+2. The main checkout's .env: taken. The pattern covers --root plus the main checkout and every worktree (--checkout from git worktree list). Case: measured, Seatbelt's regex match is case-insensitive here (.ENV.probe refused), recorded.
+3. Step 7 and the loopback exposures: taken. The tests assert the amended self-test pair and the loopback/true variants; the header and GOAL-FORMAT name both measured exposures.
+
+## Round 7 (Amendment 1, rerun after a void round) — Grok
+
+The last pass was interrupted before a verdict. I'll re-read the plan and check the prior findings against the current text.The three Amendment 1 holes are closed. Inside the profile, `ln .env leaked` is refused and `file-link` is denied again on secret paths and the `.env` pattern, with one subpath allow per tree and dependency-folder links only under `--setup`. The `.env` rule covers `--root`, the main checkout, and every worktree, and the measured regex is case-insensitive. The walk header, `GOAL-FORMAT.md`, and `proof-sandbox-test.sh` now match the no-network default and the two `loopback` exposures.
+
+One bypass is still open. Those rules apply to the sandboxed proof. The implementer runs first, outside that profile, and its `denyRead` list is still only `secret-paths.txt`. In the checkout it can `ln .env leaked` or `cp .env leaked` without either command printing the secret. The pre-check then allows the link: both names are inside the walked trees, and step 3 says links wholly inside the trees are fine. The proof reads `leaked`. Seatbelt checks that path, not the inode, so the `.env` regex does not match. `EVIDENCE.md` only measured `ln` inside the profile.
+
+Fix: treat a denied `.env` or `.env.*` whose link count is greater than one as `proof-hardlink` even when every name is inside the trees, and give the implementer the same read denial for those paths under each checkout so the copy fails too. Probe both plants.
+
+VERDICT: REVISE
+
+### Architect's response
+
+Taken. Before each implementer pass the host passes every existing .env/.env.* under each checkout as a literal --deny-read path (no pattern support needed from Claude Code's sandbox); step 6's implementer measurement checks cat, cp and ln of such a file fail. The pre-check stops any file with more than one link whose name matches the .env pattern, even inside the trees. Both plants probed.
+
+## Round 8 (Amendment 1) — Grok
+
+The last review left one bypass: the implementer can alias `.env` before the sandbox starts. I'll read the revision and check that path.The earlier bypass is closed for `cp` and `ln`. Before each implementer pass the host deny-reads every existing `.env` and `.env.*` under the checkouts, the pre-check stops a `.env` whose link count is above one even when every name is inside the trees, and both plants are probed.
+
+`mv` still gets the secret out. The implementer is denied read of those paths, and the checkout stays writable. `mv .env leaked` is a rename: it does not read the file and it does not leave a second link. After it, nothing named `.env` remains, the link count is one, and the pre-check does not fire. The proof reads `leaked`. The same rename onto `.env.example` lands on a name the later allow keeps readable. Step 0 probes `cat`, `cp`, and `ln`, not `mv`.
+
+Fix: pass those same paths as `--deny-write`, and probe `mv .env leaked` and `mv .env .env.example`. If the sandbox cannot block the rename, remember each file's inode before the pass and stop when that inode is still in the tree under any name.
+
+The implementer denial is the stored literal path. The proof's regex was measured case-insensitive, and a literal deny was not. On the default volume, `cp .ENV leaked` can read the same file and write a new one the pre-check will not flag. The listing is also not said to be recursive, so a nested `.env` never gets a denial.
+
+Fix: walk every directory of each checkout, and make step 0 copy the file by a different casing than its directory entry. If that copy succeeds, pass every case variant of the basename or stop.
+
+VERDICT: REVISE
+
+### Architect's response
+
+The findings are right (mv renames without reading; a literal deny on a case-insensitive volume is unmeasured). This was the third and fourth patch to one mechanism, so the user was offered a structural option and chose it (Option 2): no live .env in a walked checkout. Part B is replaced by a gate (secrets-in-checkout) run before any implementer pass and once per walk over every checkout, case-insensitive, recursive, skipping .git and dependency folders; CW_ALLOW_DOTENV=1 is the journaled opt-out. The .env profile pattern, the implementer's per-file read denials and the .env pre-check rule are removed.
+
+## Round 9 (Amendment 1) — Grok
+
+The last review left two bypasses: renaming `.env`, and opening it under a different casing. I'll read the revision and check both.The rename and case-variant chase is closed. The gate refuses a checkout that already contains a `.env` or `.env.*` file, at any depth and in any case, before the implementer runs, and `CW_ALLOW_DOTENV=1` is the deliberate opt-out. The profile no longer carries a `.env` rule.
+
+The gate is specified before the implementer (`run-goal.sh`) and once per walk (`run-goals.sh`). In a walk, `worktree_setup` runs before `run-goal.sh` is spawned (`wave-walk.sh` runs setup, then the goal). Setup is a `proof_exec` with the network, and the profile no longer denies `.env`. A gitignored `.env` lives in the main checkout, which setup can read. If the walk scan is not before that call, setup can upload the file and the later gate never sees the proof.
+
+Fix: run the scan before the first `proof_exec` of the walk, including every `worktree_setup`, and stop with `secrets-in-checkout` before setup starts.
+
+The scan is specified as a file. A symlink named `.env` is the usual leftover when secrets move to `~/.config/<project>/`, and that target is not on the secret list. The proof follows symlinks. `find -type f` would miss the link, and both setup and the proof could still read it.
+
+Fix: any directory entry with that name, including a symlink, is a hit. Cover a symlink in the gate tests.
+
+VERDICT: REVISE
+
+### Architect's response
+
+Both taken. The walk's scan runs before it cuts or sets up any worktree (before the first proof_exec, setup included); run-goal.sh scans at its start. Any directory entry named .env* counts, a symlink included; tested. Also, from the same reading: the stop message no longer points at a readable folder: ~/.config/cw-secrets is added to the secret list as the home for a walked project's secrets.
+
+## Round 10 (Amendment 1) — Grok
+
+The last review asked for the `.env` gate to run before setup, and to treat a symlink as a hit. I'll read that section and check for anything new.The two earlier holes are closed. The gate runs before the first `proof_exec` of a run, including every `worktree_setup`, at the start of `run-goals.sh` before any worktree is cut and at the start of `run-goal.sh`. A hit is any directory entry named `.env` or `.env.*`, at any depth and in any case, and the tests include a symlink to a file outside the repo. `~/.config/cw-secrets` is on the shared secret list, so the place those files move to is unreadable to proofs and the implementer.
+
+No new material hole.
+
+VERDICT: APPROVED
+
+## Resolution (Amendment 1)
+
+APPROVED in round 10 (rounds 6-10 on Amendment 1; round 7 once void on a host sleep and rerun). Findings 3, 1, 2 (then the user's structural choice, Option 2), 2, 0.

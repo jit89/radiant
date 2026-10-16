@@ -154,7 +154,9 @@ both, and nothing is resolved against the target repo. The list:
 - `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`,
   `~/.docker` (the whole folder: config and `run/docker.sock`), `~/.kube`,
   `~/.config/gh`;
-- `~/.claude`, `~/.grok`, `~/.codex`, `~/Library/Keychains`.
+- `~/.claude`, `~/.grok`, `~/.codex`, `~/Library/Keychains`;
+- `~/.config/cw-secrets` (Amendment 1 B: where a walked project's secrets
+  live, outside its checkout).
 
 `claude-implement.sh`'s `settings_json` reads the same file for its
 `sandbox.filesystem.denyRead` and its `Read(...)` permission denials, in
@@ -384,3 +386,134 @@ tamper checks (`tree_snapshot`, `proof_moved`) stay as they are.
 - Sandboxing the Opus reviewer.
 - Host-name network allowlists (needs a proxy).
 - Denying all of `$HOME` (Q2 option (a)).
+
+## Amendment 1 — step 0's findings (user-approved, 2026-10-16)
+
+The evidence is `EVIDENCE.md`, "Step 0". Where this amendment and the steps
+above disagree, this amendment wins.
+
+### A. Network: none by default (changes Q3)
+
+SBPL cannot express "only ports the proof itself bound" or a port range, a
+loopback-only bind rule still allows a bind to `0.0.0.0` (a sandboxed server
+bound there accepted a connection from the machine's LAN address), and an
+outbound loopback rule reaches every host loopback service. No measured
+proof needs loopback. So:
+- **Default:** no `network-bind`, `network-inbound` or `network-outbound`
+  allowance at all; any socket operation fails with `EPERM`.
+- `proof_network: loopback` (GOALS.md preamble) allows loopback bind, inbound
+  and outbound, accepting the two exposures above; `proof_network: true`
+  allows the full network. `goals.py validate` accepts exactly `loopback` and
+  `true`; the key absent means none.
+- `worktree_setup` keeps the full network (`--setup`), as before.
+- The self-test (step 4) checks that a TCP connect to a public address and a
+  connect to a listener the harness started on `127.0.0.1` both fail with
+  `EPERM`, and a public DNS lookup fails. The own-port listener check is
+  dropped. Under `proof_network: loopback` the walk's header names the two
+  measured exposures (any loopback service on the host is reachable; a server
+  bound to all interfaces is reachable from the LAN), and so does the key's
+  note in `skills/to-goals/GOAL-FORMAT.md`.
+- **Tests (replaces the loopback items of step 7):** `proof-sandbox-test.sh`
+  asserts the amended self-test pair (public address and host listener both
+  `EPERM`) under the default profile; under `--network loopback` that a
+  public address is still `EPERM` and a host loopback listener is reachable;
+  under `--network true` that a public connect is attempted (no `EPERM`).
+
+### B. No live `.env` in a walked checkout (extends Q2; user, 2026-10-16)
+
+Step 0 found that a target repo's own `.env` (gitignored, unseen by the tamper
+check) was readable to a proof. Denying it by pattern inside a checkout the
+implementer can write turned into a run of patches, each answered by the next
+trick (a hard link, a copy, a rename, a case variant). The user chose to close
+the class instead:
+- **The gate.** Before the first `proof_exec` of any run (so before every
+  `worktree_setup`, which has the network) and before any implementer pass:
+  once at the start of a walk in `run-goals.sh`, before it cuts or sets up any
+  worktree, and in `run-goal.sh` at its start, fresh and resume. The host scans
+  every checkout of the repo (`--root`, the main checkout, every worktree) for
+  any directory entry (a file, a symlink whatever it points to, or a folder)
+  whose name is `.env` or starts with `.env.`, case-insensitively, at any depth, except
+  `.env.example`, `.env.sample` and `.env.template`, and except under `.git`
+  and dependency folders (`node_modules`, `.venv`, `venv`, `site-packages`,
+  `target`, `vendor`), which ship their own. Any hit stops with
+  `secrets-in-checkout`, naming the entries and the fix: move the secrets out
+  of the repo into `~/.config/cw-secrets/<project>/`, a folder added to the
+  secret list (step 2) for this purpose, so proofs and the implementer cannot
+  read it; leave no symlink behind.
+- **Opt-out.** `CW_ALLOW_DOTENV=1`, set by the user in the launching
+  environment, skips the gate; it is journaled (`ORCHESTRATOR dotenv allowed`)
+  and printed in the walk's header, like `CW_PROOF_SANDBOX=off`. With it, the
+  files stay readable to proofs and the implementer, knowingly.
+- **What this removes:** no `.env` pattern in the profile, no per-file
+  `--deny-read` for the implementer, no `.env` rule in the hard-link pre-check.
+  A `.env.test` a goal itself creates is ordinary test data.
+- **Tests:** the gate stops on `.env`, `sub/.ENV.local`, a nested
+  `.env.prod`, and a `.env` symlink to a file outside the repo; it runs before
+  the walk's first `worktree_setup` (a setup that would read the file never
+  starts); passes on `.env.example` and on a `.env` under `node_modules`;
+  the opt-out is journaled; the walker scans the main checkout and every
+  worktree.
+
+### C. Profile fixes within the plan's intent
+
+1. The hard-link operation is `file-link`. A link is allowed only when both
+   ends are inside the same tree: one `(allow file-link (subpath …))` rule for
+   `--root` and one for `--tmp` (and, under `--setup` only, one for the
+   dependency folder (D), which proofs may only read). Measured: inside→inside
+   allowed; outside→inside, inside→outside and `--root`→`--tmp` refused; and a
+   link to a read-denied file inside the root refused, because the link's
+   source must itself be accessible. As a second layer, `file-link` is denied
+   explicitly on every secret-list path, after the link allows. Every other `file-link` is denied,
+   again after the final `--tmp` allow. The pre-run walk (step 3) stays.
+2. `file-read-metadata` on the literal parent folders of `--root`, `--tmp` and
+   the dependency folder (compilers resolve their `$TMPDIR`; this reveals only
+   that those folders exist).
+3. The output file: `proof-sandbox.py --out FILE` allows
+   `file-read-metadata` and `file-write-data` on that one literal path (a tool
+   looks up its own output file; the proof can already write it through its
+   descriptor).
+4. The generator refuses (exit 2, `proof-sandbox-path`) a `--root` that sits
+   under any denied path: such a checkout can never be proved.
+5. Under `--setup` only: `mach-lookup com.apple.trustd.agent` (pnpm verifies
+   TLS through the system) and reads and writes of
+   `/private/tmp/pnpm-store-operation-locks-<uid>` (pnpm's fixed lock folder,
+   also walked by the hard-link pre-check of later proofs).
+6. The denial listing (step 3) is the denials logged during the run's time
+   window. It cannot be per-run (`(with message …)` does not reach the kernel
+   log), so it is headed "denials logged during this proof (may include other
+   proofs running at the same time)". It stays diagnosis only.
+
+### D. One dependency folder per walk
+
+Rust and Go keep downloaded dependencies and build caches outside the repo
+(`~/.cargo/registry`, `~/go/pkg/mod`, `~/Library/Caches/go-build`), which the
+profile does not let a setup write, and a per-run `$TMPDIR` is gone before the
+proof runs. So:
+- Each walk (and a serial `run-goal.sh`) has one dependency folder,
+  `$CW_CACHE/deps/<repo_id>-<walk id or run id>/` (0700), made by the host
+  before the first `worktree_setup`.
+- `worktree_setup` (`--setup`) may write it; proofs and merged proofs may only
+  read it (`--deps DIR` in the generator: read for proofs, read and write for
+  setup).
+- Links inside it are allowed only under `--setup` (C.1).
+- `proof_exec` points the language caches into it: `CARGO_HOME`,
+  `GOMODCACHE`, `npm_config_cache`, `UV_CACHE_DIR`, `PIP_CACHE_DIR`, and pnpm's
+  `npm_config_store_dir`. A proof's own build caches (`GOCACHE`,
+  `XDG_CACHE_HOME`) go to its private `$TMPDIR`.
+- It is not under a denied house folder, it is walked by the hard-link
+  pre-check, and it is removed when the walk ends (and pruned past
+  `CW_PRUNE_DAYS` if a walk dies).
+- Known limit: within one walk, one goal's `worktree_setup` can write
+  something into the folder that another goal's proof then reads or runs. Each
+  of those proofs already runs implementer code, so it adds no kind of access
+  a proof lacks; it is stated, not closed.
+
+### E. A first-use smoke test for each new language
+
+`skills/to-goals/SKILL.md` gains a check: before the first goal in a language
+the house has not yet proved under the sandbox (today: C with CMake,
+TypeScript with Vitest or node:test, Python with pytest and uv), run one
+`worktree_setup` and one proof of a small project of that language under the
+profile, and record in the feature's evidence that both pass and nothing new
+is denied. A failure there is a profile change, made and reviewed before the
+walk, not a red proof mid-walk.
