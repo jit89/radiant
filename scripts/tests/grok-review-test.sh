@@ -307,10 +307,9 @@ hung_grok() {
   printf '#!/usr/bin/env bash\n%s\n' \
     "echo \$PPID >$(printf %q "$TMP/watcher")" \
     "sleep 20 & echo \$! >$(printf %q "$TMP/child")" \
-    "for _ in 1 2 3 4 5 6 7 8 9 10; do n=\$(pmset -g assertions 2>/dev/null | grep -c \"on behalf of .*(pid \$\$)\"); [ \"\$n\" -ge 1 ] && break; sleep 0.2; done; echo \$n >$(printf %q "$TMP/awake")" \
     'wait' >"$TMP/grok"
   chmod +x "$TMP/grok"
-  rm -f "$TMP/child" "$TMP/awake" "$TMP/watcher"
+  rm -f "$TMP/child" "$TMP/watcher"
 }
 child_gone() {
   local pid; pid="$(cat "$TMP/child" 2>/dev/null)"
@@ -327,7 +326,7 @@ check "timeout: stopped near the cap" yes "$([[ $((SECONDS - start)) -lt 15 ]] &
 check "timeout: grok's child is gone" yes "$(child_gone)"
 helper=yes
 for _ in $(seq 25); do
-  pgrep -f "caffeinate -i $TMP/grok" >/dev/null || { helper=gone; break; }
+  pgrep -f "^/usr/bin/caffeinate -i $TMP/grok" >/dev/null || { helper=gone; break; }
   sleep 0.2
 done
 check "timeout: caffeinate's helper is gone" gone "$helper"
@@ -342,6 +341,22 @@ for _ in $(seq 50); do
   [[ -s "$TMP/child" ]] && break
   sleep 0.2
 done
+if [[ -x /usr/bin/caffeinate ]]; then
+  # caffeinate execs grok; a forked helper with the same arguments holds the
+  # assertion. pmset cuts the "on behalf of <path> (pid N)" detail of a long
+  # path, so the helper is found by its arguments and the assertion by its pid.
+  awake=no
+  for _ in $(seq 50); do
+    helper="$(pgrep -f "^/usr/bin/caffeinate -i $TMP/grok" | head -n1 || true)"
+    # To a file first: under pipefail, grep -q quitting early fails the pipe.
+    pmset -g assertions >"$TMP/pmset" 2>/dev/null || true
+    if [[ -n "$helper" ]] && grep -q "pid $helper(caffeinate).*PreventUserIdleSystemSleep" "$TMP/pmset"; then
+      awake=yes; break
+    fi
+    sleep 0.2
+  done
+  check "the round runs under caffeinate -i" yes "$awake"
+fi
 watcher="$(cat "$TMP/watcher")"
 check "slept: the watcher is run-timeout.py" yes "$(ps -o command= -p "$watcher" | grep -q 'run-timeout.py --wall 2 0' && echo yes || echo no)"
 kill -STOP "$watcher"; sleep 4; kill -CONT "$watcher"
@@ -349,10 +364,6 @@ wait "$waiter"
 check "slept: exit 125" 125 "$(cat "$TMP/rc")"
 check "slept: a void round" "error (host slept)" "$(line GROK_REVIEW_RESULT)"
 check "slept: grok's child is gone" yes "$(child_gone)"
-if [[ -x /usr/bin/caffeinate ]]; then
-  # caffeinate execs grok and a helper holds the assertion on its behalf.
-  check "the round runs under caffeinate -i" yes "$([[ "$(cat "$TMP/awake" 2>/dev/null)" -ge 1 ]] 2>/dev/null && echo yes || echo no)"
-fi
 
 # A hangup (the terminal closed) stops the command's whole session too.
 rm -f "$TMP/child"
