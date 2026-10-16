@@ -5,6 +5,8 @@
 #   runs/   run-goal folders (a wake's evidence), walker stop folders, and the
 #           folders a launcher makes when it runs without CW_OUT_DIR
 #   grok/   Grok verdicts and raw output, until the Architect logs them
+#   tests/  last/: the last full run-all.sh run of a house checkout, keyed by
+#           lib/tree-key.py, for install.sh --check to reuse
 #   lessons/  the lessons hook's run markers (due/), run locks and logs/
 #           (scripts/lessons.py writes and prunes them itself)
 # runs/, grok/ and lessons/logs/ are pruned past CW_PRUNE_DAYS (default 14) by

@@ -220,7 +220,9 @@ sandboxed (FUTURE-WORK item 12); Grok verdicts are in
 past `CW_PRUNE_DAYS`. Run the tests with `scripts/tests/run-all.sh [-j N]`:
 four at a time by default (`CW_TEST_JOBS`), each in its own `TMPDIR` and
 `HOME`, failing any test that leaves something in either; `install.sh --check`
-runs them the same way (~3 minutes at `-j4`, against ~7.5 one at a time).
+runs them the same way (~3 minutes at `-j4`, against ~7.5 one at a time), or
+reuses the last full `run-all.sh` run when the tree is still the one it tested
+(`~/.cache/claude-coding-workflow/tests/last/`; `CW_CHECK_RERUN=1` reruns).
 
 The legacy `deepseek-code.sh` keeps Codex in `workspace-write` (not
 `danger-full-access`). Codex remounts `<repo>/.git` read-only inside that

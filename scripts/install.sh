@@ -180,38 +180,54 @@ do_install() {
     "$ROOT/scripts/lib/resume-state.py" \
     "$ROOT/scripts/lib/verdict.py" \
     "$ROOT/scripts/lib/run-timeout.py" \
+    "$ROOT/scripts/lib/tree-key.py" \
     "$ROOT/scripts/lib/agent-result.py"
   echo "launchers: grok-review.sh claude-goal-review.sh deepseek-code.sh goals.py"
 }
 
 # The house tests run once, side by side (scripts/tests/run-all.sh: each in its
 # own TMPDIR and HOME, a leak counts as a failure); the steps below read the
-# results. CW_TEST_JOBS sets how many at a time (default 4).
+# results. CW_TEST_JOBS sets how many at a time (default 4). A full run of this
+# same tree (run-all.sh's tests/last/, its key from lib/tree-key.py still
+# matching) is reused instead; CW_CHECK_RERUN=1 runs the suite regardless.
 TEST_RESULTS=""
 test_ok() { [[ "$(cat "$TEST_RESULTS/$1.rc" 2>/dev/null)" == 0 ]]; }
 test_show() { cat "$TEST_RESULTS/$1.out" 2>/dev/null || echo "(no output: $1 did not run)"; }
 
 do_check() {
   local rc=0
+  local suite_rc=0
+  local key
   TEST_RESULTS="$(mktemp -d "${TMPDIR:-/tmp}/cw-check-tests-XXXXXX")"
   # Removed on any exit: set -e can end --check before its last line.
   trap 'rm -rf "$TEST_RESULTS"' EXIT
-  local suite_rc=0
-  # In the background so a signal to --check reaches the runner rather than
-  # orphaning it (a background job starts with INT ignored, so Ctrl-C is
-  # passed on as TERM); the runner stops its tests and dies of the signal.
-  # `|| true` on the waits: under set -e the runner's 143 would end the trap
-  # before its own exit status.
-  "$ROOT/scripts/tests/run-all.sh" --results "$TEST_RESULTS" >"$TEST_RESULTS/summary" 2>&1 &
-  RUNNER_PID=$!
-  trap 'kill -TERM "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null || true; exit 130' INT
-  trap 'kill -TERM "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null || true; exit 143' TERM
-  wait "$RUNNER_PID" || suite_rc=$?
-  trap - INT TERM
-  # Killed rather than failed: stop here, not with every step reading FAIL.
-  if [[ "$suite_rc" -gt 128 ]]; then
-    echo "tests: interrupted (exit $suite_rc)"
-    exit "$suite_rc"
+  key="$(python3 "$ROOT/scripts/lib/tree-key.py" "$ROOT" 2>/dev/null || true)"
+  # A copy, so a run publishing meanwhile cannot change what is read. Its key
+  # line holds the tree's key and that run's fail count.
+  local kept=""
+  if [[ "${CW_CHECK_RERUN:-0}" != 1 && -n "$key" ]] &&
+    cp -R "$HOME/.cache/claude-coding-workflow/tests/last/." "$TEST_RESULTS/" 2>/dev/null &&
+    kept="$(cat "$TEST_RESULTS/key" 2>/dev/null)" && [[ "${kept%% *}" == "$key" ]]; then
+    [[ "$kept" == "$key 0" ]] || suite_rc=1
+    echo "tests: reused the full run of $(cat "$TEST_RESULTS/when" 2>/dev/null) (this tree; CW_CHECK_RERUN=1 to rerun)"
+  else
+    rm -rf "${TEST_RESULTS:?}"/* "$TEST_RESULTS"/.[!.]* 2>/dev/null || true
+    # In the background so a signal to --check reaches the runner rather than
+    # orphaning it (a background job starts with INT ignored, so Ctrl-C is
+    # passed on as TERM); the runner stops its tests and dies of the signal.
+    # `|| true` on the waits: under set -e the runner's 143 would end the trap
+    # before its own exit status.
+    "$ROOT/scripts/tests/run-all.sh" --results "$TEST_RESULTS" >"$TEST_RESULTS/summary" 2>&1 &
+    RUNNER_PID=$!
+    trap 'kill -TERM "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null || true; exit 130' INT
+    trap 'kill -TERM "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null || true; exit 143' TERM
+    wait "$RUNNER_PID" || suite_rc=$?
+    trap - INT TERM
+    # Killed rather than failed: stop here, not with every step reading FAIL.
+    if [[ "$suite_rc" -gt 128 ]]; then
+      echo "tests: interrupted (exit $suite_rc)"
+      exit "$suite_rc"
+    fi
   fi
   if [[ "$suite_rc" -eq 0 ]]; then
     echo "tests: OK ($(tail -n1 "$TEST_RESULTS/summary"))"

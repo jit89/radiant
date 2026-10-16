@@ -642,3 +642,28 @@ in `register.test.tsx`, seven plants red. Opus noted the extra `walks` scan per
 tick while the pane shows a fallback walk: acceptable, reuse the task poll's
 result if it ever matters.
 
+
+## 19. `install.sh --check` reuses a fresh suite run (2026-10-16)
+
+The gate before a commit runs `scripts/tests/run-all.sh -j 8`, then `install.sh
+--check`, which runs the whole suite again (~30 min together at the end of item
+6). A full `run-all.sh` run records its results under
+`~/.cache/claude-coding-workflow/tests/last/` with a key of the tree it tested
+(every tracked and untracked, not ignored file of the house, plus the git and
+python versions), stored only when the key is the same at the start and the end
+of the run. `--check` reuses that run when its key matches the tree now, and
+says so; otherwise, or with `CW_CHECK_RERUN=1`, it runs the suite as before.
+
+**Done (2026-10-16):** `scripts/lib/tree-key.py`; `run-all.sh` publishes a full
+run's results (each test's rc and out, the summary, when, and a key line
+with the tree key and the fail count) to `tests/last/`; `install.sh
+--check` reuses them on a matching key and never deletes them. A reused failed
+run still reads `tests: FAIL` (its fail count, not a grep of the summary).
+`--check` reads a copy, so a publish meanwhile cannot change it; a failed
+publish never changes `run-all.sh`'s exit status. The key does not cover an
+edit undone before the run ends, `.git`, the environment beyond `CW_*` (PATH,
+LANG, the `*_BIN` overrides, `CLAUDE_CONFIG_DIR`), tool versions other than
+git and python, or the checkout path (another checkout with the same content
+reuses the run): fine for a gate that runs both back to back in one shell.
+`scripts/tests/check-reuse-test.sh`. Not tested: a publish failing after its
+first step (the chain is the same `if`).

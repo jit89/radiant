@@ -13,6 +13,13 @@
 #   --results DIR  also write DIR/<name>.rc (0 pass, 1 fail or leak) and
 #                  DIR/<name>.out (the test's output, then any leak) for each
 #                  test; install.sh --check reads these
+#
+# A full run (no names) of a house checkout also leaves its results in
+# ~/.cache/claude-coding-workflow/tests/last/ (the same files, plus summary,
+# key and when; key holds the tree's key and the fail count on one line, so
+# they always come from one run), keyed by lib/tree-key.py over the tree it tested; kept
+# only when the key is the same at the start and the end. install.sh --check
+# reuses them while the key still matches. A failed publish changes nothing.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -26,7 +33,7 @@ while [[ $# -gt 0 ]]; do
     -j*) JOBS="${1#-j}"; shift ;;
     --results) [[ $# -ge 2 ]] || { echo "--results needs a directory" >&2; exit 2; }
         RESULTS="$2"; shift 2 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     -*) echo "usage: run-all.sh [-j N] [--results DIR] [name-test.sh ...]" >&2; exit 2 ;;
     *) names+=("$1"); shift ;;
   esac
@@ -82,6 +89,11 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 G="$(mktemp -d "${TMPDIR:-/tmp}/cw-run-all-XXXXXX")"
 
+# Before the test list, so a test added meanwhile changes the key.
+KEY=""
+if [[ ${#names[@]} -eq 0 && -f "$HERE/../lib/tree-key.py" ]]; then
+  KEY="$(python3 "$HERE/../lib/tree-key.py" "$HERE/../.." 2>/dev/null || true)"
+fi
 tests=()
 seen=" "
 if [[ ${#names[@]} -gt 0 ]]; then
@@ -170,7 +182,7 @@ for t in "${tests[@]}"; do
 done
 wait
 
-[[ -z "$RESULTS" ]] || mkdir -p "$RESULTS"
+mkdir -p "$G/res"
 fails=0
 for t in "${tests[@]}"; do
   name="$(basename "$t")"
@@ -179,12 +191,10 @@ for t in "${tests[@]}"; do
   # No rc file: the test's runner itself died, which is a failure too.
   rc="$(cat "$d/rc" 2>/dev/null || echo 1)"
   [[ -f "$d/rc" ]] || : >"$d/failed"
-  if [[ -n "$RESULTS" ]]; then
-    echo "$rc" >"$RESULTS/$name.rc"
-    { cat "$d/out" 2>/dev/null || true
-      if [[ -f "$d/leak" ]]; then echo "LEAK: left in its TMPDIR or HOME:"; cat "$d/leak"; fi
-    } >"$RESULTS/$name.out"
-  fi
+  echo "$rc" >"$G/res/$name.rc"
+  { cat "$d/out" 2>/dev/null || true
+    if [[ -f "$d/leak" ]]; then echo "LEAK: left in its TMPDIR or HOME:"; cat "$d/leak"; fi
+  } >"$G/res/$name.out"
   if [[ "$rc" == 0 ]]; then
     echo "ok    $name"
     continue
@@ -198,7 +208,30 @@ for t in "${tests[@]}"; do
     echo "LEAK  $name left:"
     sed 's/^/      /' "$d/leak"
   fi
-done
+done >"$G/report"
+echo "test scripts: ${#tests[@]}, jobs=$JOBS, fails=$fails" >>"$G/report"
+cat "$G/report"
 
-echo "test scripts: ${#tests[@]}, jobs=$JOBS, fails=$fails"
+if [[ -n "$RESULTS" ]]; then
+  mkdir -p "$RESULTS"
+  cp "$G"/res/* "$RESULTS"/
+fi
+# Published only for the tree the whole run saw: an edit during it changes the key.
+if [[ -n "$KEY" && "$KEY" == "$(python3 "$HERE/../lib/tree-key.py" "$HERE/../.." 2>/dev/null || true)" ]]; then
+  cache="$HOME/.cache/claude-coding-workflow/tests"
+  # Chained, so a failure here never changes this run's exit status; another
+  # run's half-filled .new-* is left alone unless it is an hour old.
+  new=""
+  if mkdir -p "$cache" && chmod 700 "$(dirname "$cache")" "$cache" &&
+    { find "$cache" -maxdepth 1 -name '.new-*' -mmin +60 -exec rm -rf {} + 2>/dev/null || true; } &&
+    new="$(mktemp -d "$cache/.new-XXXXXX")" &&
+    cp "$G"/res/* "$new"/ && cp "$G/report" "$new/summary" &&
+    echo "$KEY $fails" >"$new/key" &&
+    date -u +%Y-%m-%dT%H:%M:%SZ >"$new/when" &&
+    rm -rf "$cache/last" && mv "$new" "$cache/last"; then
+    :
+  else
+    [[ -z "$new" ]] || rm -rf "$new" || true
+  fi
+fi
 [[ "$fails" -eq 0 ]]
