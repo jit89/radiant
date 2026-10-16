@@ -1064,12 +1064,19 @@ while :; do
         echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\` or tests/acceptance/."
         echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
         echo
-        echo "The host ran the goal's proof after your last pass and it failed. Make it pass"
-        echo "without changing any contract file. If you believe the oracle or the case table"
-        echo "is wrong, do not work around it: report BLOCKED with the exact question (the"
-        echo "blocker rule). If the proof passes in your sandbox and you have nothing to"
-        echo "change, say so in the journal END record and the return handoff and report"
-        echo "DONE without changing any file."
+        echo "The host ran the goal's proof after your last pass, in this working tree but"
+        echo "outside your sandbox, and it failed. Make it pass without changing a contract"
+        echo "(step 5 of your instructions). If you believe the oracle or the case table is"
+        echo "wrong, do not work around it: report BLOCKED with the exact question (step 8)."
+        echo "If the proof passes in your sandbox, look for what differs on the host:"
+        echo "environment variables, \$TMPDIR, network access. If you find nothing to change,"
+        echo "say so in the journal END record and the return handoff, and report DONE"
+        echo "without changing any file but the journal."
+        if [[ "$PROOF_EXIT" -eq 0 ]]; then
+          echo
+          echo "It exited 0, but its output says \"Ran 0 tests\", which the host counts as a"
+          echo "failure: the proof ran no test."
+        fi
         echo
         echo "## Findings"
         cat "$FINDINGS"

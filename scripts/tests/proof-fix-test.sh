@@ -140,9 +140,14 @@ check "the fix line is a proof fix" yes "$([[ "$(fix_line 0)" == *"count=1 "*"so
 check "the journaled hash is the handoff's findings" \
   "$(findings_hash "$CALLS/handoff-2.md")" "$(fix_line 0 | sed -n 's/.*hash=\([0-9a-f]*\).*/\1/p')"
 check "handoff titled as a red proof" yes "$(has '(after round 0: red host proof)' "$CALLS/handoff-2.md")"
-check "handoff names the blocker rule" yes "$(has 'report BLOCKED with the exact question' "$CALLS/handoff-2.md")"
+check "handoff names the blocker rule by its step" yes "$(has 'report BLOCKED with the exact question (step 8)' "$CALLS/handoff-2.md")"
+check "handoff names the contract by its step" yes "$(has '(step 5 of your instructions)' "$CALLS/handoff-2.md")"
+check "handoff says the host ran it outside the sandbox" yes "$(has 'outside your sandbox, and it failed' "$CALLS/handoff-2.md")"
+check "handoff names what differs on the host" yes "$(has 'environment variables, $TMPDIR, network access' "$CALLS/handoff-2.md")"
+check "handoff's DONE keeps the journal records" yes "$(has 'without changing any file but the journal' "$CALLS/handoff-2.md")"
 check "handoff carries the failure" yes "$(has 'FAIL: impl.txt is not FIXED' "$CALLS/handoff-2.md")"
 check "handoff carries the exit code" yes "$(has 'exited 3' "$CALLS/handoff-2.md")"
+check "a nonzero exit gets no Ran-0-tests line" no "$(has 'which the host counts as a' "$CALLS/handoff-2.md")"
 check "the secret is redacted" no "$(has 'AKIAABCDEFGHIJKLMNOP' "$CALLS/handoff-2.md")"
 check "the redaction is counted" yes "$(has '1 value redacted' "$CALLS/handoff-2.md")"
 check "the fix is saved for a resume" yes "$([[ -f "$(art)/fix-r0.md" ]] && echo yes || echo no)"
@@ -241,6 +246,7 @@ fresh "ok same" ""
 unset ZERO_FLAG
 check "a proof fix was issued" yes "$([[ "$(fix_line 0)" == *"source=proof"* ]] && echo yes || echo "no: $(fix_line 0)")"
 check "the excerpt shows it" yes "$(has 'Ran 0 tests' "$CALLS/handoff-2.md")"
+check "the handoff says why exit 0 is red" yes "$(has 'which the host counts as a' "$CALLS/handoff-2.md")"
 
 echo "== 13. interrupted, resumed, then no change: the saved head still judges =="
 fresh "ok rate same" ""

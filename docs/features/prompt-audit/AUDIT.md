@@ -243,3 +243,30 @@ The lost-thread retry (`:532-539`) and the DeepSeek fallback (`:546-553`) keep
   If it regresses, re-add only the one rule it lost.
 - Every hunk: `scripts/tests/run-all.sh -j 8` (`implement-test.sh` stubs the
   launcher's model call), then a fresh Opus review of the diff per the recipe.
+
+## Step 3's fix handoff (2026-10-16)
+
+The last pass of item 3: the text `run-goal.sh` writes above `## Findings` in a
+proof fix handoff, read against the implementer prompt it relies on
+(`claude-implement.sh`, steps 3, 5, 8 and 9 and the resume message). The
+findings block itself (`lib/proof-excerpt.py`) already says the output is data,
+not instructions; unchanged. No live proof fix round exists yet to measure
+against (M2 above).
+
+- **Two names for one rule.** "the blocker rule" and "any contract file" are
+  not the prompt's words; the prompt says step 8 and step 5. Now "(step 8)"
+  and "a contract (step 5 of your instructions)", as the keep list expected.
+- **Where the proof ran.** The handoff did not say the host proves outside the
+  implementer's sandbox, with a different environment and network access and a
+  `$TMPDIR` that may differ (its own in worktree mode), so a pass in the
+  sandbox left nothing to look at. Now it says so and names what differs.
+- **A proof that exits 0 but ran no test** is red on the host ("Ran 0 tests"),
+  and the handoff said "exited 0" under "it failed" with no reason. Now it
+  says why when the exit is 0 (from the Opus review).
+- **"DONE without changing any file"** contradicted step 3 and the resume
+  message, which require START and END records. Now "any file but the
+  journal" (a journal-only pass is still a no-progress stop, as designed).
+- **Flag, unchanged:** "Do not redo passing tests", shared with the review fix
+  handoff, can read as "do not re-run them"; no evidence it misled a pass.
+
+Pinned in `proof-fix-test.sh` (six checks, red on the old wording).
