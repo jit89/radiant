@@ -751,12 +751,11 @@ elif [[ "$STATUS" == "in_progress" ]]; then
 fi
 
 if [[ "$RESUME" -eq 0 ]]; then
+  # -z: the line form C-quotes a name with `"`, `\` or a control character.
+  # --no-renames: a rename is its two paths, each its own entry.
   dirty=()
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    p="${line:3}"
-    p="${p#\"}"
-    p="${p%\"}"
+  while IFS= read -r -d '' p; do
+    p="${p:3}"
     if [[ "$p" == "GOALS.md" && -z "$WT_MAIN" ]]; then
       tmp="$(mktemp)"
       git show HEAD:GOALS.md >"$tmp"
@@ -767,7 +766,7 @@ if [[ "$RESUME" -eq 0 ]]; then
       rm -f "$tmp"
     fi
     dirty+=("$p")
-  done < <(git status --porcelain)
+  done < <(git status --porcelain -z --no-renames)
   if ((${#dirty[@]})); then
     die_gate "working tree is not clean (fresh start). Offending paths: ${dirty[*]}"
   fi
@@ -975,11 +974,8 @@ while :; do
   fi
 
   unexpected=()
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    p="${line:3}"
-    p="${p#\"}"
-    p="${p%\"}"
+  while IFS= read -r -d '' p; do
+    p="${p:3}"
     if [[ "$p" == "GOALS.md" && -z "$WT_MAIN" ]]; then
       if "$GOALS_PY" GOALS.md status-only-id "$GOAL_ID" "$RUN_DIR/goals-base.md" >/dev/null; then
         continue
@@ -989,7 +985,7 @@ while :; do
       continue
     fi
     unexpected+=("$p")
-  done < <(git status --porcelain)
+  done < <(git status --porcelain -z --no-renames)
   if ((${#unexpected[@]})); then
     wake "dirty-tree" "unexpected paths: ${unexpected[*]}"
   fi

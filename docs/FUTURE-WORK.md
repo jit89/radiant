@@ -589,6 +589,16 @@ From the parallel walker's seventh Opus review: `run-goal.sh` reads `git status
 or a rename (`old -> new`) is misread. `git status --porcelain -z` removes the
 whole class. Low priority: such a journal or contract path is exotic.
 
+**Done (2026-10-16):** the fresh-start gate and the after-pass dirty-tree
+check in `run-goal.sh` read `git status --porcelain -z --no-renames`: each path
+verbatim, a rename as its two paths (Opus's simpler form, over a parser for
+the rename field). `scripts/tests/porcelain-test.sh` (serial mode): names with
+`"`, `\`, a tab, a space and non-ASCII, a staged rename, a journal named with
+`"`, an unexpected rename and a worktree (intent-to-add) rename after a pass.
+Red on the old parser (10 checks) and without `--no-renames` (3). Needs git
+2.18+, now stated in SETUP.md: older git rejects `--no-renames` and the empty
+status passes both checks, the same fail-open as any failed `git status` before.
+
 ## 17. Parallel walker: recut a goal after a merge conflict (2026-10-16)
 
 From the first live parallel walk (rbtree replay, `--jobs 3`): g4, g5 and g7

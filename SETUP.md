@@ -27,6 +27,7 @@ Bundled xAI skills (`~/.grok/bundled/`) come with the Grok CLI. Do not copy them
 ## 0. Prerequisites (host, not this repo)
 
 ```bash
+git --version     # 2.18+ (run-goal.sh's status reads); 2.38+ for --jobs (merge-tree --write-tree)
 command -v claude && claude --version
 command -v grok && grok --version
 command -v brew
