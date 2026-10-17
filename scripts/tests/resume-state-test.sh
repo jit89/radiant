@@ -102,8 +102,10 @@ has() { grep -q "$1" "$2" 2>/dev/null && echo yes || echo no; }
 fresh "ok ok" "error error"
 check "1: first run woke on reviewer" "reviewer-error" "$reason"
 run
-check "1: resume reuses the implementer thread" "ds --resume t1" \
-  "$(nth_call ds 2 | cut -d' ' -f1-3)"
+# The launcher's arguments start with the run's --deny-read paths (the proof
+# sandbox, step 6); the resume flag and thread follow them.
+check "1: resume reuses the implementer thread" "yes" \
+  "$([[ " $(nth_call ds 2) " == *" --resume t1 "* ]] && echo yes || echo "no: $(nth_call ds 2 | cut -c1-120)")"
 check "1: resume reuses the reviewer session" "rv --resume s1" \
   "$(nth_call rv 2 | cut -d' ' -f1-3)"
 

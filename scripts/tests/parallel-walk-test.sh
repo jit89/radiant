@@ -362,6 +362,58 @@ check "earlier goal red after a later merge: integration-red" integration-red "$
 check "earlier goal red: the stop names g1-a's proof" yes \
   "$(grep -q 'g1-a (exit' "$(sed -n 's/^- g2-b: integration-red — //p' "$pstop")" && echo yes || echo no)"
 
+echo "== the proof sandbox in a walk (house item 12)"
+# sprun: prun with the proof sandbox on.
+sprun() { CW_PROOF_SANDBOX= prun "$@"; }
+
+pwalk_repo
+deps_before="$(ls "$HOME/.cache/claude-coding-workflow/deps" 2>/dev/null | grep -c '^walk-' || true)"
+sprun --jobs 3
+check "sandbox: a plain walk completes" 0 "$prc"
+check "sandbox: every goal done" "done done done done" "$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
+check "sandbox: the walk's dependency folder is removed at the end" "$deps_before" "$(ls "$HOME/.cache/claude-coding-workflow/deps" 2>/dev/null | grep -c '^walk-' || true)"
+
+# The dependency folder: worktree_setup writes it, a proof reads it and cannot
+# write it (npm_config_cache points into it).
+pwalk_repo
+sed -i '' 's|^journal: docs/journal/p.md$|journal: docs/journal/p.md\nworktree_setup: mkdir -p "$npm_config_cache" \&\& echo dep >"$npm_config_cache/dep.txt"|' GOALS.md
+sed -i '' 's|^    proof: test -f b.txt$|    proof: test -f b.txt \&\& test -f "$npm_config_cache/dep.txt" \&\& ! touch "$npm_config_cache/proof-wrote"|' GOALS.md
+git commit -qam "setup writes deps; g2-b's proof reads them"
+sprun --jobs 3
+check "sandbox deps: the walk completes" 0 "$prc"
+[[ "$prc" -eq 0 ]] || tail -15 "$TMP/pout" | sed 's/^/    | /'
+check "sandbox deps: g2-b done (it read the dependency and could not write there)" done "$(status_of g2-b)"
+
+# A live .env in the main checkout stops the walk before any worktree is cut.
+pwalk_repo
+printf '.env.local\n' >>.gitignore && git add .gitignore && git commit -qm "ignore .env.local"
+echo 'TOKEN=x' >.env.local
+sprun --jobs 3
+check "secrets-in-checkout: the walk stops" secrets-in-checkout "$(sed -n 's/^- reason: //p' "$pstop" 2>/dev/null)"
+check "secrets-in-checkout: the stop names the file" yes "$(grep -q '\.env\.local' "$pstop" && echo yes || echo no)"
+check "secrets-in-checkout: no worktree was cut" "" "$(ls "$WTROOT"/*/ 2>/dev/null | grep -E '^g[0-9]' || true)"
+CW_ALLOW_DOTENV=1 sprun --jobs 3
+check "CW_ALLOW_DOTENV=1: the walk goes ahead" 0 "$prc"
+check "CW_ALLOW_DOTENV=1: the header says so" yes "$(grep -q 'CW_ALLOW_DOTENV=1' "$TMP/pout" && echo yes || echo no)"
+rm -f .env.local
+# A .env inside another worktree of the repo stops the walk too.
+pwalk_repo
+git worktree add -q "$TMP/extra-wt" -b extra-branch
+echo 'TOKEN=y' >"$TMP/extra-wt/.env"
+sprun --jobs 3
+check "secrets-in-checkout: a .env in another worktree stops the walk" secrets-in-checkout "$(sed -n 's/^- reason: //p' "$pstop" 2>/dev/null)"
+check "  ...naming it" yes "$(grep -q 'extra-wt/.env' "$pstop" && echo yes || echo no)"
+git worktree remove --force "$TMP/extra-wt"; git branch -q -D extra-branch
+
+# The sandbox cannot be made: the walk stops before any worktree is cut.
+pwalk_repo
+mv "$HOUSE/scripts/lib/proof-sandbox.py" "$HOUSE/scripts/lib/proof-sandbox.py.away"
+sprun --jobs 3
+mv "$HOUSE/scripts/lib/proof-sandbox.py.away" "$HOUSE/scripts/lib/proof-sandbox.py"
+check "proof-sandbox-unavailable: the walk stops" proof-sandbox-unavailable "$(sed -n 's/^- reason: //p' "$pstop" 2>/dev/null)"
+check "proof-sandbox-unavailable: no worktree was cut" "" "$(ls "$WTROOT"/*/ 2>/dev/null | grep -E '^g[0-9]' || true)"
+CW_PROOF_SANDBOX=off prun --jobs 3
+check "CW_PROOF_SANDBOX=off: the walk goes ahead" 0 "$prc"
 
 echo
 if [[ "$fails" -eq 0 ]]; then

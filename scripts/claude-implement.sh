@@ -88,9 +88,13 @@ ADD_DIRS=()
 # other goals of the wave (run-goals.sh resolves them). Every pass of this run,
 # the DeepSeek fallback included, gets the same list.
 DENY_WRITES=()
+# Absolute paths the sandbox must not read, on top of lib/secret-paths.txt:
+# the house's run folders, Grok verdicts, logs, and other goals' handoff
+# folders (run-goal.sh passes them; docs/features/proof-sandbox step 6).
+DENY_READS=()
 
 usage() {
-  echo "usage: claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... [--deny-write PATH]... <handoff.md>" >&2
+  echo "usage: claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... [--deny-write PATH]... [--deny-read PATH]... <handoff.md>" >&2
   echo "       claude-implement.sh --smoke" >&2
   exit 2
 }
@@ -111,6 +115,11 @@ while [[ $# -gt 0 ]]; do
     --deny-write)
       [[ $# -ge 2 && "$2" == /* ]] || usage
       DENY_WRITES+=("$2")
+      shift 2
+      ;;
+    --deny-read)
+      [[ $# -ge 2 && "$2" == /* ]] || usage
+      DENY_READS+=("$2")
       shift 2
       ;;
     -h|--help) usage ;;
@@ -183,9 +192,27 @@ new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 settings_json() {
   python3 - "$1" "${IMPLEMENTER_ALLOWED_DOMAINS:-}" \
     "$(printf '%s\n' "${DENY_WRITES[@]+"${DENY_WRITES[@]}"}")" \
-    "$HOUSE/.env" "$HOME/.config/watch/.env" "$KEYS_DIR" <<'PY'
+    "$HOUSE" "$HERE/lib/secret-paths.txt" "$KEYS_DIR" \
+    "${DENY_READS[@]+"${DENY_READS[@]}"}" <<'PY'
 import json, os, shlex, sys
-key_file, domains, deny_writes, *secrets = sys.argv[1:]
+key_file, domains, deny_writes, house, listing, keys_dir, *extra = sys.argv[1:]
+# lib/secret-paths.txt, shared with the proof sandbox: ~/ is the home, @HOUSE/
+# the house checkout. The keys folder this launcher writes, and the run's
+# --deny-read paths, are added to it.
+secrets = []
+with open(listing, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("~/"):
+            line = os.path.join(os.path.expanduser("~"), line[2:])
+        elif line.startswith("@HOUSE/"):
+            line = os.path.join(house, line[7:])
+        secrets.append(line)
+for p in [keys_dir] + extra:
+    if p not in secrets:
+        secrets.append(p)
 deny = []
 for p in secrets:
     deny.append(f"Read(/{p})")
@@ -247,7 +274,7 @@ run_pass() {
     deepseek)
       make_key_file "$DS_KEY"
       key_file="$KEY_FILE"
-      envs=("ANTHROPIC_BASE_URL=$DS_BASE")
+      envs+=("ANTHROPIC_BASE_URL=$DS_BASE")
       model_flags=(--bare --model "$DS_MODEL")
       ;;
   esac

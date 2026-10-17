@@ -61,6 +61,7 @@ s|oracle: inline|oracle: tests/acceptance/g1-store.sh|
   printf '.gitignore\n%s' "${IGNORE:-}" >.gitignore
   printf '# Journal: example\n' >docs/journal/example.md
   git add -A && git commit -q -m base
+  [[ -z "${PRE:-}" ]] || eval "$PRE"
   local t0=$SECONDS
   "$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true
   secs=$((SECONDS - t0))
@@ -79,12 +80,32 @@ check "hang: stops near the limit" "yes" "$([[ $secs -le 15 ]] && echo yes || ec
 check "hang: proof process killed" "0" "$(pgrep -f "sleep $NAP" | wc -l | tr -d ' ')"
 check "hang: no review" "no" "$reviewed"
 
+# 1b. A hung proof whose child ignores TERM: the whole session is killed, and
+#     the sandboxed proof never uses GNU timeout (it reaches only its own
+#     process group), even when one is on PATH.
+mkdir -p "$TMP/fakebin"
+printf '#!/bin/sh\necho "$*" >>"%s/gtimeout-called"\nshift 2; exec "$@"\n' "$TMP" >"$TMP/fakebin/gtimeout"
+chmod +x "$TMP/fakebin/gtimeout"
+rm -f "$TMP/gtimeout-called"
+PATH="$TMP/fakebin:$PATH" PROOF_TIMEOUT=2 proof '(trap "" TERM; sleep "$NAP") & wait'
+check "hang with a TERM-proof child: proof-timeout" "proof-timeout" "$reason"
+check "hang with a TERM-proof child: the child is gone too" "0" "$(pgrep -f "sleep $NAP" | wc -l | tr -d ' ')"
+# The stub is live (the launchers' own steps use it) but never wraps a proof.
+check "gtimeout on PATH is used by the launchers' steps" yes "$([[ -s "$TMP/gtimeout-called" ]] && echo yes || echo no)"
+check "the sandboxed proof never used gtimeout" 0 "$(grep -c sandbox-exec "$TMP/gtimeout-called" 2>/dev/null || true)"
+
+# 1c. A proof that exits 0 and leaves a child behind: the child is killed.
+proof 'sleep "$NAP" & exit 0'
+check "a child left after exit 0 is gone" "0" "$(pgrep -f "sleep $NAP" | wc -l | tr -d ' ')"
+
 # 2. Credentials in the host environment are not handed to proof code.
-export ANTHROPIC_API_KEY=stub-anthropic MY_SERVICE_TOKEN=stub-token \
+export SSH_AUTH_SOCK=/nonexistent/agent ANTHROPIC_API_KEY=stub-anthropic MY_SERVICE_TOKEN=stub-token \
   DB_PASSWORD=stub-pw PLAIN_SETTING=visible KEYBOARD_LAYOUT=us
-PROOF_ENV_KEEP="MY_SERVICE_TOKEN" proof 'env >"$OUTSIDE/env"'
+# The proof sandbox lets a proof write only its checkout and TMPDIR, so the
+# environment goes to an ignored file in the repo.
+IGNORE=$'env.out\n' PROOF_ENV_KEEP="MY_SERVICE_TOKEN" proof 'env >env.out'
 check "env: green proof reaches review" "yes" "$reviewed"
-seen() { grep -q "^$1=" "$OUTSIDE/env" && echo present || echo absent; }
+seen() { grep -q "^$1=" "$TMP/repo/env.out" && echo present || echo absent; }
 check "env: DEEPSEEK_API_KEY hidden" "absent" "$(seen DEEPSEEK_API_KEY)"
 check "env: ANTHROPIC_API_KEY hidden" "absent" "$(seen ANTHROPIC_API_KEY)"
 check "env: *_PASSWORD hidden" "absent" "$(seen DB_PASSWORD)"
@@ -94,14 +115,52 @@ check "env: PATH kept" "present" "$(seen PATH)"
 check "env: KEY inside a word is not a credential" "present" "$(seen KEYBOARD_LAYOUT)"
 check "env: git's GIT_CONFIG_KEY_n kept" "present" "$(seen GIT_CONFIG_KEY_0)"
 check "env: bytecode writes off (D-09)" "yes" \
-  "$(grep -qx 'PYTHONDONTWRITEBYTECODE=1' "$OUTSIDE/env" && echo yes || echo no)"
-unset ANTHROPIC_API_KEY MY_SERVICE_TOKEN DB_PASSWORD PLAIN_SETTING KEYBOARD_LAYOUT
+  "$(grep -qx 'PYTHONDONTWRITEBYTECODE=1' "$TMP/repo/env.out" && echo yes || echo no)"
+check "env: no ssh agent socket (proof sandbox)" "absent" "$(seen SSH_AUTH_SOCK)"
+check "env: no global git config (proof sandbox)" "yes" \
+  "$(grep -qx 'GIT_CONFIG_GLOBAL=/dev/null' "$TMP/repo/env.out" && echo yes || echo no)"
+unset SSH_AUTH_SOCK ANTHROPIC_API_KEY MY_SERVICE_TOKEN DB_PASSWORD PLAIN_SETTING KEYBOARD_LAYOUT
 
-# 3. Proof code that commits.
+# 2b. A hard link left in the checkout (an ignored folder) to a file outside
+#     it: the proof sandbox checks paths, not files, so the goal stops before
+#     the proof runs (docs/features/proof-sandbox step 3).
+IGNORE=$'build/\n' PRE='echo outside-secret >"$OUTSIDE/secret.txt" && mkdir -p build && ln "$OUTSIDE/secret.txt" build/leak' proof 'cat build/leak >ran.txt'
+check "hard link: proof-hardlink" "proof-hardlink" "$reason"
+check "hard link: the proof never ran" "no" "$([[ -f "$TMP/repo/ran.txt" ]] && echo yes || echo no)"
+check "hard link: no review" "no" "$reviewed"
+
+# 2c. A hard link to an outside unix socket, left in the checkout: a proof
+#     may use sockets in its TMPDIR, so linked sockets are checked too.
+IGNORE=$'build/\n' PRE='/usr/bin/python3 -c "import socket,time,os; s=socket.socket(socket.AF_UNIX); os.chdir(\"$OUTSIDE\"); s.bind(\"o.sock\"); s.listen(1); time.sleep(60)" & sleep 1; mkdir -p build && ln "$OUTSIDE/o.sock" build/s.sock' \
+  proof 'true'
+check "socket link: proof-hardlink" "proof-hardlink" "$reason"
+pkill -f 'o.sock' 2>/dev/null || true
+
+# 3. Proof code that commits. The proof sandbox refuses writes to .git, so the
+#    commit fails; the file it made is still caught as tampering.
 proof 'echo x >sneak.txt && git add sneak.txt && git commit -qm sneak'
 check "commit: proof-tamper" "proof-tamper" "$reason"
-check "commit: says HEAD moved" "yes" "$(has 'HEAD moved')"
+check "commit: the commit never happened" "no" "$(has 'HEAD moved' | cut -c1-3 | sed 's/yes/yes/;s/no:/no/')"
+check "commit: the new file is reported" "yes" "$(has 'sneak.txt')"
 check "commit: no review" "no" "$reviewed"
+
+# 3b. The same with the sandbox off (the user's opt-out): the tamper rule
+#     itself still catches a commit, and the override is journaled.
+CW_PROOF_SANDBOX=off proof 'echo x >sneak.txt && git add sneak.txt && git commit -qm sneak'
+check "sandbox off, commit: proof-tamper" "proof-tamper" "$reason"
+check "sandbox off, commit: says HEAD moved" "yes" "$(has 'HEAD moved')"
+check "sandbox off: the override is journaled" yes \
+  "$(git -C "$TMP/repo" log -p --all -- docs/journal/example.md 2>/dev/null | grep -q 'proof-sandbox=off' || grep -q 'proof-sandbox=off' "$TMP/repo/docs/journal/example.md"; [[ $? -eq 0 ]] && echo yes || echo no)"
+
+# 3c. A proof the sandbox refuses: red, and its output ends with the denials
+#     the kernel logged (diagnosis only).
+proof 'touch "$HOME/escape-attempt"; exit 1'
+pf="$(ls -t "$HOME/.cache/claude-coding-workflow/runs"/run-goal-g1-store-*/proof-g1-store-r0.txt 2>/dev/null | head -n1)"
+check "denied proof: the denial listing is appended" yes \
+  "$(grep -q -- '--- proof sandbox denials' "$pf" 2>/dev/null && echo yes || echo no)"
+check "denied proof: it names the denied path" yes \
+  "$(sed -n '/--- proof sandbox denials/,$p' "$pf" 2>/dev/null | grep -q 'escape-attempt' && echo yes || echo no)"
+check "denied proof: the escape never happened" no "$([[ -e "$HOME/escape-attempt" ]] && echo yes || echo no)"
 
 # 4. Proof code that edits a tracked source file.
 proof 'echo changed >impl.txt'

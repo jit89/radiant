@@ -72,7 +72,8 @@ run() {
   "$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true
   stop="$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)"
   reason="$(sed -n 's/^- reason: //p' "$stop" 2>/dev/null || true)"
-  frozen="$(dirname "$stop")/implementer/plan-at-base-$(basename "$plan")"
+  # The implementer folder is under handoffs/ (docs/features/proof-sandbox).
+  frozen="$(ls -td "$HOME/.cache/claude-coding-workflow/handoffs"/run-goal-g1-store-* 2>/dev/null | head -n1)/plan-at-base-$(basename "$plan")"
 }
 content() { cat "$1" 2>/dev/null || echo "(missing)"; }
 reviewed() { [[ -f "$OUTSIDE/review-plan-path" ]] && echo yes || echo no; }

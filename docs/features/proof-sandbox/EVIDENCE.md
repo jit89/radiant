@@ -209,3 +209,100 @@ With `(deny file-link) (allow file-link (subpath ROOT)) (allow file-link
 - the lower-case `.env` regex refuses `.ENV.probe` too (Seatbelt matched it
   case-insensitively on this APFS volume) while `normal.txt` stays readable;
 - an inline `(?i)` flag is not valid SBPL regex ("unexpected ^ operator").
+
+### Correction (build, step 1): hard links are checked per end
+
+Building the generator found that a link from the checkout into `$TMPDIR` is
+**allowed** when both trees allow links. Seatbelt checks each end of `link()`
+against the rules on its own; it cannot require both ends in the same tree.
+The step 0 row "`ln .env $TMP/leaked` (root → tmp): refused" was refused
+because its source was the denied `.env`, not because the trees differed.
+Measured in a minimal profile: with `file-link` allowed on two trees, a link
+between them is allowed and a link to or from anywhere else is refused.
+Two more rules this build measured:
+- **Precedence:** a rule naming an operation beats a wildcard rule whatever
+  their order (`(allow file-write-create …)` then `(deny file-write* …)`
+  still allows). The generator names every write operation in both its write
+  allows and its write denials.
+- **The implicit default deny of `file-link` loses to named write allows**:
+  with only `file-write-create` allowed on two trees, links between them are
+  allowed. The generator emits an explicit `(deny file-link)` before its link
+  allows.
+
+So the guarantee is: a hard link made in the sandbox has both ends inside
+`--root`, `--tmp` (or `--deps` under `--setup`), all walked by the pre-check,
+and never on a secret path or the root's `.git`. That keeps the plan's
+purpose (no outside file pulled in); a link between a proof's own trees only
+gives its own file a second name.
+
+### Step 6: the implementer's sandbox (one Haiku 5.5 pass, $0.009)
+
+The real launcher (`claude-implement.sh`, Claude Code's sandbox) with the
+`--deny-read` list `run-goal.sh` builds (`runs/`, `grok/`, `logs/`, another
+goal's handoff folder), running a probe script in a throwaway repo:
+
+| From inside the implementer's shell | Result |
+|---|---|
+| read a file in `runs/` | refused |
+| read another goal's handoff folder | refused |
+| read and write its own handoff folder | allowed |
+| write the repo, write `$TMPDIR`, `ln` inside `$TMPDIR` | allowed |
+| write `$HOME`, `/var/folders`, `/private/tmp` outside its `$TMPDIR`, `handoffs/` itself | refused |
+
+**Claude Code replaces `TMPDIR`**: the shell saw `TMPDIR=/tmp/claude-501`,
+not the `tmp/` the launcher set inside the handoff folder. PLAN step 6 named
+this case: the replacement must sit under a prefix denied to proofs, and
+`/tmp` (`/private/tmp`) is one, so nothing the implementer leaves in its
+scratch space is readable by a proof. The launcher's own `TMPDIR` setting was
+dead and is removed. (`/tmp/claude-501` is shared by every Claude Code sandbox
+of this user; the probe's three residue files were removed.)
+
+The implementer's write set is therefore: the repo (walked by the hard-link
+pre-check), its handoff folder (denied to proofs), and `/tmp/claude-<uid>`
+(denied to proofs), plus, in a walk, the worktree's admin and common gitdirs
+it commits through (walked).
+
+### Opus review round 1: measured
+
+- **`(allow network*)` also opens unix sockets.** Under it a connect to a unix
+  socket bound outside the checkout succeeded. With IP only
+  (`(local ip "*:*")`, `(remote ip "*:*")`) DNS fails (`getaddrinfo`:
+  nodename nor servname); adding
+  `(remote unix-socket (path-literal "/private/var/run/mDNSResponder"))` makes
+  DNS work while a connect to any other unix socket is `EPERM`. The setup and
+  `--network true` profiles now allow exactly that.
+- **`kern.procargs2` is readable across processes and the sandbox cannot stop
+  it.** A sandboxed process read 1476–2990 bytes of its parent shell's
+  arguments and environment through `sysctl` (`CTL_KERN, KERN_PROCARGS2, pid`).
+  It stayed readable with no `sysctl-read` allowance at all, with
+  `(deny sysctl-read (sysctl-name-prefix "kern.procargs"))`, and with an
+  allow-list of other prefixes: Seatbelt does not gate this read for a
+  same-user process. A proof can therefore read the environment of any process
+  the user runs (the walker, `run-goal.sh`, the user's shell, Claude Code). The
+  house never puts a key in a child's starting environment on the Claude path
+  (keys go through key files); exposure is whatever the user's own processes
+  hold. A known limit, brought to the user.
+- **`TIOCSTI`** could not be measured from this tool's shell (no controlling
+  terminal: `/dev/tty` "Device not configured"). Closed by construction
+  instead: every sandboxed run starts in a session of its own (`setsid`; under
+  `run-timeout.py` the child already leads one), with stdin from `/dev/null`,
+  and the profile denies `file-ioctl` on `/dev/tty` and `/dev/ttys*`.
+- **Self-test against a fake `sandbox-exec` that runs the command
+  unsandboxed:** it fails, naming the write outside, the secret, the temp-area
+  read, DNS, the public connect and the host listener.
+
+### Opus review round 2: measured
+
+- **A `--deny-read` path that does not exist at launch.** One Haiku pass
+  ($0.008) launched with `--deny-read ~/.cache/claude-coding-workflow/run-goal-pss0late`
+  before that folder existed; the host created it and a file in it 15 s in;
+  the implementer's `cat` of the file at 45 s failed with "Operation not
+  permitted". Claude Code keeps a deny path that does not exist yet, so a wave
+  member's artifact folder made after the others launched stays unreadable to
+  them.
+- **Setups under the IP-only profile** (house generator, `--setup`): `npm ci`
+  rc 0, `uv sync --frozen` rc 0, then Vitest and pytest rc 0 under the default
+  profile. `pnpm install` first failed: it reaches its lock folder through
+  `/tmp` and was denied `file-read-metadata` on `/tmp` (the temp-area rule);
+  with metadata-only on `/tmp` and `/private/tmp` under `--setup` it is rc 0,
+  and the pre-check finds no outside names.

@@ -463,7 +463,12 @@ run_setup() {
   local g="$1" dir="$2" out="$3" rc=0 st
   SETUP_REASON=""
   [[ -n "$WORKTREE_SETUP" ]] || return 0
-  proof_exec "$PROOF_SECS" "$out" "$WAVE_DIR/tmp-setup-$g" "cd $(printf '%q' "$dir") && $WORKTREE_SETUP" || rc=$?
+  PROOF_ROOT="$dir" PROOF_WALK="$GIT_COMMON_P" PROOF_DEPS="$DEPS_DIR" PROOF_SETUP=1 \
+    proof_exec "$PROOF_SECS" "$out" "$WAVE_DIR/tmp-setup-$g" "cd $(printf '%q' "$dir") && $WORKTREE_SETUP" || rc=$?
+  if [[ -n "$PROOF_SANDBOX_REASON" ]]; then
+    SETUP_REASON="$PROOF_SANDBOX_REASON"
+    return 1
+  fi
   if [[ "$rc" -ne 0 ]]; then
     SETUP_REASON=worktree-setup-failed
     return 1
@@ -660,7 +665,12 @@ integrate() {
     out="$WAVE_DIR/$g.merged-proof-$p.txt"
     in_scratch tree_snapshot >"$WAVE_DIR/$g.before"
     rc=0
-    proof_exec "$PROOF_SECS" "$out" "$WAVE_DIR/tmp-proof-$g-$p" "cd $(printf '%q' "$s") && $proof" || rc=$?
+    PROOF_ROOT="$s" PROOF_WALK="$GIT_COMMON_P" PROOF_NETWORK="$PROOF_NET" PROOF_DEPS="$DEPS_DIR" \
+      proof_exec "$PROOF_SECS" "$out" "$WAVE_DIR/tmp-proof-$g-$p" "cd $(printf '%q' "$s") && $proof" || rc=$?
+    if [[ -n "$PROOF_SANDBOX_REASON" ]]; then
+      integration_stop "$g" "$PROOF_SANDBOX_REASON" "the proof sandbox stopped the merged proof of $p before it ran (output: $out)" "$s"
+      return 1
+    fi
     in_scratch tree_snapshot >"$WAVE_DIR/$g.after"
     moved=()
     while IFS= read -r m; do [[ -z "$m" ]] || moved+=("$m"); done < <(in_scratch proof_moved "$WAVE_DIR/$g.before" "$WAVE_DIR/$g.after")
@@ -772,6 +782,33 @@ orch_preflight "" --none || walk_stop orchestration-files-dirty "$(orch_refusal)
 expect_from_tree
 walk_check
 
+# The proof sandbox (docs/features/proof-sandbox/PLAN.md step 4, Amendment 1
+# B, D): once per walk, before any worktree is cut or set up (setup has the
+# network). Each member's run-goal.sh checks again and journals an override
+# as its own goal's record; the walker only prints it.
+if [[ "${CW_ALLOW_DOTENV:-}" == 1 ]]; then
+  echo "NOTE: CW_ALLOW_DOTENV=1 — .env files in the checkouts stay readable to proofs and implementers"
+else
+  checkouts=()
+  while IFS= read -r wt; do [[ -z "$wt" ]] || checkouts+=("$wt"); done \
+    < <(git worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  [[ ${#checkouts[@]} -gt 0 ]] || checkouts=("$MAIN_ROOT")
+  if dotenvs="$(secrets_in_checkout "${checkouts[@]}")"; then :; else
+    walk_stop secrets-in-checkout "live .env files in the repo's checkouts — move the secrets to ~/.config/cw-secrets/<project>/ (proofs and implementers cannot read it) and leave no symlink; or rerun with CW_ALLOW_DOTENV=1 to walk anyway: $(printf '%s ' $dotenvs)"
+  fi
+fi
+if proof_sandbox_off; then
+  echo "NOTE: CW_PROOF_SANDBOX=off — proofs, worktree_setup and merged proofs run unsandboxed"
+elif ! sbx_why="$(proof_sandbox_selftest)"; then
+  walk_stop proof-sandbox-unavailable "the proof sandbox self-test failed — ${sbx_why//$'\n'/; }. CW_PROOF_SANDBOX=off runs proofs unsandboxed, deliberately."
+fi
+PROOF_NET="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof_network") or "none")')"
+[[ "$PROOF_NET" != loopback ]] || echo "NOTE: proof_network: loopback — proofs reach every loopback service on this Mac, and a server a proof binds to all interfaces is reachable from the LAN"
+[[ "$PROOF_NET" != true ]] || echo "NOTE: proof_network: true — proofs have the full network"
+# One dependency folder for the walk: worktree_setup writes it, proofs read it.
+DEPS_DIR="$(mktemp -d "$CW_CACHE/deps/walk-XXXXXX")"
+chmod 700 "$DEPS_DIR"
+
 trap 'wave_on_signal INT 130' INT
 trap 'wave_on_signal TERM 143' TERM
 
@@ -843,6 +880,7 @@ while :; do
     wave_commit "chore: orchestrator walk-end" ""
     events_end_walk
     git_meta_forget
+    case "$DEPS_DIR" in */deps/walk-*) rm -rf "$DEPS_DIR" ;; esac
     exit 0
   fi
 
@@ -912,14 +950,22 @@ while :; do
   RUNNING_PIDS=()
   RUNNING_IDS=()
   EXIT_AT=()
+  # Every member's handoff folder first, so each member, building its read
+  # denials at start, finds the others (docs/features/proof-sandbox step 6).
+  HANDOFFS=()
+  for g in ${STARTABLE[@]+"${STARTABLE[@]}"}; do
+    HANDOFFS+=("$(mktemp -d "$CW_CACHE/handoffs/run-goal-$g-XXXXXX")")
+  done
+  hi=0
   for g in ${STARTABLE[@]+"${STARTABLE[@]}"}; do
     deny_list "$g" "$WAVE_DIR/$g.deny"
     : >"$WAVE_DIR/$g.ptr"
     rm -f "$WAVE_DIR/$g.result"
-    ( cd "$(wt_path "$g")" && exec env CW_DENY_WRITE_FILE="$WAVE_DIR/$g.deny" \
+    ( cd "$(wt_path "$g")" && exec env CW_DENY_WRITE_FILE="$WAVE_DIR/$g.deny" CW_PROOF_DEPS="$DEPS_DIR" CW_PROOF_NETWORK="$PROOF_NET" \
       CW_PIN_ADMIN="$(goal_admin "$g")" CW_PIN_COMMON="$GIT_COMMON_P" \
       RUN_GOAL_STOP_PTR="$WAVE_DIR/$g.ptr" "$RUN_GOAL" --worktree "$MAIN_ROOT" \
-      --base "$WAVE_BASE" --result "$WAVE_DIR/$g.result" "$g" ) &
+      --base "$WAVE_BASE" --result "$WAVE_DIR/$g.result" --handoff-dir "${HANDOFFS[$hi]}" "$g" ) &
+    hi=$((hi + 1))
     RUNNING_PIDS+=("$!")
     RUNNING_IDS+=("$g")
   done

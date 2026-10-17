@@ -73,6 +73,7 @@ REVIEWED_HEAD=""
 WAKE_RC=1
 # --deny-write arguments for the implementer launcher (worktree mode).
 DENY_ARGS=()
+HANDOFF_DIR_ARG=""
 RUN_DIR=""
 STOP_FILE=""
 ART_DIR=""
@@ -117,6 +118,10 @@ PROOF_FIRST=0
 # The proof's private TMPDIR in worktree mode (parallel goals side by side);
 # empty otherwise, which leaves the proof's environment as it always was.
 PROOF_TMP=""
+PROOF_DEPS_DIR=""
+PROOF_NET=none
+PSB_NOTE=""
+PSB_NOTED=0
 # 1 once GOALS.md and the journal hold nothing this workflow did not write;
 # -1 when they were refused (then the stop leaves them, and HEAD, untouched).
 ORCH_FILES_OK=0
@@ -289,6 +294,9 @@ succeed() {
   if [[ "${KEEP_RUN_DIR:-0}" != "1" && -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
     case "$RUN_DIR" in
       */run-goal-*) rm -rf "$RUN_DIR" ;;
+    esac
+    case "${IMPL_DIR:-}" in
+      */handoffs/*) rm -rf "$IMPL_DIR" ;;
     esac
   fi
   exit 0
@@ -581,6 +589,11 @@ while [[ $# -gt 0 ]]; do
       WT_RESULT="$2"
       shift 2
       ;;
+    --handoff-dir)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      HANDOFF_DIR_ARG="$2"
+      shift 2
+      ;;
     -h | --help) usage ;;
     -*) usage ;;
     *)
@@ -621,14 +634,30 @@ cw_cache_init || die_gate "cannot create $CW_CACHE"
 cw_prune
 RUN_DIR="$(mktemp -d "$CW_CACHE/runs/run-goal-${GOAL_ID}-XXXXXX")"
 chmod 700 "$RUN_DIR"
-# The implementer's handoffs, and its return documents beside them. The
+# The implementer's handoffs, its return documents and the frozen plan. The
 # launcher gives the implementer this folder (--add-dir of the handoff's
-# folder), not RUN_DIR, which holds the raw proof logs, briefs and diffs.
-IMPL_DIR="$RUN_DIR/implementer"
-mkdir -m 700 "$IMPL_DIR"
+# folder). It sits under handoffs/, outside runs/, so the implementer can be
+# denied every run folder whole (docs/features/proof-sandbox step 6): a walk's
+# walker made it before spawning any member; a serial run makes its own.
+if [[ -n "$HANDOFF_DIR_ARG" ]]; then
+  IMPL_DIR="$(cd "$HANDOFF_DIR_ARG" && pwd -P)" || die_gate "--handoff-dir $HANDOFF_DIR_ARG is not a folder"
+  case "$IMPL_DIR" in "$(cd "$CW_CACHE/handoffs" && pwd -P)"/*) ;; *) die_gate "--handoff-dir must be under $CW_CACHE/handoffs" ;; esac
+else
+  IMPL_DIR="$(mktemp -d "$CW_CACHE/handoffs/run-goal-${GOAL_ID}-XXXXXX")"
+fi
+chmod 700 "$IMPL_DIR"
+# What the implementer may not read: every run folder, Grok's verdicts, the
+# logs, every run-goal-* artifact folder, and every handoff folder but its own
+# (in a walk the others already exist: the walker made them all first).
+IMPL_DENY_READS=("$CW_CACHE/runs" "$CW_CACHE/grok" "$CW_CACHE/logs")
+for d in "$CW_CACHE"/run-goal-* "$CW_CACHE"/handoffs/*; do
+  [[ -e "$d" ]] || continue
+  [[ "$(cd "$d" 2>/dev/null && pwd -P)" == "$IMPL_DIR" ]] || IMPL_DENY_READS+=("$d")
+done
+# Every proof gets a private TMPDIR (the sandbox's only writable temp area);
+# proofs of a wave run side by side, each with its own.
+PROOF_TMP="$RUN_DIR/tmp"
 if [[ -n "$WT_MAIN" ]]; then
-  # Proofs of a wave run side by side: each gets its own TMPDIR.
-  PROOF_TMP="$RUN_DIR/tmp"
   # The worktree's link files, saved before any implementer runs and checked
   # before every host git call from here on (lib/git-guard.sh, Amendment 4).
   [[ "$(pwd -P)" == "$GIT_PIN_TREE" ]] || die_gate "worktree mode: the toplevel $ROOT is not the pinned worktree $GIT_PIN_TREE"
@@ -661,6 +690,15 @@ fi
 
 # Worktree mode: status comes from the main checkout's GOALS.md (read-only).
 STATUS_SRC=GOALS.md
+# Every goal's artifact folder by name, made yet or not (a wave member's is
+# made after this list is built), this goal's own included.
+while IFS= read -r gid; do
+  [[ -z "$gid" ]] || IMPL_DENY_READS+=("$CW_CACHE/run-goal-$gid")
+done < <("$GOALS_PY" "${STATUS_SRC:-GOALS.md}" graph 2>/dev/null | awk '{print $1}')
+IMPL_DENY_READS+=("$ART_DIR")
+if [[ "$IMPLEMENTER" == claude ]]; then
+  for d in "${IMPL_DENY_READS[@]}"; do DENY_ARGS+=(--deny-read "$d"); done
+fi
 if [[ -n "$WT_MAIN" ]]; then
   [[ "$WT_MAIN" != "$(pwd -P)" ]] || die_gate "--worktree names this checkout itself; worktree mode runs in a goal's own worktree"
   [[ "$IMPLEMENTER" == claude ]] || die_gate "IMPLEMENTER=$IMPLEMENTER cannot run worktree mode: only claude-implement.sh takes the parallel walk's --deny-write list"
@@ -687,6 +725,50 @@ else
 fi
 [[ "$ORCH_FILES_OK" -eq 0 ]] || die_gate "$(orch_refusal)"
 ORCH_FILES_OK=1
+
+# The proof sandbox (docs/features/proof-sandbox/PLAN.md step 4, Amendment 1
+# B): before any proof and any implementer pass. A live .env in any checkout of
+# the repo stops the goal; the sandbox must load and hold, or the goal stops.
+# Each override is the user's, from the environment the run was launched in,
+# and rides on the dispatch record (written here it would dirty the tree
+# before the fresh-start gate).
+if [[ "${CW_ALLOW_DOTENV:-}" == 1 ]]; then
+  PSB_NOTE+=" dotenv=allowed"
+  echo "NOTE: CW_ALLOW_DOTENV=1 — .env files in the checkouts stay readable to proofs and the implementer"
+else
+  checkouts=("$ROOT")
+  [[ -z "$WT_MAIN" ]] || checkouts+=("$WT_MAIN")
+  if [[ -z "$WT_MAIN" ]]; then
+    while IFS= read -r wt; do [[ -z "$wt" ]] || checkouts+=("$wt"); done \
+      < <(git worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  fi
+  if dotenvs="$(secrets_in_checkout "${checkouts[@]}")"; then :; else
+    die_gate "secrets-in-checkout: live .env files in the repo's checkouts — move the secrets to ~/.config/cw-secrets/<project>/ (proofs and the implementer cannot read it) and leave no symlink; or rerun with CW_ALLOW_DOTENV=1 to walk anyway: $(printf '%s ' $dotenvs)"
+  fi
+fi
+if proof_sandbox_off; then
+  PSB_NOTE+=" proof-sandbox=off"
+  echo "NOTE: CW_PROOF_SANDBOX=off — proofs run unsandboxed"
+elif ! sbx_why="$(proof_sandbox_selftest)"; then
+  die_gate "proof-sandbox-unavailable: the proof sandbox self-test failed — ${sbx_why//$'\n'/; }. CW_PROOF_SANDBOX=off runs proofs unsandboxed, deliberately."
+fi
+# proof_network: the walker's (read from the main checkout) in worktree mode.
+if [[ -n "$WT_MAIN" ]]; then
+  PROOF_NET="${CW_PROOF_NETWORK:-none}"
+else
+  PROOF_NET="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof_network") or "none")')"
+fi
+# The dependency folder is the walk's (worktree_setup fills it); a serial run
+# has no setup, so its proofs' caches stay in their own TMPDIR.
+PROOF_DEPS_DIR="${CW_PROOF_DEPS:-}"
+[[ -n "$WT_MAIN" ]] || PROOF_DEPS_DIR=""
+# The real profile once, before any paid pass: a checkout path the profile
+# cannot take stops here, not after an implementer pass.
+if ! proof_sandbox_off; then
+  mkdir -p "$PROOF_TMP"
+  python3 "$HERE/lib/proof-sandbox.py" --root "$ROOT" --tmp "$PROOF_TMP" >/dev/null 2>"$RUN_DIR/proof-sandbox.err" ||
+    die_gate "proof-sandbox-path: $(head -c 300 "$RUN_DIR/proof-sandbox.err")"
+fi
 
 # Cache walk_id until walk-end. Mint → one journal line, fail-closed commit.
 # Before the dirty-tree gate so a later wake still has a walk_id.
@@ -886,7 +968,8 @@ while :; do
       } >"$HAND"
     fi
 
-    journal_line "## $(utc) — ORCHESTRATOR dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA} THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
+    journal_line "## $(utc) — ORCHESTRATOR dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA} THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}${PSB_NOTE}"
+    [[ -z "$PSB_NOTE" ]] || PSB_NOTED=1
     JOURNALED_IDS="THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
     events_append --event dispatch --severity info --goal "$GOAL_ID" --round "$ROUND" \
       --base-sha "$BASE_SHA" \
@@ -1009,14 +1092,25 @@ while :; do
     set +e
     PHASE="proof r${ROUND}"
     event_phase proof
+    # The overrides ride on the dispatch record; a run that proves before any
+    # dispatch (a proof-first resume) journals them here, before the snapshot
+    # the proof is judged against.
+    if [[ -n "$PSB_NOTE" && "$PSB_NOTED" -eq 0 ]]; then
+      journal_line "## $(utc) — ORCHESTRATOR overrides ${GOAL_ID}${PSB_NOTE}"
+      PSB_NOTED=1
+    fi
     tree_snapshot >"$RUN_DIR/tree-before-proof.txt"
     # lib/proof.sh: plain bash -c, credential variables stripped,
     # PYTHONDONTWRITEBYTECODE. PROOF_TMP is empty unless worktree mode set it.
-    proof_exec "$PROOF_SECS" "$PROOF_FILE" "$PROOF_TMP" "$PROOF"
+    PROOF_ROOT="$ROOT" PROOF_WALK="${GIT_PIN_COMMON:-}" PROOF_NETWORK="$PROOF_NET" \
+      PROOF_DEPS="$PROOF_DEPS_DIR" proof_exec "$PROOF_SECS" "$PROOF_FILE" "$PROOF_TMP" "$PROOF"
     PROOF_EXIT=$?
     set -e
     PHASE="assess r${ROUND}"
     verify_git_meta "during proof r${ROUND}"
+    if [[ -n "$PROOF_SANDBOX_REASON" ]]; then
+      wake "$PROOF_SANDBOX_REASON" "the proof sandbox stopped the proof before it ran. Output: $PROOF_FILE"
+    fi
     if [[ "$PROOF_EXIT" -eq 124 ]]; then
       wake "proof-timeout" "proof ran past ${PROOF_SECS}s (PROOF_TIMEOUT). Output: $PROOF_FILE"
     fi
@@ -1069,9 +1163,11 @@ while :; do
         echo "(step 5 of your instructions). If you believe the oracle or the case table is"
         echo "wrong, do not work around it: report BLOCKED with the exact question (step 8)."
         echo "If the proof passes in your sandbox, look for what differs on the host:"
-        echo "environment variables, \$TMPDIR, network access. If you find nothing to change,"
-        echo "say so in the journal END record and the return handoff, and report DONE"
-        echo "without changing any file but the journal."
+        echo "environment variables, \$TMPDIR, network access, and the proof sandbox (no"
+        echo "network, writes only in the checkout and \$TMPDIR, secret paths unreadable;"
+        echo "its denials, if any, are listed at the end of the output). If you find nothing"
+        echo "to change, say so in the journal END record and the return handoff, and report"
+        echo "DONE without changing any file but the journal."
         if [[ "$PROOF_EXIT" -eq 0 ]]; then
           echo
           echo "It exited 0, but its output says \"Ran 0 tests\", which the host counts as a"
@@ -1129,9 +1225,9 @@ EOF
   # PROOF_OUTPUT at all: headless Claude denies reads outside the repo and
   # there is nobody to approve the prompt. It then reviews on no evidence.
   if [[ -n "$SESSION_ID" ]]; then
-    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" "$BRIEF"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
   else
-    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --add-dir "$RUN_DIR" "$BRIEF"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
   fi
   rv_rc=$?
   set -e

@@ -62,6 +62,15 @@ Cheap, deterministic evidence first; the independent model last. In order:
 `PLAN-REVIEW-LOG.md` are committed on their own (`run-goal.sh` refuses a
 `plan:` path that is not in `HEAD`); after any re-sign, again on their own.
 
+**0b. The language runs under the proof sandbox.** If the walk's language
+and toolchain are not yet proved under the sandbox (so far: C with CMake,
+TypeScript with Vitest or node:test, Python with pytest and uv), first run one
+`worktree_setup` and one proof of a small project of that language under
+`scripts/lib/proof-sandbox.py` (`--setup` for the setup) and record in the
+feature's evidence that both pass and nothing new is denied. A failure here
+is a profile change, reviewed before the walk, not a red proof mid-walk
+(docs/features/proof-sandbox, Amendment 1 E).
+
 **1. Write.** Draft `GOALS.md` (uncommitted) in the GOAL-FORMAT.md shape;
 statuses `ready` if `blocked_by` is empty, else `blocked`. For every
 approved goal, write the acceptance cases:

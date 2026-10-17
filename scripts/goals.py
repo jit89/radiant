@@ -389,6 +389,11 @@ def validate(data: dict) -> list[str]:
     setup = data.get("worktree_setup")
     if setup is not None and (not isinstance(setup, str) or not setup.strip()):
         errors.append("worktree_setup: must be one shell command (a non-empty string)")
+    # The proof sandbox's network (docs/features/proof-sandbox/PLAN.md,
+    # Amendment 1 A): absent means none; only these two strings open it.
+    net = data.get("proof_network")
+    if net is not None and net not in ("loopback", "true"):
+        errors.append("proof_network: must be loopback or true (leave it out for none)")
     ids = [g.get("id") for g in data["goals"]]
     if len(ids) != len(set(ids)):
         errors.append("duplicate goal ids")
@@ -618,6 +623,7 @@ def cmd_meta(data, **_):
                 "log": data.get("log"),
                 "journal": data.get("journal"),
                 "worktree_setup": data.get("worktree_setup"),
+                "proof_network": data.get("proof_network") or "none",
             },
             indent=2,
         )

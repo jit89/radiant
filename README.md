@@ -203,6 +203,8 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `IMPLEMENTER_TIMEOUT` | `1200` | Seconds per implementer pass (`DEEPSEEK_TIMEOUT` still honoured) |
 | `CLAUDE_REVIEW_TIMEOUT` | `600` | Seconds per review |
 | `PROOF_TIMEOUT` | `600` | Seconds for the host proof |
+| `CW_PROOF_SANDBOX` | (on) | `off` runs proofs, `worktree_setup` and merged proofs unsandboxed; journaled on the dispatch record |
+| `CW_ALLOW_DOTENV` | (unset) | `1` walks a repo with a live `.env` in a checkout, knowingly; journaled on the dispatch record |
 | `PROOF_ENV_KEEP` | empty | Space-separated credential-like variables the proof may still see (others named `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*` are removed) |
 | `KEEP_RUN_DIR=1` | off | Keep the run dir after a goal lands |
 | `CW_OUT_DIR` | unset | Launchers write raw output, `.err` and verdict/report here and delete none; `run-goal.sh` sets it to its run dir |
@@ -211,12 +213,18 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 
 Where files live: a goal's run dir (stop file, diff, proof output, the
 launchers' output) is `~/.cache/claude-coding-workflow/runs/run-goal-<id>-*`,
-removed when the goal lands and kept on a wake. The implementer's Read, Edit
-and Write tools are given only its `implementer/` subfolder (handoffs, return
-documents, the frozen plan), not the raw proof output beside it; its shell can
-still read the run folder until the host proof and the run folder are
-sandboxed (FUTURE-WORK item 12); Grok verdicts are in
-`~/.cache/claude-coding-workflow/grok/`. Both folders are 0700 and pruned
+removed when the goal lands and kept on a wake. The implementer's folder
+(handoffs, return documents, the frozen plan) is
+`~/.cache/claude-coding-workflow/handoffs/run-goal-<id>-*`, outside the run
+folders: the implementer's sandbox denies it every run folder, Grok's
+verdicts, the logs and every other goal's handoff folder. Every host proof,
+`worktree_setup` and merged proof runs under the proof sandbox
+(`scripts/lib/proof-sandbox.py`, docs/features/proof-sandbox): writes only to
+the checkout and its own `TMPDIR`, no network unless the GOALS.md preamble
+says `proof_network: loopback` or `true`, the secret list
+(`scripts/lib/secret-paths.txt`) unreadable; a walk with a live `.env` in any
+checkout stops (`secrets-in-checkout`). Grok verdicts are in
+`~/.cache/claude-coding-workflow/grok/`. These folders are 0700 and pruned
 past `CW_PRUNE_DAYS`. Run the tests with `scripts/tests/run-all.sh [-j N]`:
 four at a time by default (`CW_TEST_JOBS`), each in its own `TMPDIR` and
 `HOME`, failing any test that leaves something in either; `install.sh --check`

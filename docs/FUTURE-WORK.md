@@ -544,6 +544,41 @@ subfolder is measured to work. The legacy `IMPLEMENTER=codex` launcher
 (`deepseek-code.sh`, sandbox `workspace-write`) reads outside its handoff
 folder the same way.
 
+**Done (2026-10-17):** `docs/features/proof-sandbox/` (PLAN with Amendment 1,
+ten Grok rounds, EVIDENCE with step 0 and step 6 measurements, journal). Every
+`proof_exec` (host proof, `worktree_setup`, merged proofs) runs under a
+generated `sandbox-exec` profile (`scripts/lib/proof-sandbox.py`), with a
+self-test before any implementer pass and `CW_PROOF_SANDBOX=off` as the only
+opt-out; no network by default (`proof_network: loopback|true`); one secret
+list shared with the implementer (`scripts/lib/secret-paths.txt`); a
+`secrets-in-checkout` gate (`CW_ALLOW_DOTENV=1`); a hard-link pre-check; a
+dependency folder per walk; the implementer's folder under `handoffs/`,
+denied every run folder.
+
+Follow-ups from the build's Opus review (2026-10-17), not closed by item 12:
+- `kern.procargs2`: a proof can read the arguments and environment of any
+  process the user runs (Seatbelt does not gate it; EVIDENCE.md). Closing it
+  needs proofs run as another user. Until then: keep keys out of long-lived
+  processes' environments.
+- `/tmp/claude-<uid>` (Claude Code's TMPDIR for every sandbox of the user) is
+  shared by all of them; the implementer can read what another Claude Code
+  session left there. Not reachable by proofs.
+- Probes not yet in the tests: `/System/Volumes/Data` firmlink paths and
+  `.GIT` case variants against the secret and `.git` rules; a mach-lookup
+  probe apart from the exec layer (a ctypes `bootstrap_look_up` of securityd);
+  the sandboxed walker block never takes the `PROOF_SANDBOX_REASON` branches
+  of `run_setup` or `integrate`; plan step 0's hard-linked-secret plant from
+  inside the implementer's sandbox.
+- Test time: item 12 took the full suite from ~22 to ~49 min, mostly the
+  parallel-walk files (~37 walks each). The sandbox self-test runs once per
+  walk and once per goal (~1 s), and a red proof waits ~3 s for its denial
+  listing. Cheap cuts: the walker passes its members "self-test passed" (only
+  the walker sets their environment), a test-only setting skips the listing's
+  wait, and the walk tests split across more files for run-all -j.
+- A walker resume that only integrates finished goals runs merged proofs
+  under `CW_PROOF_SANDBOX=off` / `CW_ALLOW_DOTENV=1` without a journal record
+  (the walker prints it; members journal their own).
+
 ## 13. Parallel walker: dynamic dispatch (2026-10-15)
 
 Item 6 ships fork-join waves (user's choice): a goal that finishes early waits

@@ -375,6 +375,16 @@ tamper checks (`tree_snapshot`, `proof_moved`) stay as they are.
   a secret in a variable with another name stays visible to it, as today.
 - The walker's state is protected from the proof by the profile, but not from
   `worktree_setup`'s network (it can upload what it can read).
+- **Accepted known limit (user, 2026-10-17):** a proof can read the arguments
+  and environment of any process the user runs through `sysctl`
+  `kern.procargs2`; Seatbelt does not gate this for same-user processes
+  (EVIDENCE.md, "Opus review round 1"). The house keeps keys out of child
+  environments (key files); what is exposed is what the user's own processes
+  hold. A full fix needs proofs run as another user (FUTURE-WORK).
+- **Known limit:** when a proof ends, everything still in its session is
+  killed (`run-timeout.py --reap`), but a child that starts a session of its
+  own (`setsid`), or keeps re-forking faster than the reap scans, escapes. The
+  reap is for leftovers, not a defence against a proof built to outlive it.
 - Surfacing denials depends on the unified log; if step 0 finds no reliable
   per-run method, the listing is dropped and denials are diagnosed by hand
   (`log show`), which the plan would then say.
@@ -457,12 +467,13 @@ the class instead:
 ### C. Profile fixes within the plan's intent
 
 1. The hard-link operation is `file-link`. A link is allowed only when both
-   ends are inside the same tree: one `(allow file-link (subpath …))` rule for
-   `--root` and one for `--tmp` (and, under `--setup` only, one for the
-   dependency folder (D), which proofs may only read). Measured: inside→inside
-   allowed; outside→inside, inside→outside and `--root`→`--tmp` refused; and a
-   link to a read-denied file inside the root refused, because the link's
-   source must itself be accessible. As a second layer, `file-link` is denied
+   ends are inside the allowed trees: `--root`, `--tmp`, and under `--setup`
+   only the dependency folder (D), which proofs may only read. Seatbelt checks
+   each end on its own, so a link between two of those trees is allowed (build
+   correction, EVIDENCE.md); outside→inside and inside→outside are refused,
+   and a link to a read-denied file is refused because the link's source must
+   itself be accessible. An explicit `(deny file-link)` precedes the allows:
+   the implicit default deny loses to named write allows. As a second layer, `file-link` is denied
    explicitly on every secret-list path, after the link allows. Every other `file-link` is denied,
    again after the final `--tmp` allow. The pre-run walk (step 3) stays.
 2. `file-read-metadata` on the literal parent folders of `--root`, `--tmp` and

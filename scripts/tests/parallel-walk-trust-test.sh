@@ -391,6 +391,15 @@ prun --jobs 3
 check "rewritten commondir: the filter in the fake common dir never ran" no "$([[ -e "$CALLS/pwned" ]] && echo yes || echo no)"
 check "rewritten commondir: g1-a stopped (it made no change)" yes "$([[ -n "$(reason_in g1-a)" ]] && echo yes || echo no)"
 check "rewritten commondir: g2-b still integrated" done "$(status_of g2-b)"
+# The same setup under the proof sandbox: the write to the admin folder (in
+# the common gitdir, outside the worktree) is refused, so setup fails first.
+pwalk_repo
+rm -rf "$CALLS/pwned"
+sed -i '' 's|^journal: docs/journal/p.md$|journal: docs/journal/p.md\nworktree_setup: case "$PWD" in */g1-a) printf "%s\\n" "'"$FAKE"'" >"$(git rev-parse --absolute-git-dir)/commondir" ;; esac|' GOALS.md
+git commit -qam "setup key"
+CW_PROOF_SANDBOX= prun --jobs 3
+check "rewritten commondir under the sandbox: g1-a's setup fails" worktree-setup-failed "$(reason_in g1-a)"
+check "rewritten commondir under the sandbox: the filter never ran" no "$([[ -e "$CALLS/pwned" ]] && echo yes || echo no)"
 
 # A non-ASCII journal path: git quotes such names unless told not to.
 pwalk_repo
@@ -447,7 +456,9 @@ else
   old_done="$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
   norm >"$TMP/norm-old"
   pwalk_repo
-  "$HOUSE/scripts/run-goals.sh" >"$TMP/pout-new" 2>&1 && nrc=0 || nrc=$?
+  # Sandbox on: the old walker had none, and these proofs need nothing outside
+  # the checkout, so the records must match it exactly.
+  CW_PROOF_SANDBOX= "$HOUSE/scripts/run-goals.sh" >"$TMP/pout-new" 2>&1 && nrc=0 || nrc=$?
   new_done="$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
   norm >"$TMP/norm-new"
   check "--jobs 1: both walks succeed and finish every goal" "0 0 done done done done done done done done" \

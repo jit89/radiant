@@ -153,6 +153,11 @@ check "goal Ctrl-C: reviewer killed" "0" "$(survivors)"
 # 3. TERM while the host proof runs (file oracle, command proof).
 stub claude-goal-review.sh 'exit 1'
 make_repo
+# The proof runs under the proof sandbox, which lets it write only its
+# checkout and TMPDIR: its started/finished marker is an ignored file there.
+STUBS_OUTSIDE="$STUBS"
+export STUBS="$TMP/repo/.stubs"
+printf '.stubs\n' >.gitignore
 printf '%s\n' "$NAPPER" >tests/acceptance/g1-store.sh
 sed -i.bak -e '/id: g1-store/,/status:/{
 s|proof: true|proof: bash tests/acceptance/g1-store.sh|
@@ -165,6 +170,7 @@ check "proof TERM: stops promptly" "yes" "$(fast)"
 check "proof TERM: detail names proof" "yes" \
   "$([[ "$detail" == *SIGTERM*proof* ]] && echo yes || echo "no: $detail")"
 check "proof TERM: proof killed" "0" "$(survivors)"
+export STUBS="$STUBS_OUTSIDE"
 
 # 4. TERM to the walker alone: child stopped, walk ends, no next dispatch.
 stub claude-implement.sh "$NAPPER"

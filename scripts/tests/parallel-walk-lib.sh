@@ -9,6 +9,11 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-${PW_NAME:-parallel}-XXXXXX")"
 export TMPDIR="$TMP"
 trap '[[ -n "${KEEP_TMP:-}" ]] || rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" EVENTS_CACHE="$TMP/cache"
+# These scenarios test the walker's logic, and their proofs and setups record
+# themselves in $CALLS, outside the checkout, which the proof sandbox (house
+# item 12) refuses. They run unsandboxed; the sandbox in a walk has its own
+# block at the end of parallel-walk-test.sh (CW_PROOF_SANDBOX unset there).
+export CW_PROOF_SANDBOX=off
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
 export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
 # No background auto-maintenance: a detached repack still writing .git/objects

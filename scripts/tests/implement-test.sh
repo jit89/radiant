@@ -218,6 +218,21 @@ reset "$DONE"
 run -- "$HANDOFF"
 check "no --deny-write: no denyWrite key" null "$(setting 1 sandbox.filesystem.denyWrite)"
 
+echo "== 2c. read denials (docs/features/proof-sandbox step 6) =="
+reset "$REFUSAL" "$DONE"
+run -- --deny-read /x/runs --deny-read /x/handoffs/other "$HANDOFF"
+check "deny-read: exit 0" 0 "$RC"
+for n in 1 2; do
+  check "deny-read: pass $n denies /x/runs" yes "$(has '/x/runs' "$(setting $n sandbox.filesystem.denyRead)")"
+  check "deny-read: pass $n denies another handoff folder" yes "$(has '/x/handoffs/other' "$(setting $n sandbox.filesystem.denyRead)")"
+done
+check "deny-read: the shared secret list (~/.ssh)" yes "$(has "$HOME/.ssh" "$(setting 1 sandbox.filesystem.denyRead)")"
+check "deny-read: the shared secret list (~/.config/cw-secrets)" yes "$(has "$HOME/.config/cw-secrets" "$(setting 1 sandbox.filesystem.denyRead)")"
+check "deny-read: the Read tool is denied too" yes "$(has 'Read(//x/runs)' "$(setting 1 permissions.deny)")"
+reset "$DONE"
+run -- --deny-read relative/path "$HANDOFF"
+check "deny-read: a relative path is refused" 2 "$RC"
+
 echo "== 3. DECLINED -> fallback =="
 reset "$DECLINED" "$DONE"
 run -- "$HANDOFF"

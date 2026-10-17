@@ -120,7 +120,7 @@ VERDICT: FIX
 MD
 stub claude-goal-review.sh "printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' \
   'VERDICT: FIX' 'VERDICT_FILE: $TMP/fix-verdict.md'"
-stub claude-implement.sh 'if [[ "$1" == --resume ]]; then echo "IMPLEMENTER_RESULT: error (exit 1)"; exit 1; fi
+stub claude-implement.sh 'if [[ " $* " == *" --resume "* ]]; then echo "IMPLEMENTER_RESULT: error (exit 1)"; exit 1; fi
 '"$COMMIT"'
 printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 run_goal
@@ -140,7 +140,7 @@ check "flagged reviewer: reviewer-flagged" "reviewer-flagged" "$reason"
 check "flagged reviewer: detail says nothing was judged" "yes" "$(has 'Nothing was judged' "$detail")"
 
 # The journal names the model that judged, and marks a fallback so it is never silent.
-stub claude-implement.sh 'if [[ "$1" == --resume ]]; then echo "IMPLEMENTER_RESULT: error (exit 1)"; exit 1; fi
+stub claude-implement.sh 'if [[ " $* " == *" --resume "* ]]; then echo "IMPLEMENTER_RESULT: error (exit 1)"; exit 1; fi
 '"$COMMIT"'
 printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 stub claude-goal-review.sh "printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' \

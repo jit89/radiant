@@ -88,13 +88,14 @@ SH
 chmod +x "$HOUSE/scripts/"*.sh
 
 # The proof: green once impl.txt says FIXED or the "host" is fixed
-# ($CALLS/hostfixed). It prints a recognised secret (an AWS key id) first, so
+# (.hostfixed, an ignored file in the repo: the proof sandbox lets a proof
+# read its checkout, not the test's other folders). It prints a recognised secret (an AWS key id) first, so
 # the raw log holds a secret the excerpt must not carry.
 ORACLE_BODY='echo "proof: checking impl.txt"
 echo "aws AKIAABCDEFGHIJKLMNOP"
 if [ -n "${ZERO_FLAG:-}" ]; then echo "Ran 0 tests"; exit 0; fi
 if [ -n "${NUL_FLAG:-}" ]; then printf "raw\\0byte\\n"; fi
-[ -f "$CALLS/hostfixed" ] && exit 0
+[ -f .hostfixed ] && exit 0
 grep -q FIXED impl.txt || { echo "FAIL: impl.txt is not FIXED"; exit 3; }'
 
 # fresh <ds plan> <rv plan>: new repo, new cache, run once.
@@ -110,6 +111,7 @@ s|oracle: inline|oracle: tests/acceptance/g1-store.sh|
   printf '%s\n' "$ORACLE_BODY" >tests/acceptance/g1-store.sh
   printf 'start\n' >impl.txt
   printf '# Journal: example\n' >docs/journal/example.md
+  printf '.hostfixed\n' >.gitignore
   git add -A && git commit -q -m base
   printf '%s\n' $1 >"$CALLS/ds.plan"
   printf '%s\n' $2 >"$CALLS/rv.plan"
@@ -143,8 +145,9 @@ check "handoff titled as a red proof" yes "$(has '(after round 0: red host proof
 check "handoff names the blocker rule by its step" yes "$(has 'report BLOCKED with the exact question (step 8)' "$CALLS/handoff-2.md")"
 check "handoff names the contract by its step" yes "$(has '(step 5 of your instructions)' "$CALLS/handoff-2.md")"
 check "handoff says the host ran it outside the sandbox" yes "$(has 'outside your sandbox, and it failed' "$CALLS/handoff-2.md")"
-check "handoff names what differs on the host" yes "$(has 'environment variables, $TMPDIR, network access' "$CALLS/handoff-2.md")"
-check "handoff's DONE keeps the journal records" yes "$(has 'without changing any file but the journal' "$CALLS/handoff-2.md")"
+check "handoff names what differs on the host" yes "$(has 'environment variables, $TMPDIR, network access, and the proof sandbox' "$CALLS/handoff-2.md")"
+check "handoff points at the denial listing" yes "$(has 'its denials, if any, are listed' "$CALLS/handoff-2.md")"
+check "handoff's DONE keeps the journal records" yes "$(has 'DONE without changing any file but the journal' "$CALLS/handoff-2.md")"
 check "handoff carries the failure" yes "$(has 'FAIL: impl.txt is not FIXED' "$CALLS/handoff-2.md")"
 check "handoff carries the exit code" yes "$(has 'exited 3' "$CALLS/handoff-2.md")"
 check "a nonzero exit gets no Ran-0-tests line" no "$(has 'which the host counts as a' "$CALLS/handoff-2.md")"
@@ -161,11 +164,11 @@ check "no review" 0 "$(calls rv)"
 # A stop keeps the run folder: what the implementer was given is still there.
 IMPL="$(dirname "$(cat "$CALLS/path-1")")"
 check "the implementer folder is kept" yes "$([[ -d "$IMPL" ]] && echo yes || echo no)"
-check "first handoff in the implementer folder" implementer "$(basename "$IMPL")"
+check "first handoff in a handoffs/ folder, outside the run folder" handoffs "$(basename "$(dirname "$IMPL")")"
 check "fix handoff in the same folder" "$IMPL" "$(dirname "$(cat "$CALLS/path-2")")"
 check "no raw proof log there" 0 "$(find "$IMPL" -name 'proof-*' | wc -l | tr -d ' ')"
 check "the secret appears nowhere there" no "$(grep -rq AKIAABCDEFGHIJKLMNOP "$IMPL" && echo yes || echo no)"
-check "it is in the raw log beside it" yes "$(grep -q AKIAABCDEFGHIJKLMNOP "$(dirname "$IMPL")"/proof-* && echo yes || echo no)"
+check "it is in the raw log, in the run folder" yes "$(grep -q AKIAABCDEFGHIJKLMNOP "$HOME/.cache/claude-coding-workflow/runs"/run-goal-g1-store-*/proof-* && echo yes || echo no)"
 
 echo "== 3. a journal-only commit is not progress =="
 fresh "ok journal" ""
@@ -195,7 +198,7 @@ fresh "fix break fix" "fix-A done"
 check "done" yes "$done_"
 check "r0 is a review fix" yes "$([[ "$(fix_line 0)" == *"source=review"* ]] && echo yes || echo "no: $(fix_line 0)")"
 check "r1 is a proof fix" yes "$([[ "$(fix_line 1)" == *"source=proof"* ]] && echo yes || echo "no: $(fix_line 1)")"
-check "the review fix handoff is in implementer/" implementer "$(basename "$(dirname "$(cat "$CALLS/path-2")")")"
+check "the review fix handoff is under handoffs/" handoffs "$(basename "$(dirname "$(dirname "$(cat "$CALLS/path-2")")")")"
 check "the repair after it is r2" yes "$(grep -q 'ORCHESTRATOR dispatch g1-store r2 ' docs/journal/example.md && echo yes || echo no)"
 
 echo "== 7. BLOCKED in a proof fix round, then a resume =="
@@ -221,11 +224,20 @@ check "stuck" proof-red "$reason"
 run
 check "unchanged: proof-red again" proof-red "$reason"
 check "unchanged: nothing dispatched" 2 "$(calls ds)"
-touch "$CALLS/hostfixed"
+touch "$TMP/repo/.hostfixed"
 run
 check "host fixed: done" yes "$done_"
 check "host fixed: nothing dispatched" 2 "$(calls ds)"
 check "host fixed: reviewed" 1 "$(calls rv)"
+# The same proof-first resume with the sandbox off (the user's opt-out): the
+# override is journaled before the proof's snapshot, so it is not tampering.
+fresh "ok same fix" "done"
+check "stuck (sandbox off case)" proof-red "$reason"
+touch "$TMP/repo/.hostfixed"
+CW_PROOF_SANDBOX=off run
+check "proof-first resume, sandbox off: done" yes "$done_"
+check "proof-first resume, sandbox off: the override journaled" yes \
+  "$(grep -q 'ORCHESTRATOR overrides g1-store proof-sandbox=off' docs/journal/example.md && echo yes || echo no)"
 fresh "ok same fix" "done"
 echo "by hand" >>notes.txt && git add notes.txt && git commit -qm "a person's change"
 run

@@ -124,7 +124,9 @@ oracle gap, which the review targets.
 ### Phase 4 — Implement + review
 
 From the target repo: `scripts/run-goal.sh <id>`. The **script** is
-the hop (assess, proof, Opus, FIX loop). The Architect only runs it and,
+the hop (assess, proof, Opus, FIX loop). The host proof runs under the proof
+sandbox (`docs/features/proof-sandbox/PLAN.md`; `CW_PROOF_SANDBOX=off` is the
+user's only way out); a live `.env` in a checkout stops it. The Architect only runs it and,
 on a nonzero exit, reads `STOP_FILE:`. Do not restate the hop here.
 
 ### Phase 5 — Orchestrate
