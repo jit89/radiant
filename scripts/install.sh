@@ -344,7 +344,7 @@ do_check() {
     test_show proof-test.sh
   fi
   if test_ok implement-test.sh; then
-    echo "implementer: OK (Haiku sandboxed and key-free; one DeepSeek fallback on a refusal or decline, none on a rate limit)"
+    echo "implementer: OK (sandboxed and key-free; one fallback to the other model on a refusal, a decline or a DeepSeek 402, none on a rate limit; primary ${IMPLEMENTER_PRIMARY:-haiku})"
   else
     echo "implementer: FAIL"; rc=1
     test_show implement-test.sh

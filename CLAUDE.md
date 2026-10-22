@@ -14,7 +14,7 @@ in-session (do not dispatch the implementer at the house).
 |------|-------|------------------|
 | **Architect** | Claude Code (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
 | **Attacker** | Grok (`grok-4.7`) | Headless, read-only. Attacks a locked plan (Phase 2) and the Architect's acceptance oracles (Phase 3). A different model on purpose — the Architect cannot attack its own plan or oracles. Never reviews implementer diffs. Advises; does not command. |
-| **Implementer** | Claude Haiku 5.5 (`claude-haiku-5-5`, effort `xhigh`), headless and sandboxed; DeepSeek V4 Flash (`deepseek-v4-flash`) through the same Claude Code harness when Haiku refuses or declines | Cheap long TDD loops against one goal. Sibling process. |
+| **Implementer** | Claude Haiku 5.5 (`claude-haiku-5-5`, effort `xhigh`), headless and sandboxed; DeepSeek Flash (`deepseek-flash`) through the same Claude Code harness when Haiku refuses or declines (`IMPLEMENTER_PRIMARY=deepseek` swaps the two) | Cheap long TDD loops against one goal. Sibling process. |
 | **Goal reviewer** | Claude Opus 5.5 (`claude-opus-5-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
 
 The Architect never silently switches into "just code it" mode. If the
@@ -307,7 +307,9 @@ leaning on the bare name.
 - Do not use Codex/ChatGPT, and never your own second opinion, as the
   **plan attacker** — that is the one role this session may not fill.
   If the attacker or the implementer cannot run, stop and tell the
-  user. The implementer switches model in one case only: Haiku refuses
-  or declines the goal, and the launcher reruns that pass once on
-  DeepSeek and journals it (`IMPLEMENTER_FALLBACK`). Never on a rate
-  limit, an error, or a goal that ran out of fix rounds.
+  user. The implementer switches model in one case only: the primary
+  (`IMPLEMENTER_PRIMARY`, Haiku by default) refuses or declines the goal,
+  or DeepSeek is out of balance (402), and the launcher reruns that pass
+  once on the other model and journals it (`IMPLEMENTER_FALLBACK`).
+  Nothing switches back. Never on a rate limit, another error, a missing
+  key, or a goal that ran out of fix rounds.

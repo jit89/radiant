@@ -1,25 +1,34 @@
 #!/usr/bin/env bash
 #
 # claude-implement.sh — one IMPLEMENTATION pass via headless Claude Code.
-# Claude Haiku 5.5 implements; if Haiku's safeguards flag the pass or it
-# declines the goal, the same pass runs ONCE on DeepSeek V4 Flash through the
-# same harness (DeepSeek's Anthropic-compatible endpoint). Replaces
-# deepseek-code.sh (Codex) as run-goal.sh's implementer.
+# The primary (IMPLEMENTER_PRIMARY: Claude Haiku 5.5 or DeepSeek Flash, through
+# DeepSeek's Anthropic-compatible endpoint) implements; if it refuses the pass,
+# declines the goal, or (DeepSeek) is out of balance, the same pass runs ONCE on
+# the other one through the same harness, and nothing switches back
+# (docs/features/deepseek-primary). Replaces deepseek-code.sh (Codex) as
+# run-goal.sh's implementer.
 #
 # This file owns the implementer prompt. Do not fork it.
 #
 # Usage:
 #   claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... [--deny-write PATH]... <handoff.md>
-#   claude-implement.sh --smoke     (IMPLEMENTER_SMOKE_PROVIDER=haiku|deepseek)
+#   claude-implement.sh --smoke     (the primary, or IMPLEMENTER_SMOKE_PROVIDER=haiku|deepseek)
 #
 # Optional env:
 #   IMPLEMENTER_MODEL           default claude-haiku-5-5
 #   IMPLEMENTER_EFFORT          default xhigh
-#   IMPLEMENTER_FALLBACK        deepseek (default) | none (empty also disables)
-#   DEEPSEEK_MODEL              default deepseek-v4-flash
+#   IMPLEMENTER_PRIMARY         haiku (default, also when empty) | deepseek;
+#                               anything else exits 1
+#   IMPLEMENTER_FALLBACK        on (default; `deepseek` and `haiku` also mean on)
+#                               | none or empty: off; anything else exits 1
+#   DEEPSEEK_MODEL              default deepseek-flash
+#   DEEPSEEK_EFFORT             --effort on DeepSeek passes (unset: Claude Code
+#                               sends high)
+#   DEEPSEEK_PRICE_MISS / _HIT / _OUT  USD per 1M tokens, default the published
+#                               deepseek-flash peak prices 0.30 / 0.006 / 1.20
 #   DEEPSEEK_ANTHROPIC_BASE_URL default https://api.deepseek.com/anthropic
 #   IMPLEMENTER_ALLOWED_DOMAINS comma list the sandbox may reach (default none)
-#   IMPLEMENTER_MAX_BUDGET_USD  passed as --max-budget-usd when set
+#   IMPLEMENTER_MAX_BUDGET_USD  passed as --max-budget-usd when set, Haiku only
 #   IMPLEMENTER_DRY_RUN=1       print the command, call nothing
 #   CW_OUT_DIR                  write raw output, .err and report there and
 #                               delete none (run-goal.sh passes its run
@@ -30,17 +39,23 @@
 #
 # Result lines (stdout):
 #   IMPLEMENTER_RESULT: ok | rate_limited (exit N) | declined (<provider>)
-#                       | flagged (<provider>) | error (...) | dry_run
+#                       | flagged (<provider>) | balance (deepseek) | error (...)
+#                       | dry_run
 #   THREAD_ID: haiku:<uuid> | deepseek:<uuid>
 #   IMPLEMENTER_STATUS: DONE | BLOCKED | DECLINED | MISSING
 #   IMPLEMENTER_MODEL: <the model that produced the final result>
-#   IMPLEMENTER_FALLBACK: haiku -> deepseek (<refusal|declined>)   only when it ran
-#   IMPLEMENTER_COST_USD: <envelope total_cost_usd: a client-side estimate, and
-#                         on a resumed thread the whole conversation's total>
+#   IMPLEMENTER_FALLBACK: <primary> -> <secondary> (<refusal|declined|balance>)
+#                         only when it ran, followed by
+#   IMPLEMENTER_FALLBACK_FROM: <primary THREAD_ID> COST_USD=<x> COST_BASIS=thread
+#   IMPLEMENTER_COST_USD: the thread's cost so far: Haiku's envelope
+#                         total_cost_usd (a client-side estimate); DeepSeek's
+#                         modelUsage tokens at the peak list price (an upper
+#                         bound; Claude Code's own figure is ~17x)
+#   IMPLEMENTER_COST_BASIS: thread
 #   IMPLEMENTER_TOKENS: in=<n> out=<n> cache_read=<n> cache_write=<n>
 #   RETURN_HANDOFF / REPORT / LOG / stderr: paths
 # `ok` covers DONE, BLOCKED and MISSING: the host assesses the tree either way.
-# Exit: 0 ok, 75 rate_limited, 76 declined/flagged with no fallback left,
+# Exit: 0 ok, 75 rate_limited, 76 declined/flagged/balance with no fallback left,
 # 2 a thread this launcher does not own, else the error code.
 #
 # ISOLATION. Both providers run with:
@@ -72,10 +87,25 @@ source "$HERE/lib/cache.sh"
 
 MODEL="${IMPLEMENTER_MODEL:-claude-haiku-5-5}"
 EFFORT="${IMPLEMENTER_EFFORT:-xhigh}"
-# `-` not `:-`: an explicitly empty value disables the fallback.
-FALLBACK="${IMPLEMENTER_FALLBACK-deepseek}"
-[[ "$FALLBACK" == "none" ]] && FALLBACK=""
-DS_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-flash}"
+# The provider a new goal starts on; the other one is the secondary. Only these
+# two values: a typo must not become a normal walk on the other model.
+PRIMARY="${IMPLEMENTER_PRIMARY:-haiku}"
+case "$PRIMARY" in
+  haiku|deepseek) ;;
+  *) echo "IMPLEMENTER_RESULT: error (IMPLEMENTER_PRIMARY must be haiku or deepseek, not '$PRIMARY')"; exit 1 ;;
+esac
+# `-` not `:-`: an explicitly empty value disables the fallback. `deepseek`
+# (the old default) and `haiku` still mean on.
+FALLBACK="${IMPLEMENTER_FALLBACK-on}"
+case "$FALLBACK" in
+  ""|none) FALLBACK="" ;;
+  on|deepseek|haiku) FALLBACK="on" ;;
+  *) echo "IMPLEMENTER_RESULT: error (IMPLEMENTER_FALLBACK must be on, none or empty, not '$FALLBACK')"; exit 1 ;;
+esac
+DS_MODEL="${DEEPSEEK_MODEL:-deepseek-flash}"
+# Sent as --effort, which Claude Code passes on as output_config.effort (step 0b
+# of docs/features/deepseek-primary). Unset, Claude Code sends `high`.
+DS_EFFORT="${DEEPSEEK_EFFORT:-}"
 DS_BASE="${DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
 KEYS_DIR="$HOME/.cache/claude-coding-workflow/keys"
 
@@ -86,7 +116,7 @@ ADD_DIRS=()
 # Absolute paths the sandbox must not write (sandbox.filesystem.denyWrite): in a
 # parallel walk, the shared .git paths that belong to the walker and to the
 # other goals of the wave (run-goals.sh resolves them). Every pass of this run,
-# the DeepSeek fallback included, gets the same list.
+# the fallback included, gets the same list.
 DENY_WRITES=()
 # Absolute paths the sandbox must not read, on top of lib/secret-paths.txt:
 # the house's run folders, Grok verdicts, logs, and other goals' handoff
@@ -177,6 +207,9 @@ env_unsets() {
   printf '%s\n' -u ANTHROPIC_BASE_URL
   # The house's own folder settings are for this launcher, not the model's shell.
   printf '%s\n' -u CW_OUT_DIR -u CW_KEEP_RAW -u CW_PRUNE_DAYS
+  # Effort is set by this launcher only (--effort); a value left in the user's
+  # shell would change it unseen.
+  printf '%s\n' -u CLAUDE_CODE_EFFORT_LEVEL
   for name in $(compgen -e); do
     [[ "$name" != GIT_CONFIG_* ]] || continue
     if grep -qiE '(^|_)(API)?KEY(_|$)|(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)' <<<"$name"; then
@@ -253,7 +286,7 @@ out_dir() {
 }
 
 # Sets RAW (envelope), ERRF (stderr), RC, CMD_SHOWN. RAWS keeps every pass's
-# pair: the unsaved-thread retry and the DeepSeek fallback each make a new one.
+# pair: the unsaved-thread retry and the fallback each make a new one.
 RAW=""
 ERRF=""
 RAWS=()
@@ -276,6 +309,7 @@ run_pass() {
       key_file="$KEY_FILE"
       envs+=("ANTHROPIC_BASE_URL=$DS_BASE")
       model_flags=(--bare --model "$DS_MODEL")
+      [[ -z "$DS_EFFORT" ]] || model_flags+=(--effort "$DS_EFFORT")
       ;;
   esac
   local session_flag=(--session-id "$sid")
@@ -284,8 +318,10 @@ run_pass() {
   for d in "${ADD_DIRS[@]+"${ADD_DIRS[@]}"}"; do
     if [[ -d "$d" ]]; then add_flags+=(--add-dir "$d"); fi
   done
+  # Haiku only: Claude Code prices DeepSeek at its own default (~17x the list
+  # price), so a budget would stop a DeepSeek pass early, as an error.
   local budget=()
-  [[ -z "${IMPLEMENTER_MAX_BUDGET_USD:-}" ]] || budget=(--max-budget-usd "$IMPLEMENTER_MAX_BUDGET_USD")
+  [[ -z "${IMPLEMENTER_MAX_BUDGET_USD:-}" || "$provider" != haiku ]] || budget=(--max-budget-usd "$IMPLEMENTER_MAX_BUDGET_USD")
   local allow=()
   [[ "$tools" != *Bash* ]] || allow=(--allowedTools Bash)
   local cmd=(
@@ -322,8 +358,27 @@ run_pass() {
   set -e
 }
 
-# classify — sets KIND (ok|flagged|rate_limited|error|declined), STATUS,
+# api_status — the envelope's api_error_status as a string (a number or a
+# string there; both forms are seen), or nothing.
+api_status() {
+  python3 - "$RAW" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+s = d.get("api_error_status") if isinstance(d, dict) else None
+if s is not None:
+    print(str(s).strip())
+PY
+}
+
+# classify — sets KIND (ok|flagged|balance|rate_limited|error|declined), STATUS,
 # SESSION (from the envelope when present), ERR_DETAIL, and writes REPORT.
+# The order is the contract (docs/features/deepseek-primary step 5): a safety
+# flag, then DeepSeek's empty balance (402, whose text may say
+# insufficient_quota, which the rate-limit check would otherwise claim), then a
+# rate limit, then any other error.
 KIND=""
 STATUS="MISSING"
 SESSION=""
@@ -342,7 +397,14 @@ classify() {
     KIND="flagged"
     return 0
   fi
-  if is_transport_rate_limit "$RC" "$ERRF" "$RAW"; then
+  local status
+  status="$(api_status)"
+  if [[ "$PROVIDER" == deepseek && "$status" == 402 ]]; then
+    KIND="balance"
+    ERR_DETAIL="DeepSeek: insufficient balance (402)"
+    return 0
+  fi
+  if [[ "$status" == 429 || "$status" == 503 ]] || is_transport_rate_limit "$RC" "$ERRF" "$RAW"; then
     KIND="rate_limited"
     return 0
   fi
@@ -372,19 +434,51 @@ classify() {
   fi
 }
 
-# usage_lines — cost and token lines from the envelope, when it parses.
-usage_lines() {
-  python3 - "$RAW" <<'PY' 2>/dev/null || true
+# envelope_cost RAW PROVIDER [MODE] — the thread's cost so far (basis `thread`):
+# Haiku's envelope total_cost_usd, which on a resumed thread is the whole
+# conversation; for DeepSeek, its modelUsage (the thread's tokens across resumes,
+# step 0c) at DeepSeek's peak list price, because Claude Code prices a model it
+# does not know at its own default (~17x). Always peak: an upper bound, never an
+# under-estimate. MODE `lines` prints the result lines (cost, basis, this
+# invocation's tokens); `value` prints the cost alone (0 when there is none).
+envelope_cost() {
+  python3 - "$1" "$2" "${3:-lines}" "${DEEPSEEK_PRICE_MISS:-0.30}" \
+    "${DEEPSEEK_PRICE_HIT:-0.006}" "${DEEPSEEK_PRICE_OUT:-1.20}" <<'PY' 2>/dev/null || true
 import json, sys
+path, provider, mode, miss, hit, out = sys.argv[1:]
 try:
-    d = json.load(open(sys.argv[1]))
+    d = json.load(open(path))
 except Exception:
-    sys.exit(0)
+    d = None
 if not isinstance(d, dict):
+    if mode == "value":
+        print(0)
     sys.exit(0)
-cost = d.get("total_cost_usd")
+cost = None
+if provider == "deepseek":
+    mu = d.get("modelUsage")
+    if isinstance(mu, dict) and mu:
+        rows = [r for r in mu.values() if isinstance(r, dict)]
+        tok = lambda k: sum(int(r.get(k) or 0) for r in rows)
+        inp, cr, cw, o = (tok("inputTokens"), tok("cacheReadInputTokens"),
+                          tok("cacheCreationInputTokens"), tok("outputTokens"))
+    else:
+        # No modelUsage: this invocation's usage only (step 0c), still labelled
+        # `thread`; the rollup keeps a thread's largest line, so it never
+        # replaces a larger running total.
+        u = d.get("usage") or {}
+        inp, cr, cw, o = (int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                                       "cache_creation_input_tokens", "output_tokens"))
+    # input_tokens excludes cache reads (step 0c), so the terms are disjoint.
+    cost = ("%.6f" % (((inp + cw) * float(miss) + cr * float(hit) + o * float(out)) / 1e6)).rstrip("0").rstrip(".")
+elif d.get("total_cost_usd") is not None:
+    cost = d.get("total_cost_usd")
+if mode == "value":
+    print(cost if cost is not None else 0)
+    sys.exit(0)
 if cost is not None:
     print(f"IMPLEMENTER_COST_USD: {cost}")
+    print("IMPLEMENTER_COST_BASIS: thread")
 u = d.get("usage") or {}
 if u:
     print("IMPLEMENTER_TOKENS: in={} out={} cache_read={} cache_write={}".format(
@@ -395,6 +489,9 @@ PY
 
 PROVIDER=""
 FELL_BACK=""
+FROM_PROVIDER=""
+FROM_THREAD=""
+FROM_RAW=""
 RETURN_DOC=""
 emit_and_exit() {
   local model="$MODEL"
@@ -402,17 +499,24 @@ emit_and_exit() {
   case "$KIND" in
     ok) echo "IMPLEMENTER_RESULT: ok" ;;
     rate_limited) echo "IMPLEMENTER_RESULT: rate_limited (exit $RC)" ;;
-    declined|flagged) echo "IMPLEMENTER_RESULT: $KIND ($PROVIDER)" ;;
+    declined|flagged|balance) echo "IMPLEMENTER_RESULT: $KIND ($PROVIDER)" ;;
     *) echo "IMPLEMENTER_RESULT: error (${ERR_DETAIL:-exit $RC})" ;;
   esac
   echo "THREAD_ID: ${PROVIDER}:${SESSION}"
   echo "IMPLEMENTER_STATUS: ${STATUS}"
   echo "IMPLEMENTER_MODEL: ${model}"
-  [[ -z "$FELL_BACK" ]] || echo "IMPLEMENTER_FALLBACK: haiku -> deepseek (${FELL_BACK})"
-  usage_lines
+  if [[ -n "$FELL_BACK" ]]; then
+    echo "IMPLEMENTER_FALLBACK: ${FROM_PROVIDER} -> ${PROVIDER} (${FELL_BACK})"
+    # The primary's pass, priced too, under its own thread id exactly as this
+    # launcher prints thread ids: the walk's cost rollup counts it there.
+    local from_cost
+    from_cost="$(envelope_cost "$FROM_RAW" "$FROM_PROVIDER" value)"
+    echo "IMPLEMENTER_FALLBACK_FROM: ${FROM_THREAD} COST_USD=${from_cost:--} COST_BASIS=thread"
+  fi
+  envelope_cost "$RAW" "$PROVIDER"
   # Standalone, an ok pass's report holds everything worth keeping; under
   # CW_OUT_DIR the caller decides (an ok pass can still end in a wake). After
-  # usage_lines, which reads the envelope.
+  # envelope_cost, which reads the envelopes.
   local log="$RAW" errf="$ERRF"
   if [[ "$KIND" == ok && -z "${CW_OUT_DIR:-}" && "${CW_KEEP_RAW:-0}" != "1" ]]; then
     rm -f "${RAWS[@]}"
@@ -432,7 +536,7 @@ emit_and_exit() {
   case "$KIND" in
     ok) exit 0 ;;
     rate_limited) exit 75 ;;
-    declined|flagged) exit 76 ;;
+    declined|flagged|balance) exit 76 ;;
     *)
       tail -n 40 "$ERRF" >&2 2>/dev/null || true
       if [[ "$RC" -ne 0 ]]; then exit "$RC"; fi
@@ -443,7 +547,7 @@ emit_and_exit() {
 
 # --- smoke -----------------------------------------------------------------
 if [[ "$SMOKE" -eq 1 ]]; then
-  PROVIDER="${IMPLEMENTER_SMOKE_PROVIDER:-haiku}"
+  PROVIDER="${IMPLEMENTER_SMOKE_PROVIDER:-$PRIMARY}"
   case "$PROVIDER" in
     haiku) EFFORT="low"; smoke_model="$MODEL" ;;
     deepseek)
@@ -573,9 +677,15 @@ if [[ -n "$RESUME_ID" ]]; then
     exit 1
   fi
 else
-  PROVIDER=haiku
+  PROVIDER="$PRIMARY"
   SID="$(new_session_id)"
   MODE=new
+  # A DeepSeek pass with no DeepSeek key fails closed: never a quiet switch to
+  # Haiku (docs/features/deepseek-primary Q1). Haiku needs no key of its own.
+  if [[ "$PROVIDER" == deepseek && -z "$DS_KEY" ]]; then
+    echo "IMPLEMENTER_RESULT: error (no DeepSeek key: set DEEPSEEK_API_KEY in $HOUSE/.env)"
+    exit 1
+  fi
 fi
 
 # A resumed thread already holds the full instructions; it needs only the new handoff.
@@ -603,15 +713,28 @@ ${PROMPT}" "$TOOLS"
 fi
 classify "$SID"
 
-# One fallback, Haiku to DeepSeek, on a safety flag or a decline only. A rate
-# limit, an error, or a resumed DeepSeek thread gets none.
-if [[ "$PROVIDER" == haiku && ( "$KIND" == flagged || "$KIND" == declined ) \
-  && "$FALLBACK" == deepseek && -n "$DS_KEY" ]]; then
-  if [[ "$KIND" == flagged ]]; then FELL_BACK="refusal"; else FELL_BACK="declined"; fi
-  echo "claude-implement: ${MODEL} ${KIND} this goal; running it once on ${DS_MODEL}" >&2
-  PROVIDER=deepseek
+# One fallback, primary to secondary, on a safety flag, a decline, or (DeepSeek
+# only) an empty balance; on a new or a resumed primary pass. A rate limit,
+# another error, or a pass already on the secondary gets none: nothing switches
+# back (docs/features/deepseek-primary Q2).
+SECONDARY=haiku
+[[ "$PRIMARY" == haiku ]] && SECONDARY=deepseek
+if [[ "$PROVIDER" == "$PRIMARY" && ( "$KIND" == flagged || "$KIND" == declined || "$KIND" == balance ) \
+  && -n "$FALLBACK" && ( "$SECONDARY" == haiku || -n "$DS_KEY" ) ]]; then
+  case "$KIND" in
+    flagged) FELL_BACK="refusal"; why="refused it" ;;
+    declined) FELL_BACK="declined"; why="declined it" ;;
+    balance) FELL_BACK="balance"; why="could not run it: its provider is out of balance" ;;
+  esac
+  from_model="$MODEL"; to_model="$DS_MODEL"
+  if [[ "$PRIMARY" == deepseek ]]; then from_model="$DS_MODEL"; to_model="$MODEL"; fi
+  echo "claude-implement: ${from_model} ${KIND} this goal; running it once on ${to_model}" >&2
+  FROM_PROVIDER="$PROVIDER"
+  FROM_THREAD="${PROVIDER}:${SESSION}"
+  FROM_RAW="$RAW"
+  PROVIDER="$SECONDARY"
   SID="$(new_session_id)"
-  run_pass deepseek new "$SID" "A previous implementer declined this goal. Continue from the current HEAD; read the journal and git log first.
+  run_pass "$SECONDARY" new "$SID" "A previous implementer on this goal ${why}. Continue from the current HEAD; read the journal and git log first.
 
 ${PROMPT}" "$TOOLS"
   classify "$SID"

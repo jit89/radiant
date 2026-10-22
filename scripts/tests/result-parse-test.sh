@@ -171,6 +171,14 @@ check "declined implementer: implementer-declined" "implementer-declined" "$reas
 check "declined implementer: detail names the result" "yes" "$(has 'IMPLEMENTER_RESULT=declined (deepseek)' "$detail")"
 check "declined implementer: thread kept" "deepseek:u1" "$thread"
 
+# Out of balance with no fallback left: the same stop, worded to say so, and a
+# `balance` result is enough even without the exit code.
+stub claude-implement.sh 'printf "%s\n" "IMPLEMENTER_RESULT: balance (deepseek)" "THREAD_ID: deepseek:u5" \
+  "IMPLEMENTER_STATUS: MISSING" "IMPLEMENTER_MODEL: deepseek-flash"; exit 1'
+run_goal
+check "balance: implementer-declined" "implementer-declined" "$reason"
+check "balance: the stop names the balance" "yes" "$(has 'out of balance (DeepSeek 402)' "$detail")"
+
 # BLOCKED with its red test left uncommitted: the blocker is the reason, not the
 # dirty tree, and the status reaches the stop file.
 stub claude-implement.sh 'echo red >red_test.txt
@@ -227,6 +235,20 @@ journal="$(cat "$TMP/repo/docs/journal/example.md")"
 check "implemented record: model, fallback and cost journaled" "yes" \
   "$(has 'ORCHESTRATOR implemented g1-store r0 STATUS=DONE MODEL=deepseek-v4-flash FALLBACK=(haiku -> deepseek (refusal)) COST_USD=0.25' "$journal")"
 check "implemented record: still reaches review" "reviewer-error" "$reason"
+check "implemented record: no basis or FROM when the launcher prints none" "0" \
+  "$(grep 'COST_USD=0.25' <<<"$journal" | grep -c -E 'COST_BASIS=| FROM=' || true)"
+
+# The cost basis, and a fallback's primary pass with its own thread and cost
+# (docs/features/deepseek-primary step 7), reach the journal line.
+stub claude-implement.sh "$COMMIT"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: haiku:u3" "IMPLEMENTER_STATUS: DONE" \
+  "IMPLEMENTER_MODEL: claude-haiku-5-5" "IMPLEMENTER_FALLBACK: deepseek -> haiku (balance)" \
+  "IMPLEMENTER_FALLBACK_FROM: deepseek:u9 COST_USD=0.0042 COST_BASIS=thread" \
+  "IMPLEMENTER_COST_USD: 0.31" "IMPLEMENTER_COST_BASIS: thread"'
+run_goal
+journal="$(cat "$TMP/repo/docs/journal/example.md")"
+check "implemented record: basis and the primary's thread and cost" "yes" \
+  "$(has 'MODEL=claude-haiku-5-5 FALLBACK=(deepseek -> haiku (balance)) COST_USD=0.31 COST_BASIS=thread FROM=deepseek:u9 FROM_COST_USD=0.0042 FROM_COST_BASIS=thread' "$journal")"
 
 # Resume holds .claude/ to the baseline the stopped run took: a file planted
 # while the goal was paused is refused before any dispatch.

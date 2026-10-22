@@ -536,17 +536,25 @@ load_resume_state() {
 }
 
 # One record per implementer pass: who produced it and what it cost. A fallback
-# to DeepSeek must be visible in the journal and in `logs.sh warnings`, as a
-# reviewer fallback is. COST_USD is the launcher's client-side estimate, and on
-# a resumed thread the conversation's running total, not this pass alone.
+# must be visible in the journal and in `logs.sh warnings`, as a reviewer
+# fallback is. COST_USD is the launcher's estimate of the thread's cost so far
+# (COST_BASIS=thread: on a resumed thread the running total, not this pass
+# alone); on a fallback, FROM= names the primary's thread and FROM_COST_USD its
+# cost, so a goal's cost rolls up per thread (lib/cost-rollup.py).
 journal_implemented() {
-  local out="$1" status="$IMPL_STATUS" cost tokens sev=info payload
+  local out="$1" status="$IMPL_STATUS" cost basis from from_raw tokens sev=info payload
   cost="$(kv "$out" IMPLEMENTER_COST_USD)"
+  basis="$(kv "$out" IMPLEMENTER_COST_BASIS)"
   tokens="$(kv "$out" IMPLEMENTER_TOKENS)"
-  journal_line "## $(utc) — ORCHESTRATOR implemented ${GOAL_ID} r${ROUND} STATUS=${status:--} MODEL=${IMPL_MODEL:--}${IMPL_FALLBACK:+ FALLBACK=(${IMPL_FALLBACK})} COST_USD=${cost:--}"
+  from_raw="$(kv "$out" IMPLEMENTER_FALLBACK_FROM)"
+  from=""
+  if [[ -n "$from_raw" ]]; then
+    from=" FROM=${from_raw%% *} FROM_COST_USD=$(sed -n 's/.* COST_USD=\([^ ]*\).*/\1/p' <<<"$from_raw") FROM_COST_BASIS=$(sed -n 's/.* COST_BASIS=\([^ ]*\).*/\1/p' <<<"$from_raw")"
+  fi
+  journal_line "## $(utc) — ORCHESTRATOR implemented ${GOAL_ID} r${ROUND} STATUS=${status:--} MODEL=${IMPL_MODEL:--}${IMPL_FALLBACK:+ FALLBACK=(${IMPL_FALLBACK})} COST_USD=${cost:--}${basis:+ COST_BASIS=${basis}}${from}"
   [[ -z "$IMPL_FALLBACK" ]] || sev=warning
-  payload="$(python3 -c 'import json,sys; print(json.dumps(dict(zip(("status","model","fallback","cost_usd","tokens","thread"), sys.argv[1:]))))' \
-    "${status:-}" "${IMPL_MODEL:-}" "${IMPL_FALLBACK:-}" "${cost:-}" "${tokens:-}" "${THREAD_ID:-}")"
+  payload="$(python3 -c 'import json,sys; print(json.dumps(dict(zip(("status","model","fallback","cost_usd","tokens","thread","cost_basis","fallback_from"), sys.argv[1:]))))' \
+    "${status:-}" "${IMPL_MODEL:-}" "${IMPL_FALLBACK:-}" "${cost:-}" "${tokens:-}" "${THREAD_ID:-}" "${basis:-}" "${from_raw:-}")"
   events_append --event implemented --severity "$sev" --goal "$GOAL_ID" --round "$ROUND" \
     --base-sha "$BASE_SHA" \
     --summary "implemented ${GOAL_ID} r${ROUND} STATUS=${status:--} MODEL=${IMPL_MODEL:--}${IMPL_FALLBACK:+ FALLBACK=(${IMPL_FALLBACK})}" \
@@ -859,7 +867,8 @@ else
 fi
 
 # The Claude launcher needs no key here: Haiku uses the Claude login, and the
-# DeepSeek fallback loads its own key (a missing one only disables it).
+# launcher loads the DeepSeek key itself (a missing one disables the fallback
+# to DeepSeek, or, with IMPLEMENTER_PRIMARY=deepseek, stops the goal).
 if [[ "$IMPLEMENTER" == codex ]] && ! load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env"; then
   die_gate "DEEPSEEK_API_KEY is not set (target .env or $HOUSE/.env). Do not paste it."
 fi
@@ -1007,8 +1016,8 @@ while :; do
     if [[ "$ds_rc" -eq 75 || "$LAST_IMPL" == rate_limited* ]]; then
       wake "rate_limited" "${IMPL_KEY}=$LAST_IMPL"
     fi
-    if [[ "$ds_rc" -eq 76 || "$LAST_IMPL" == declined* || "$LAST_IMPL" == flagged* ]]; then
-      wake "implementer-declined" "${IMPL_KEY}=$LAST_IMPL — the implementer refused or declined this goal and no fallback was left (IMPLEMENTER_FALLBACK, a DeepSeek key). Nothing was assessed. Report: $(kv "$DS_OUT" REPORT)"
+    if [[ "$ds_rc" -eq 76 || "$LAST_IMPL" == declined* || "$LAST_IMPL" == flagged* || "$LAST_IMPL" == balance* ]]; then
+      wake "implementer-declined" "${IMPL_KEY}=$LAST_IMPL — the implementer refused, declined or was out of balance (DeepSeek 402) on this goal and no fallback was left (IMPLEMENTER_FALLBACK, a DeepSeek key, or the secondary already ran). Nothing was assessed. Report: $(kv "$DS_OUT" REPORT)"
     fi
     if [[ -z "$LAST_IMPL" ]]; then
       wake "implementer-error" "no ${IMPL_KEY} line (rc=$ds_rc). stderr: $DS_OUT.wrap"

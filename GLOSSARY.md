@@ -21,7 +21,7 @@ Headless Grok. Read-only critic of a locked plan (Phase 2) and of the Architect'
 Not: "reviewer" (that word is reserved for the goal reviewer)
 
 **Implementer**
-Claude Haiku 5.5 in headless, sandboxed Claude Code (`claude-implement.sh`). Executes one goal under TDD. When Haiku refuses or declines the goal, the same pass reruns once on DeepSeek V4 Flash through the same harness.
+The primary model (`IMPLEMENTER_PRIMARY`: Claude Haiku 5.5 by default, or DeepSeek Flash) in headless, sandboxed Claude Code (`claude-implement.sh`). Executes one goal under TDD. See **Implementer fallback** for the one switch to the other model.
 
 **Goal reviewer**
 Headless Claude Opus 5.5 judging an implementer diff until the goal is done. A separate session with no access to the Architect's conversation; it needs `--add-dir` for the run dir or it cannot read the diff and proof it is judging.
@@ -85,7 +85,7 @@ A fix round whose findings are the host proof's output (redacted, the first 40 a
 Not: a review FIX; "retry"
 
 **Implementer fallback**
-The one model switch the implementer makes: Haiku's safeguards flag the pass, or it ends `IMPLEMENTER_STATUS: DECLINED`, and the launcher reruns it once on DeepSeek in a fresh session, journaled as `FALLBACK=`. Never on a rate limit.
+The one model switch the implementer makes, primary to secondary, on a new or a resumed primary pass: a safety flag on the pass, `IMPLEMENTER_STATUS: DECLINED`, or DeepSeek's empty balance (HTTP 402). The launcher reruns it once on the other model in a fresh session, journaled as `FALLBACK=(<from> -> <to> (refusal|declined|balance))`, with the primary's thread and cost as `FROM=`. Nothing switches back. Never on a rate limit (429, 503), another error, or a missing key.
 Not: "retry", "quota fallback"
 
 **Codex home lock**

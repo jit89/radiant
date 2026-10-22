@@ -766,3 +766,11 @@ hold nothing. Shape: the walker holds `caffeinate -i -w $$` for the walk
 (idle sleep only, so a closed lid still sleeps), and `run-goal.sh` does the
 same when run alone. A test asserts the assertion exists while a walk runs,
 found by the helper's pid as in `650eb39`.
+
+Item 22 status (2026-10-22): plan `a7aefd7`, step 0 `5d2a829`, the build
+(default still `haiku`) reviewed DONE. Left for the flip commit, after the
+rbtree comparison walk: the "who is primary" wording (CLAUDE.md roles table,
+README intro, the run-goal skill description), and a goal that fell back to
+DeepSeek and resumes after the flip would treat its `deepseek:` thread as the
+primary (one switch back possible). Outside the plan: the `/walk-status` cost
+(`events.py`) ignores `fallback_from`, so it undercounts a goal that fell back.

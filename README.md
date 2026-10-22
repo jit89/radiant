@@ -100,8 +100,9 @@ envelope checks, and warns if a borrowed skill is missing or the clone
 has drifted from its pin.
 
 Copy `.env.example` to `.env` in this repo **or** the target repo and set
-`DEEPSEEK_API_KEY` (the implementer's fallback; without it a refused goal
-stops instead). Never commit `.env`. Never paste the key into chat.
+`DEEPSEEK_API_KEY` for the DeepSeek implementer. It is the fallback by
+default, where without it a refused goal stops instead; with
+`IMPLEMENTER_PRIMARY=deepseek` it is required, and without it every goal stops. Never commit `.env`. Never paste the key into chat.
 
 ## Prerequisites
 
@@ -111,8 +112,10 @@ stops instead). Never commit `.env`. Never paste the key into chat.
 - Grok CLI, signed in (`grok login`). `grok-review.sh` finds it on `PATH`
   or at `~/.grok/bin/grok`; override with `GROK_BIN`.
 - `DEEPSEEK_API_KEY` from [platform.deepseek.com](https://platform.deepseek.com/api_keys),
-  for the fallback. It runs through DeepSeek's Anthropic-compatible endpoint
-  (`https://api.deepseek.com/anthropic`), model `deepseek-v4-flash`.
+  for the DeepSeek implementer (the fallback by default; required with
+  `IMPLEMENTER_PRIMARY=deepseek`). It runs through DeepSeek's
+  Anthropic-compatible endpoint (`https://api.deepseek.com/anthropic`), model
+  `deepseek-flash`.
 - Only for `IMPLEMENTER=codex`: Codex CLI ≥ 0.144.
 
 The implementer runs with Claude Code's sandbox on (writes only inside the
@@ -187,12 +190,15 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `IMPLEMENTER` | `claude` | `codex` selects the legacy `deepseek-code.sh` |
 | `IMPLEMENTER_MODEL` | `claude-haiku-5-5` | Implementer |
 | `IMPLEMENTER_EFFORT` | `xhigh` | Implementer `--effort` |
-| `IMPLEMENTER_FALLBACK` | `deepseek` | One rerun on DeepSeek when Haiku refuses or declines (`none` = off) |
+| `IMPLEMENTER_PRIMARY` | `haiku` | `deepseek` implements first, with Haiku as the fallback; any other value stops |
+| `IMPLEMENTER_FALLBACK` | `on` | One rerun on the other model when the primary refuses, declines or (DeepSeek) is out of balance (`none` or empty = off; the old `deepseek` still means on) |
 | `IMPLEMENTER_ALLOWED_DOMAINS` | empty | Comma list of hosts the sandbox may reach |
-| `IMPLEMENTER_MAX_BUDGET_USD` | unset | `--max-budget-usd` per pass |
+| `IMPLEMENTER_MAX_BUDGET_USD` | unset | `--max-budget-usd` per Haiku pass (not DeepSeek: Claude Code misprices it) |
 | `IMPLEMENTER_DRY_RUN=1` | off | Print the Claude command only |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Fallback model (and the Codex launcher's) |
-| `DEEPSEEK_ANTHROPIC_BASE_URL` | `https://api.deepseek.com/anthropic` | Fallback endpoint |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | The DeepSeek implementer (the Codex launcher keeps its own `deepseek-v4-flash` default) |
+| `DEEPSEEK_EFFORT` | unset | DeepSeek `--effort` (unset: Claude Code sends `high`) |
+| `DEEPSEEK_PRICE_MISS` / `_HIT` / `_OUT` | `0.30` / `0.006` / `1.20` | USD per 1M tokens for the DeepSeek cost line (the published peak prices) |
+| `DEEPSEEK_ANTHROPIC_BASE_URL` | `https://api.deepseek.com/anthropic` | The DeepSeek implementer's endpoint |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/` | Codex launcher only: OpenAI-compatible endpoint |
 | `DEEPSEEK_DRY_RUN=1` | off | Codex launcher only: print the command |
 | `DEEPSEEK_CODEX_HOME` | `~/.cache/claude-coding-workflow/codex` | Codex launcher only: isolated state |
