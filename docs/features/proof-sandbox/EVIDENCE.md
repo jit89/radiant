@@ -306,3 +306,14 @@ it commits through (walked).
   `/tmp` and was denied `file-read-metadata` on `/tmp` (the temp-area rule);
   with metadata-only on `/tmp` and `/private/tmp` under `--setup` it is rc 0,
   and the pre-check finds no outside names.
+
+## The first live walk under the sandbox (2026-10-22)
+
+The rbtree `--jobs 3` walk at house `c5297ca` ran with the sandbox on. Every
+proof ran under the generated profile (`CW_PROOF_SANDBOX` unset, no
+`ORCHESTRATOR overrides` record): each goal's host proof, and the merged proofs at each
+integration. The proofs build with CMake and gcc-16 and run the
+ASan and UBSan builds. 7/7 goals were done, with no `proof-sandbox-*`, `proof-hardlink` or
+`secrets-in-checkout` stops. The local `git clone` hard-linked the object
+store, and the pre-check passed it as designed. `logs.sh warnings` and
+`errors` are empty for the walk. Details are in `docs/features/parallel-walker/EVIDENCE.md`, step 12b.

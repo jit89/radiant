@@ -702,3 +702,66 @@ git and python, or the checkout path (another checkout with the same content
 reuses the run): fine for a gate that runs both back to back in one shell.
 `scripts/tests/check-reuse-test.sh`. Not tested: a publish failing after its
 first step (the chain is the same `if`).
+
+## 20. No full suite rerun for doc-only changes (2026-10-17)
+
+User, 2026-10-17: a change to documentation only must not make `install.sh
+--check` (or the plain `install.sh` that ends with it) rerun the whole suite.
+Today `lib/tree-key.py` keys over every file of the house, so appending a
+journal entry after a green gate costs the full ~49 min again (seen on item 12:
+the gate passed, two doc entries were added, and the closing check reran it).
+
+Shape: `tree-key.py` leaves out files no test reads: `docs/**` (plans, review
+logs, journals, evidence, FUTURE-WORK) and the top-level `README.md`,
+`SETUP.md`, `CLAUDE.md`, `PLAN*.md`. It keeps everything under `scripts/`,
+`mods/`, `skills/` and any top-level file a test copies or reads
+(`GOALS.example.md`, `.gitignore`). The excluded set is a list in one place,
+with a test that fails if any test script names a path in it, so a later test
+that starts reading a doc file puts that file back in the key. Not "every
+`.md` file": skills and fixtures are Markdown that tests and agents read.
+
+## 21. GOAL-FORMAT "Registration points": a test glob breaks committed-red oracles (2026-10-22)
+
+The rule's example registers one test per file with a `foreach` over
+`tests/acceptance/*.c`. A plan whose oracles are all committed before the
+goals run (the house's own to-goals output) cannot do that: the scaffold
+goal's build would compile every later oracle, which calls API that does not
+exist yet, and fail. Found drafting the rbtree re-run (2026-10-22). What
+worked there: sources globbed, and each goal registers its oracle in a file of
+its own (`tests/register/<name>.cmake`, one `rbtree_add_acceptance(<name>)`
+call) that the harness includes by glob. Fix: replace the example with that
+one-file-per-goal pattern, and say why a glob over the oracles themselves is
+wrong when they are committed up front. Prose only; to-goals quiz wording to
+match.
+
+## 22. DeepSeek as the primary implementer, Haiku second (2026-10-22)
+
+User, 2026-10-22, after reading the DeepSeek API docs: DeepSeek implements
+first and Haiku 5.5 is the second implementer. Reverses the 2026-10-10 lock.
+Agreed shape, to crucible after the rbtree --jobs 3 walk is recorded:
+- a switch `IMPLEMENTER_PRIMARY=deepseek|haiku` in `claude-implement.sh`;
+- the fallback runs on a refusal, a decline, or DeepSeek's 402 (insufficient
+  balance); a 429 or 503 is a rate limit and stops as today, no switch;
+- the model id moves to `deepseek-flash` (`deepseek-v4-flash` is retired and
+  aliased to DeepSeek-V4.1-Flash-1017); decide the effort (DeepSeek maps
+  `xhigh` to `high`; `max` is its top; the DeepSeek pass passes no
+  `--effort` today);
+- every goal's code now goes to DeepSeek (user accepted);
+- proven by re-running the rbtree DAG with DeepSeek primary against the Haiku
+  walk of 2026-10-22: fix rounds, review verdicts, cost, time.
+Docs facts (api-docs.deepseek.com, read 2026-10-22): Anthropic endpoint
+`https://api.deepseek.com/anthropic`; thinking on by default at `high`;
+`reasoning_content` must be passed back on tool-call turns or the API returns
+400; 2500 concurrent requests per account (429 beyond); peak pricing Beijing
+09-12 and 14-18 on weekdays, off-peak half price.
+
+## 23. The walker keeps the host awake (2026-10-22)
+
+The rbtree `--jobs 3` walk lost 24 min to an idle sleep on battery
+(05:49–06:13 UTC; parallel-walker EVIDENCE step 12b). Nothing failed. The run
+paused and resumed on the user's wake. `grok-review.sh` already holds
+`caffeinate -i` for its run (item 11.1); `run-goals.sh` and `run-goal.sh`
+hold nothing. Shape: the walker holds `caffeinate -i -w $$` for the walk
+(idle sleep only, so a closed lid still sleeps), and `run-goal.sh` does the
+same when run alone. A test asserts the assertion exists while a walk runs,
+found by the helper's pid as in `650eb39`.

@@ -150,3 +150,45 @@ Logged for later:
 
 Not yet measured: a full parallel walk to the end. That needs a harness that
 globs its sources and tests, per the new rule.
+
+## Step 12b: the full parallel walk (2026-10-22)
+
+The same DAG again, in `~/dogfood/rbtree-par2`: a fresh clone at `02f35a4`
+plus one plan amendment (`990e342`, user signed off). Under the amendment, g1's harness
+globs `src/*.c` and includes one `tests/register/<name>.cmake` per goal.
+`tests/acceptance/*.c` is not globbed, because the later oracles are committed
+red. Proofs and oracles were unchanged. `run-goals.sh --jobs 3` at house commit
+`c5297ca` (item 12), with real Haiku 5.5 implementers and Opus 5.5 reviewers.
+It was the first walk with every proof under the proof sandbox.
+
+| Wave | Goals | Start → integrated (UTC) | Notes |
+|---|---|---|---|
+| 1 | g1-scaffold | 05:36:14 → 05:42:20 | DONE r0 |
+| 2 | g2-validate | 05:42:22 → 05:49:01 | DONE r0 |
+| 3 | g3-insert | 05:49:04 → 06:18:59 | DONE r0; host asleep 05:49:02–06:13:25 |
+| 4 | g4-walk, g5-search, g7-teardown | 06:19:03 → all finished 06:23:56; integrated 06:24:31, 06:25:15, 06:26:07 | no conflict |
+| 5 | g6-remove | 06:26:10 → 06:34:01 | DONE r0 |
+
+- **The walk ran to the end and exited 0, with 7/7 goals done.** Wave 4's three goals
+  merged one after another with no conflict: each added only a new `src/`
+  file and its own registration file. This is the case that stopped g5 and
+  g7 on 2026-10-16. The harness rule (GOAL-FORMAT "Registration points")
+  holds. Its example (a glob over the test files) does not fit oracles
+  committed up front (FUTURE-WORK item 21).
+- **Every goal reviewed DONE on its first pass**, with no fix rounds and no fallback.
+  This is the first live measure of the SIMPLER review heading (item 15). All 7 verdicts
+  answered it and found nothing material, so it added 0 fix rounds. The item 3 M2
+  fix-round check was not exercised, because no fix round ran.
+- **Haiku cost:** g1 0.110, g2 0.103, g3 0.050, g4 0.036, g5 0.036,
+  g6 0.050, g7 0.048 USD; 0.433 in all (client-side estimates).
+- **Integrations:** waves 1–3 took 10–30 s; wave 4 took 35, 44 and 52 s; g6 took 83 s.
+  Integration time grows with the merged proofs of every goal done so far, all now under the sandbox.
+- **`join_wait`, wave 4:** g4 85 s, g5 84 s, g7 2 s (the slowest).
+- **Time:** 57m51s on the clock, of which 24m23s was the host in idle sleep
+  on battery (pmset: `Entering Sleep state due to 'Idle Sleep'` at 05:49:02
+  UTC, user wake at 06:13:25). g3's run was dispatched in a short dark wake
+  and its implementer started after the wake. Nothing failed across the sleep. Awake time was
+  about 33.5 min, against 33 min for the sequential walk of 2026-10-13. The
+  linear part g1–g3 took about 18m17s awake, against 16m51s on 2026-10-16. Wave 4 ran
+  three goals in 7m04s including integration. The walker holds no
+  `caffeinate` (FUTURE-WORK item 23).
