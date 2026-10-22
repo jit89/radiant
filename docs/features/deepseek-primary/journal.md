@@ -20,3 +20,6 @@ Grok round 5: REVISE, 2 findings (fix rounds have no ids line; a fallback's prim
 
 ## 2026-10-22T08:34:20Z — ARCHITECT round 6
 Grok round 6 (narrow, user-ordered): REVISE, 2 findings in the fallback cost (thread id prefix, a low fallback envelope replacing the total); both taken. Asked the user for sign-off.
+
+## 2026-10-22T08:46:00Z — ARCHITECT step 0
+Measured (EVIDENCE.md): 0a DeepSeek refuses a bare moderated question with a varying HTTP 200 reply (no API error, no stable signature: no deepseek-refusal.py), and in the implementer framing does the task and reports DONE; 0b Claude Code sends output_config.effort to DeepSeek from --effort or CLAUDE_CODE_EFFORT_LEVEL (default high), so DEEPSEEK_EFFORT uses --effort; it caps an unknown model at max_tokens 32000; 0c cache reads are reported, input_tokens excludes them, usage is per invocation and modelUsage is the thread total, so DeepSeek cost is priced from modelUsage with basis thread; 0d 402 not provokable, keyed on 402/"402" with fixtures.
