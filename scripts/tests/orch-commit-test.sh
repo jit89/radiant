@@ -80,8 +80,9 @@ check "user file still staged after walk" "source.py" \
 
 # AWAKE_PROBE: which ancestor (run-goals.sh or run-goal.sh) holds a
 # `caffeinate -i -w <its pid>` while this stub runs (FUTURE-WORK item 23).
-AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; echo "$p" >"$AWAKE_OUT.pid"; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
-export AWAKE_OUT="$TMP/awake"
+AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 && "$p" != "$AWAKE_TOP" ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; echo "$p" >"$AWAKE_OUT.pid"; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
+# The walk stops at this test: run-all.sh above it holds an assertion too.
+export AWAKE_OUT="$TMP/awake" AWAKE_TOP=$$
 for setting in on off; do
   rm -f "$AWAKE_OUT"
   make_repo "$TMP/walk-$setting"

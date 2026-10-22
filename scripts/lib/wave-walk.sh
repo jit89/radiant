@@ -784,8 +784,9 @@ walk_check
 
 # The proof sandbox (docs/features/proof-sandbox/PLAN.md step 4, Amendment 1
 # B, D): once per walk, before any worktree is cut or set up (setup has the
-# network). Each member's run-goal.sh checks again and journals an override
-# as its own goal's record; the walker only prints it.
+# network). Each member's run-goal.sh checks the .env files again and
+# journals an override as its own goal's record; the walker only prints it.
+# Members skip the self-test itself (CW_PROOF_SANDBOX_CHECKED=1, below).
 if [[ "${CW_ALLOW_DOTENV:-}" == 1 ]]; then
   echo "NOTE: CW_ALLOW_DOTENV=1 — .env files in the checkouts stay readable to proofs and implementers"
 else
@@ -961,7 +962,7 @@ while :; do
     deny_list "$g" "$WAVE_DIR/$g.deny"
     : >"$WAVE_DIR/$g.ptr"
     rm -f "$WAVE_DIR/$g.result"
-    ( cd "$(wt_path "$g")" && exec env CW_DENY_WRITE_FILE="$WAVE_DIR/$g.deny" CW_PROOF_DEPS="$DEPS_DIR" CW_PROOF_NETWORK="$PROOF_NET" \
+    ( cd "$(wt_path "$g")" && exec env CW_PROOF_SANDBOX_CHECKED=1 CW_DENY_WRITE_FILE="$WAVE_DIR/$g.deny" CW_PROOF_DEPS="$DEPS_DIR" CW_PROOF_NETWORK="$PROOF_NET" \
       CW_PIN_ADMIN="$(goal_admin "$g")" CW_PIN_COMMON="$GIT_COMMON_P" \
       RUN_GOAL_STOP_PTR="$WAVE_DIR/$g.ptr" "$RUN_GOAL" --worktree "$MAIN_ROOT" \
       --base "$WAVE_BASE" --result "$WAVE_DIR/$g.result" --handoff-dir "${HANDOFFS[$hi]}" "$g" ) &

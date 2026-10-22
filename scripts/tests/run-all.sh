@@ -23,6 +23,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/cache.sh
+source "$HERE/../lib/cache.sh"
 JOBS="${CW_TEST_JOBS:-4}"
 RESULTS=""
 names=()
@@ -39,6 +41,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "-j needs a positive number: $JOBS" >&2; exit 2; }
+# A full run takes ~17 min: an idle-asleep Mac pauses it (2026-10-22: 48 min).
+cw_keep_awake
 
 G=""
 
@@ -155,7 +159,9 @@ run_one() {
   name="$(basename "$t")"
   d="$G/$name"
   mkdir -p "$d/tmp" "$d/home"
-  "${START_TEST[@]}" env "${UNSETS[@]}" TMPDIR="$d/tmp" HOME="$d/home" \
+  # No denial listing after a red proof (lib/proof.sh): ~4 s each, and only
+  # proof-test.sh reads it, which turns it back on.
+  "${START_TEST[@]}" env "${UNSETS[@]}" TMPDIR="$d/tmp" HOME="$d/home" CW_PROOF_DENIALS=off \
     bash "$t" </dev/null >"$d/out" 2>&1 &
   pid=$!
   echo "$pid" >"$d/pid"

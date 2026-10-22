@@ -127,7 +127,8 @@ proof_exec() {
     env -u SSH_AUTH_SOCK "${unsets[@]+"${unsets[@]}"}" "${envs[@]}" bash -c "$cmd" </dev/null || rc=$?
   # Diagnosis only, never a red signal: the sandbox's denials in the run's
   # window. The kernel log names no run, so other proofs may show here too.
-  if [[ "$rc" -ne 0 && "$rc" -ne 124 ]]; then
+  # CW_PROOF_DENIALS=off skips it (~4 s a red proof; run-all.sh sets it).
+  if [[ "$rc" -ne 0 && "$rc" -ne 124 && "${CW_PROOF_DENIALS:-on}" != off ]]; then
     sleep 3
     { echo
       echo "--- proof sandbox denials logged during this proof (may include other proofs running at the same time) ---"

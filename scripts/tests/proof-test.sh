@@ -153,14 +153,26 @@ check "sandbox off: the override is journaled" yes \
   "$(git -C "$TMP/repo" log -p --all -- docs/journal/example.md 2>/dev/null | grep -q 'proof-sandbox=off' || grep -q 'proof-sandbox=off' "$TMP/repo/docs/journal/example.md"; [[ $? -eq 0 ]] && echo yes || echo no)"
 
 # 3c. A proof the sandbox refuses: red, and its output ends with the denials
-#     the kernel logged (diagnosis only).
-proof 'touch "$HOME/escape-attempt"; exit 1'
+#     the kernel logged (diagnosis only). run-all.sh turns the listing off.
+CW_PROOF_DENIALS=on proof 'touch "$HOME/escape-attempt"; exit 1'
 pf="$(ls -t "$HOME/.cache/claude-coding-workflow/runs"/run-goal-g1-store-*/proof-g1-store-r0.txt 2>/dev/null | head -n1)"
 check "denied proof: the denial listing is appended" yes \
   "$(grep -q -- '--- proof sandbox denials' "$pf" 2>/dev/null && echo yes || echo no)"
 check "denied proof: it names the denied path" yes \
   "$(sed -n '/--- proof sandbox denials/,$p' "$pf" 2>/dev/null | grep -q 'escape-attempt' && echo yes || echo no)"
 check "denied proof: the escape never happened" no "$([[ -e "$HOME/escape-attempt" ]] && echo yes || echo no)"
+CW_PROOF_DENIALS=off proof 'touch "$HOME/escape-attempt"; exit 1'
+pf="$(ls -t "$HOME/.cache/claude-coding-workflow/runs"/run-goal-g1-store-*/proof-g1-store-r0.txt 2>/dev/null | head -n1)"
+check "CW_PROOF_DENIALS=off: no denial listing" no \
+  "$(grep -q -- '--- proof sandbox denials' "$pf" 2>/dev/null && echo yes || echo no)"
+check "CW_PROOF_DENIALS=off: still red, as proof-red" proof-red "$reason"
+
+# 3d. Only a --jobs member skips the self-test (the walker ran it): a lone run
+#     ignores CW_PROOF_SANDBOX_CHECKED and still refuses a broken sandbox.
+mv "$HOUSE/scripts/lib/proof-sandbox.py" "$HOUSE/scripts/lib/proof-sandbox.py.away"
+CW_PROOF_SANDBOX_CHECKED=1 proof 'exit 0'
+mv "$HOUSE/scripts/lib/proof-sandbox.py.away" "$HOUSE/scripts/lib/proof-sandbox.py"
+check "a lone run ignores CW_PROOF_SANDBOX_CHECKED: the self-test still stops it" yes "$(has 'proof-sandbox-unavailable')"
 
 # 4. Proof code that edits a tracked source file.
 proof 'echo changed >impl.txt'

@@ -779,9 +779,13 @@ fi
 if proof_sandbox_off; then
   PSB_NOTE+=" proof-sandbox=off"
   echo "NOTE: CW_PROOF_SANDBOX=off — proofs run unsandboxed"
+elif [[ -n "$WT_MAIN" && "${CW_PROOF_SANDBOX_CHECKED:-}" == 1 ]]; then
+  : # a member of a --jobs walk: the walker ran the self-test for this walk
 elif ! sbx_why="$(proof_sandbox_selftest)"; then
   die_gate "proof-sandbox-unavailable: the proof sandbox self-test failed — ${sbx_why//$'\n'/; }. CW_PROOF_SANDBOX=off runs proofs unsandboxed, deliberately."
 fi
+# Read once: the implementer, the reviewer and proofs have no use for it.
+unset CW_PROOF_SANDBOX_CHECKED
 # proof_network: the walker's (read from the main checkout) in worktree mode.
 if [[ -n "$WT_MAIN" ]]; then
   PROOF_NET="${CW_PROOF_NETWORK:-none}"

@@ -369,8 +369,19 @@ sprun() { CW_PROOF_SANDBOX= prun "$@"; }
 
 pwalk_repo
 deps_before="$(ls "$HOME/.cache/claude-coding-workflow/deps" 2>/dev/null | grep -c '^walk-' || true)"
+# Each self-test leaves a line: who ran it (a member has --worktree).
+cp "$HOUSE/scripts/lib/proof-sandbox.sh" "$TMP/psb.sh.orig"
+cat >>"$HOUSE/scripts/lib/proof-sandbox.sh" <<'SH'
+eval "orig_$(declare -f proof_sandbox_selftest)"
+proof_sandbox_selftest() {
+  if [[ " $(ps -o command= -p $$) " == *" --worktree "* ]]; then echo member; else echo walker; fi >>"$CALLS/selftest"
+  orig_proof_sandbox_selftest
+}
+SH
 sprun --jobs 3
+cp "$TMP/psb.sh.orig" "$HOUSE/scripts/lib/proof-sandbox.sh"
 check "sandbox: a plain walk completes" 0 "$prc"
+check "sandbox: the self-test ran once, in the walker, not in its members" walker "$(paste -sd ' ' - <"$CALLS/selftest" 2>/dev/null)"
 check "sandbox: every goal done" "done done done done" "$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
 check "sandbox: the walk's dependency folder is removed at the end" "$deps_before" "$(ls "$HOME/.cache/claude-coding-workflow/deps" 2>/dev/null | grep -c '^walk-' || true)"
 

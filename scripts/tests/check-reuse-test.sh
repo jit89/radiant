@@ -39,6 +39,17 @@ cp -R "$HERE" "$H/scripts"
 rm -f "$H/scripts/tests/"*-test.sh
 printf '#!/usr/bin/env bash\necho a ran >>"%s/ran"\n' "$TMP" >"$H/scripts/tests/a-test.sh"
 printf '#!/usr/bin/env bash\necho b ran >>"%s/ran"\n' "$TMP" >"$H/scripts/tests/b-test.sh"
+# a-test also records what run-all gave it: a caffeinate -i -w held for one
+# of its ancestors (run-all.sh), and CW_PROOF_DENIALS. The walk stops at this
+# test's pid ($$, written in): an outer run-all holds an assertion too.
+cat >>"$H/scripts/tests/a-test.sh" <<SH
+p=\$\$; found=no
+for _ in 1 2 3 4 5 6 7 8; do
+  p="\$(ps -o ppid= -p "\$p" | tr -d ' ')"; [[ -n "\$p" && "\$p" != 1 && "\$p" != $$ ]] || break
+  if pgrep -f "^/usr/bin/caffeinate -i -w \$p\\\$" >/dev/null; then found="\$(ps -o command= -p "\$p" | grep -oE 'run-all\.sh' | head -n1)"; break; fi
+done
+echo "awake=\$found denials=\${CW_PROOF_DENIALS:-unset}" >"$TMP/env-seen"
+SH
 printf 'x\n' >"$H/tracked.txt"
 cp "$HERE/../GOALS.example.md" "$HERE/../.gitignore" "$H/"
 git -C "$H" init -q && git -C "$H" add -A && git -C "$H" commit -qm house
@@ -53,6 +64,7 @@ check "results kept" yes "$([[ -f "$LAST/a-test.sh.rc" && -f "$LAST/b-test.sh.ou
 check "keyed by this tree, with its fail count" "$(key) 0" "$(cat "$LAST/key" 2>/dev/null)"
 check "summary kept" yes "$(has 'fails=0' "$(tail -n1 "$LAST/summary" 2>/dev/null)")"
 check "private" 700 "$(stat -f %Lp "$(dirname "$LAST")")"
+check "run-all keeps the host awake and turns the denial listing off" "awake=run-all.sh denials=off" "$(cat "$TMP/env-seen" 2>/dev/null)"
 
 echo "== --check on the same tree reuses it"
 rm -f "$TMP/ran"

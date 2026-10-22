@@ -576,6 +576,10 @@ Follow-ups from the build's Opus review (2026-10-17), not closed by item 12:
   the walker sets their environment), a test-only setting skips the listing's
   wait, and the walk tests split across more files for run-all -j (done
   2026-10-22 for the trust checks: four files, 20m09s alone → 7m35s side by side).
+  The other two done 2026-10-23: `--jobs` members get `CW_PROOF_SANDBOX_CHECKED=1`
+  (honoured only in worktree mode), and `run-all.sh` passes
+  `CW_PROOF_DENIALS=off`; `run-all.sh` also keeps the host awake
+  (`cw_keep_awake`).
 - A walker resume that only integrates finished goals runs merged proofs
   under `CW_PROOF_SANDBOX=off` / `CW_ALLOW_DOTENV=1` without a journal record
   (the walker prints it; members journal their own).
