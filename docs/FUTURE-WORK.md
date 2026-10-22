@@ -787,3 +787,8 @@ DeepSeek stops were caught only because the edit was left uncommitted. Fix:
 In reserve if the prompt rule is not enough: the implementer appends each
 heading from the shell (`echo "## $(date -u …) — IMPLEMENTER …" >> journal`), so a
 guessed time cannot be written at all.
+
+Item 22 SHIPPED (2026-10-22): DeepSeek Flash is the default implementer with
+Haiku 5.5 as the fallback, after the comparison walk (`12e6a6f`) and the
+confirming walk after the journal prompt rule (`4e486f8`). Still open from it:
+the `/walk-status` cost ignores `fallback_from` (above), and item 24.

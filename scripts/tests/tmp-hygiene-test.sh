@@ -19,6 +19,8 @@ export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=f
   GIT_CONFIG_KEY_1=gc.auto GIT_CONFIG_VALUE_1=0
 unset ANTHROPIC_API_KEY DEEPSEEK_API_KEY CW_OUT_DIR CW_KEEP_RAW CW_PRUNE_DAYS \
   GROK_REVIEW_OUT CLAUDE_REVIEW_OUT IMPLEMENTER_FALLBACK
+# Its fallback scenarios are written for Haiku first (the default is DeepSeek).
+export IMPLEMENTER_PRIMARY=haiku
 umask 022
 fails=0
 CACHE="$HOME/.cache/claude-coding-workflow"

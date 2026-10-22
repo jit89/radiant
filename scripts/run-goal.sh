@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # run-goal.sh — host Orchestrator for one GOALS.md id.
-# The implementer (Haiku 5.5, DeepSeek on a refusal) implements, this script
+# The implementer (DeepSeek Flash, Haiku 5.5 on a refusal) implements, this script
 # assesses, Opus reviews, this script routes. Models never read each other's
 # raw output.
 #
@@ -42,8 +42,8 @@ source "$HERE/lib/cache.sh"
 source "$HERE/lib/proof.sh"
 
 GOALS_PY="$HERE/goals.py"
-# IMPLEMENTER=claude (default): claude-implement.sh, Haiku 5.5 with a DeepSeek
-# fallback on a refusal, both in the Claude Code harness. IMPLEMENTER=codex: the
+# IMPLEMENTER=claude (default): claude-implement.sh, DeepSeek Flash with a Haiku
+# 5.5 fallback on a refusal (IMPLEMENTER_PRIMARY), both in the Claude Code harness. IMPLEMENTER=codex: the
 # legacy DeepSeek-in-Codex launcher, kept until the new one has shipped goals.
 IMPLEMENTER="${IMPLEMENTER:-claude}"
 case "$IMPLEMENTER" in
@@ -518,6 +518,23 @@ journal_line() {
   printf '\n%s\n' "$line" >>"$JOURNAL"
 }
 
+# attempt_fell_back — 0 when this goal's current attempt already journaled an
+# implementer fallback: on its `ids` line (written before any stop, so a
+# fallback whose second pass stopped counts) or its `implemented` line. The
+# attempt starts at the last fresh `dispatch <id> r0` (THREAD_ID=-); a resumed
+# r0 re-dispatches with the thread and does not start one. A resume then runs
+# with the fallback off: the goal stays on the model it fell back to even if
+# IMPLEMENTER_PRIMARY changed while it was paused, so nothing switches back
+# (docs/features/deepseek-primary Q2).
+attempt_fell_back() {
+  [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 1
+  awk -v d="— ORCHESTRATOR dispatch ${GOAL_ID} r0 " -v i="— ORCHESTRATOR implemented ${GOAL_ID} r" \
+    -v t="— ORCHESTRATOR ids ${GOAL_ID} r" '
+    index($0, d) && index($0, " THREAD_ID=- ") { fb = 0 }
+    (index($0, i) || index($0, t)) && index($0, " FALLBACK=(") { fb = 1 }
+    END { exit fb ? 0 : 1 }' "$JOURNAL"
+}
+
 # Where this in_progress goal stopped, from the journal (lib/resume-state.py).
 # Sets BASE_SHA, ROUND, THREAD_ID, SESSION_ID, PENDING_FIX_ROUND,
 # PENDING_FIX_HASH, PENDING_FIX_SOURCE and PENDING_FIX_HEAD (empty when no FIX
@@ -571,9 +588,11 @@ event_phase() {
 
 # Journal the thread/session ids as soon as a launcher returns them, so a
 # resume after any later stop continues the same conversations.
+# A pass that fell back carries FALLBACK=(...) here, so the record survives a
+# stop before its `implemented` line (attempt_fell_back reads it).
 JOURNALED_IDS=""
 journal_ids() {
-  local ids="THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}"
+  local ids="THREAD_ID=${THREAD_ID:--} SESSION_ID=${SESSION_ID:--}${1:+ FALLBACK=($1)}"
   [[ "$ids" != "$JOURNALED_IDS" ]] || return 0
   journal_line "## $(utc) — ORCHESTRATOR ids ${GOAL_ID} r${ROUND} ${ids}"
   JOURNALED_IDS="$ids"
@@ -866,9 +885,9 @@ else
   # The contract itself is checked once BASE_SHA is known, below.
 fi
 
-# The Claude launcher needs no key here: Haiku uses the Claude login, and the
-# launcher loads the DeepSeek key itself (a missing one disables the fallback
-# to DeepSeek, or, with IMPLEMENTER_PRIMARY=deepseek, stops the goal).
+# The Claude launcher needs no key here: it loads the DeepSeek key itself (a
+# missing one stops the goal by default, or, with IMPLEMENTER_PRIMARY=haiku,
+# only disables the fallback to DeepSeek), and Haiku uses the Claude login.
 if [[ "$IMPLEMENTER" == codex ]] && ! load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env"; then
   die_gate "DEEPSEEK_API_KEY is not set (target .env or $HOUSE/.env). Do not paste it."
 fi
@@ -989,7 +1008,9 @@ while :; do
     PHASE="implementer r${ROUND}"
     set +e
     if [[ -n "$THREAD_ID" ]]; then
-      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" --resume "$THREAD_ID" "$HAND"
+      no_switch=()
+      ! attempt_fell_back || no_switch=(IMPLEMENTER_FALLBACK=none)
+      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "${no_switch[@]+"${no_switch[@]}"}" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" --resume "$THREAD_ID" "$HAND"
     else
       run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" "$HAND"
     fi
@@ -999,12 +1020,12 @@ while :; do
     verify_git_meta "during implementer r${ROUND}"
     LAST_IMPL="$(kv "$DS_OUT" "$IMPL_KEY")"
     kv_keep THREAD_ID "$DS_OUT" THREAD_ID
-    journal_ids
+    IMPL_FALLBACK="$(kv "$DS_OUT" IMPLEMENTER_FALLBACK)"
+    journal_ids "$IMPL_FALLBACK"
     RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
     IMPL_LOG="$(kv "$DS_OUT" LOG)"
     IMPL_ERR="$(kv "$DS_OUT" stderr)"
     IMPL_MODEL="$(kv "$DS_OUT" IMPLEMENTER_MODEL)"
-    IMPL_FALLBACK="$(kv "$DS_OUT" IMPLEMENTER_FALLBACK)"
     IMPL_STATUS="$(kv "$DS_OUT" IMPLEMENTER_STATUS)"
     [[ -s "$DS_OUT.wrap" ]] && cat "$DS_OUT.wrap" >&2 || true
     verify_claude_meta "during implementer r${ROUND}"

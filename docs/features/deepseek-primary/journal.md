@@ -35,3 +35,9 @@ The implementer prompt (step 3 and the resume prompt) now says to run date -u fo
 
 ## 2026-10-22T12:42:58Z — ARCHITECT confirming walk
 rbtree --jobs 3 DeepSeek at 6f1feba (EVIDENCE step 10b): 7/7, 0 stops, g2 one review FIX (SIMPLER: do not walk a root that names a parent, PLAN 5) fixed on the resumed thread and DONE in r1, the rest DONE r0; about $0.14 off-peak; 22m22s. The prompt rule held across 8 passes. Ready for the flip on the user's OK.
+
+## 2026-10-22T13:36:05Z — ARCHITECT flip
+Default IMPLEMENTER_PRIMARY=deepseek (user OK after the comparison and confirming walks). run-goal.sh resumes a goal whose current attempt journaled a FALLBACK with IMPLEMENTER_FALLBACK=none, so nothing switches back even across a change of primary. Tests: default checks, Haiku-first sections pinned, the guard and its attempt boundary; 3 plants red. Docs name DeepSeek first.
+
+## 2026-10-22T13:58:39Z — ARCHITECT flip review
+Opus r1 FIX on the flip, all taken: the guard now starts an attempt only at a fresh dispatch r0 (THREAD_ID=-), so a resumed r0 keeps it; a fallback is marked on the ids line, written before any stop, so a fallback whose second pass stopped counts; tests for a pause after a fallback (resumed twice) and a rate-limited secondary; header comments; a bare --smoke tests DeepSeek; install --check warns when no DeepSeek key is set. 5 plants red. Prices checked against api-docs.deepseek.com/quick_start/pricing (read 2026-10-22): deepseek-flash $0.30 miss / $0.006 hit / $1.20 out at peak, as the launcher defaults.

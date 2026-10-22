@@ -344,7 +344,13 @@ do_check() {
     test_show proof-test.sh
   fi
   if test_ok implement-test.sh; then
-    echo "implementer: OK (sandboxed and key-free; one fallback to the other model on a refusal, a decline or a DeepSeek 402, none on a rate limit; primary ${IMPLEMENTER_PRIMARY:-haiku})"
+    echo "implementer: OK (sandboxed and key-free; one fallback to the other model on a refusal, a decline or a DeepSeek 402, none on a rate limit; primary ${IMPLEMENTER_PRIMARY:-deepseek})"
+    # DeepSeek implements by default, so without its key every goal stops. A
+    # warning, never the key itself.
+    if [[ "${IMPLEMENTER_PRIMARY:-deepseek}" == deepseek && -z "${DEEPSEEK_API_KEY:-}" ]] &&
+      ! grep -qsE '^DEEPSEEK_API_KEY=.' "$ROOT/.env" "$HOME/.config/watch/.env"; then
+      echo "implementer key: WARN (no DEEPSEEK_API_KEY in $ROOT/.env, ~/.config/watch/.env or the environment: every goal will stop)"
+    fi
   else
     echo "implementer: FAIL"; rc=1
     test_show implement-test.sh

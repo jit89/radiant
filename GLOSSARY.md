@@ -21,7 +21,7 @@ Headless Grok. Read-only critic of a locked plan (Phase 2) and of the Architect'
 Not: "reviewer" (that word is reserved for the goal reviewer)
 
 **Implementer**
-The primary model (`IMPLEMENTER_PRIMARY`: Claude Haiku 5.5 by default, or DeepSeek Flash) in headless, sandboxed Claude Code (`claude-implement.sh`). Executes one goal under TDD. See **Implementer fallback** for the one switch to the other model.
+The primary model (`IMPLEMENTER_PRIMARY`: DeepSeek Flash by default, or Claude Haiku 5.5) in headless, sandboxed Claude Code (`claude-implement.sh`). Executes one goal under TDD. See **Implementer fallback** for the one switch to the other model.
 
 **Goal reviewer**
 Headless Claude Opus 5.5 judging an implementer diff until the goal is done. A separate session with no access to the Architect's conversation; it needs `--add-dir` for the run dir or it cannot read the diff and proof it is judging.

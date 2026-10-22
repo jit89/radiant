@@ -1,9 +1,10 @@
 # claude-coding-workflow
 
 Claude-driven coding workflow. Claude Code is the Architect. Grok
-hardens the plan as a headless adversary. Claude Haiku 5.5 implements in
-headless, sandboxed Claude Code, with DeepSeek V4 Flash through the same
-harness when Haiku refuses a goal. Claude Opus 5.5 reviews each goal's diff.
+hardens the plan as a headless adversary. DeepSeek Flash implements in
+headless, sandboxed Claude Code (DeepSeek's Anthropic-compatible endpoint),
+with Claude Haiku 5.5 in the same harness when DeepSeek refuses, declines or is
+out of balance. Claude Opus 5.5 reviews each goal's diff.
 
 Forked from `~/grok-coding-workflow` (where Grok was the Architect and
 Opus was the attacker) and, before that, from the house Claude/Kimi/Grok
@@ -18,7 +19,7 @@ review uses a reviewer prompt, not the plan-attacker prompt.
 |------|-----|--------|
 | Architect | Claude Code (main session) | shipped |
 | Attacker | Grok `grok-4.7`, headless, read-only, plans and oracles (never implementer diffs) | shipped |
-| Implementer | Claude Haiku 5.5 (`xhigh`), headless and sandboxed; DeepSeek V4 Flash on a refusal, same harness | shipped |
+| Implementer | DeepSeek Flash (`high`), headless and sandboxed; Claude Haiku 5.5 (`xhigh`) on a refusal, a decline or a 402, same harness | shipped |
 | Goal reviewer | Claude Opus 5.5, headless, reviewer prompt | shipped |
 
 Nobody grades their own work. The Architect writes the plan, so a
@@ -40,7 +41,7 @@ runs in another that never sees the Architect's conversation.
   oracles (`scripts/lib/oracle-files.py` lists them). A turn that does not end
   normally is reported as an error, never as a review.
 - `scripts/claude-goal-review.sh` — code reviewer. Different prompt.
-- `scripts/claude-implement.sh` — implementer: Haiku 5.5, DeepSeek fallback, sandboxed.
+- `scripts/claude-implement.sh` — implementer: DeepSeek Flash, Haiku 5.5 fallback, sandboxed.
 - `scripts/deepseek-code.sh` — legacy implementer in Codex (`IMPLEMENTER=codex`).
 - `scripts/lib/findings.sh` — parses the reviewer verdict into findings.
 - `scripts/tests/findings-test.sh` — self-test for that parser.
@@ -100,9 +101,10 @@ envelope checks, and warns if a borrowed skill is missing or the clone
 has drifted from its pin.
 
 Copy `.env.example` to `.env` in this repo **or** the target repo and set
-`DEEPSEEK_API_KEY` for the DeepSeek implementer. It is the fallback by
-default, where without it a refused goal stops instead; with
-`IMPLEMENTER_PRIMARY=deepseek` it is required, and without it every goal stops. Never commit `.env`. Never paste the key into chat.
+`DEEPSEEK_API_KEY` for the DeepSeek implementer. It is required by default
+(DeepSeek implements first), and without it every goal stops; with
+`IMPLEMENTER_PRIMARY=haiku` it is only the fallback, and without it a refused
+goal stops instead. Never commit `.env`. Never paste the key into chat.
 
 ## Prerequisites
 
@@ -112,8 +114,8 @@ default, where without it a refused goal stops instead; with
 - Grok CLI, signed in (`grok login`). `grok-review.sh` finds it on `PATH`
   or at `~/.grok/bin/grok`; override with `GROK_BIN`.
 - `DEEPSEEK_API_KEY` from [platform.deepseek.com](https://platform.deepseek.com/api_keys),
-  for the DeepSeek implementer (the fallback by default; required with
-  `IMPLEMENTER_PRIMARY=deepseek`). It runs through DeepSeek's
+  for the DeepSeek implementer (required by default; only the fallback with
+  `IMPLEMENTER_PRIMARY=haiku`). It runs through DeepSeek's
   Anthropic-compatible endpoint (`https://api.deepseek.com/anthropic`), model
   `deepseek-flash`.
 - Only for `IMPLEMENTER=codex`: Codex CLI ≥ 0.144.
@@ -188,9 +190,9 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `CLAUDE_REVIEW_EFFORT` | `high` | Claude `--effort` |
 | `CLAUDE_REVIEW_DRY_RUN=1` | off | Print Claude command only |
 | `IMPLEMENTER` | `claude` | `codex` selects the legacy `deepseek-code.sh` |
-| `IMPLEMENTER_MODEL` | `claude-haiku-5-5` | Implementer |
-| `IMPLEMENTER_EFFORT` | `xhigh` | Implementer `--effort` |
-| `IMPLEMENTER_PRIMARY` | `haiku` | `deepseek` implements first, with Haiku as the fallback; any other value stops |
+| `IMPLEMENTER_MODEL` | `claude-haiku-5-5` | The Haiku implementer |
+| `IMPLEMENTER_EFFORT` | `xhigh` | Haiku `--effort` |
+| `IMPLEMENTER_PRIMARY` | `deepseek` | `haiku` implements first instead, with DeepSeek as the fallback; any other value stops |
 | `IMPLEMENTER_FALLBACK` | `on` | One rerun on the other model when the primary refuses, declines or (DeepSeek) is out of balance (`none` or empty = off; the old `deepseek` still means on) |
 | `IMPLEMENTER_ALLOWED_DOMAINS` | empty | Comma list of hosts the sandbox may reach |
 | `IMPLEMENTER_MAX_BUDGET_USD` | unset | `--max-budget-usd` per Haiku pass (not DeepSeek: Claude Code misprices it) |

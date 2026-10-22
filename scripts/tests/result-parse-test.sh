@@ -127,6 +127,61 @@ run_goal
 check "fix round crash: implementer-error" "implementer-error" "$reason"
 check "fix round crash: thread kept" "t1" "$thread"
 
+# A goal whose attempt fell back resumes with the fallback off, so it stays on
+# the model it fell back to (docs/features/deepseek-primary Q2), even if the
+# primary changed meanwhile. Without a fallback the resume leaves it alone.
+export FB_SEEN="$TMP/fb-seen"
+for fb in yes no; do
+  rm -f "$FB_SEEN"
+  line=""
+  [[ "$fb" == no ]] || line='"IMPLEMENTER_FALLBACK: haiku -> deepseek (refusal)"'
+  stub claude-implement.sh 'if [[ " $* " == *" --resume "* ]]; then echo "${IMPLEMENTER_FALLBACK-unset}" >"$FB_SEEN"; echo "IMPLEMENTER_RESULT: error (exit 1)"; exit 1; fi
+'"$COMMIT"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: deepseek:t2" "IMPLEMENTER_STATUS: DONE" '"$line"
+  run_goal
+  if [[ "$fb" == yes ]]; then
+    check "fell back: the resume runs with the fallback off" "none" "$(cat "$FB_SEEN" 2>/dev/null)"
+  else
+    check "no fallback: the resume leaves the setting alone" "unset" "$(cat "$FB_SEEN" 2>/dev/null)"
+  fi
+done
+# An earlier attempt's fallback (before a recut: an older `dispatch r0`) does
+# not carry into a new attempt.
+rm -f "$FB_SEEN"
+stub claude-implement.sh 'if [[ " $* " == *" --resume "* ]]; then echo "${IMPLEMENTER_FALLBACK-unset}" >"$FB_SEEN"; echo "IMPLEMENTER_RESULT: error (exit 1)"; exit 1; fi
+'"$COMMIT"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: deepseek:t3" "IMPLEMENTER_STATUS: DONE"'
+make_repo
+printf '\n## 2026-01-01T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=0000000 THREAD_ID=- SESSION_ID=-\n\n## 2026-01-01T00:00:01Z — ORCHESTRATOR implemented g1-store r0 STATUS=DONE MODEL=m FALLBACK=(haiku -> deepseek (refusal)) COST_USD=-\n' >>docs/journal/example.md
+git add docs/journal/example.md && git commit -qm "an earlier attempt that fell back"
+"$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true
+check "an earlier attempt's fallback does not carry into a new one" "unset" "$(cat "$FB_SEEN" 2>/dev/null || tail -n 5 "$TMP/out")"
+
+# The case the guard is for: a goal that fell back pauses before any fix round,
+# and its resume (which re-dispatches r0 with the thread) must still run with
+# the fallback off, on a second pause too.
+resume_goal() { "$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true; }
+RESUME_RECORDS='if [[ " $* " == *" --resume "* ]]; then echo "${IMPLEMENTER_FALLBACK-unset}" >>"$FB_SEEN"; echo "IMPLEMENTER_RESULT: error (exit 1)"; exit 1; fi'
+rm -f "$FB_SEEN"
+stub claude-implement.sh "$RESUME_RECORDS"'
+'"$COMMIT"'
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: deepseek:t5" "IMPLEMENTER_STATUS: DONE" "IMPLEMENTER_FALLBACK: haiku -> deepseek (refusal)"'
+stub claude-goal-review.sh 'printf "%s\n" "CLAUDE_REVIEW_RESULT: rate_limited (exit 1)" "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null"; exit 75'
+run_goal
+check "fell back, then the review paused it" "reviewer-rate-limited" "$reason"
+resume_goal
+resume_goal
+check "resumed after the pause, twice: the fallback stays off" "none none" "$(paste -sd' ' - <"$FB_SEEN" 2>/dev/null)"
+# A fallback whose second pass stopped (a rate limit) before any implemented line.
+rm -f "$FB_SEEN"
+stub claude-implement.sh "$RESUME_RECORDS"'
+printf "%s\n" "IMPLEMENTER_RESULT: rate_limited (exit 1)" "THREAD_ID: haiku:t6" "IMPLEMENTER_STATUS: MISSING" "IMPLEMENTER_FALLBACK: deepseek -> haiku (balance)"; exit 75'
+run_goal
+check "the secondary was rate-limited" "rate_limited" "$reason"
+check "the fallback is on the journal's ids line" "1" "$(grep -c 'ORCHESTRATOR ids g1-store r0 THREAD_ID=haiku:t6 SESSION_ID=- FALLBACK=(deepseek -> haiku (balance))' "$TMP/repo/docs/journal/example.md")"
+resume_goal
+check "resumed: the fallback stays off" "none" "$(cat "$FB_SEEN" 2>/dev/null || tail -n 5 "$TMP/out")"
+
 # Reviewer safeguards flag the review and no fallback cleared it (exit 76): the
 # orchestrator stops fail-closed under its own reason, never a guessed verdict.
 stub claude-implement.sh "$COMMIT"'

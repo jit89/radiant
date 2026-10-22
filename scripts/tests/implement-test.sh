@@ -18,6 +18,8 @@ unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL DEEPSEEK_API_KEY IMPLEMENTER_MODEL \
   DEEPSEEK_EFFORT CLAUDE_CODE_EFFORT_LEVEL DEEPSEEK_PRICE_MISS DEEPSEEK_PRICE_HIT DEEPSEEK_PRICE_OUT \
   IMPLEMENTER_SMOKE_PROVIDER
 export FAKE_SECRET_TOKEN=not-for-the-child
+# Sections 1-11 are written for Haiku first; the default is DeepSeek (section 0).
+export IMPLEMENTER_PRIMARY=haiku
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
 export GIT_COMMITTER_NAME=mock GIT_COMMITTER_EMAIL=mock@localhost
 fails=0
@@ -126,6 +128,15 @@ PY
 }
 keys_left() { find "$KEYS_DIR" -type f 2>/dev/null | wc -l | tr -d ' '; }
 HANDOFF="$RUN_DIR/handoff-g1-store-r0.md"
+
+echo "== 0. the default primary is DeepSeek (unset or empty) =="
+ds_key_on
+for how in "-u IMPLEMENTER_PRIMARY" "IMPLEMENTER_PRIMARY="; do
+  reset "$DONE"
+  # shellcheck disable=SC2086
+  run $how -- "$HANDOFF"
+  check "default ($how): one DeepSeek pass" "0 1 deepseek-flash yes" "$RC $(calls) $(call_field 1 model) $(call_field 1 bare)"
+done
 
 echo "== 1. haiku ok: sandboxed, safe mode, nothing secret in its environment =="
 ds_key_on; reset "$DONE"
@@ -528,7 +539,9 @@ echo "== 22. --smoke tests the primary =="
 run IMPLEMENTER_PRIMARY=deepseek IMPLEMENTER_DRY_RUN=1 -- --smoke
 check "smoke on deepseek" yes "$(has "--bare" "$OUT")"
 run IMPLEMENTER_DRY_RUN=1 -- --smoke
-check "smoke on haiku by default" yes "$(has "--safe-mode" "$OUT")"
+check "smoke on haiku when it is the primary" yes "$(has "--safe-mode" "$OUT")"
+run -u IMPLEMENTER_PRIMARY IMPLEMENTER_DRY_RUN=1 -- --smoke
+check "a bare --smoke tests DeepSeek, the default primary" yes "$(has "--bare" "$OUT")"
 
 echo "== 23. the cost rollup (lib/cost-rollup.py) =="
 J="$TMP/journal.md"

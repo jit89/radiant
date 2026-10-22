@@ -14,7 +14,7 @@ in-session (do not dispatch the implementer at the house).
 |------|-------|------------------|
 | **Architect** | Claude Code (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
 | **Attacker** | Grok (`grok-4.7`) | Headless, read-only. Attacks a locked plan (Phase 2) and the Architect's acceptance oracles (Phase 3). A different model on purpose — the Architect cannot attack its own plan or oracles. Never reviews implementer diffs. Advises; does not command. |
-| **Implementer** | Claude Haiku 5.5 (`claude-haiku-5-5`, effort `xhigh`), headless and sandboxed; DeepSeek Flash (`deepseek-flash`) through the same Claude Code harness when Haiku refuses or declines (`IMPLEMENTER_PRIMARY=deepseek` swaps the two) | Cheap long TDD loops against one goal. Sibling process. |
+| **Implementer** | DeepSeek Flash (`deepseek-flash`, effort `high`) through DeepSeek's Anthropic-compatible endpoint in headless, sandboxed Claude Code; Claude Haiku 5.5 (`claude-haiku-5-5`, effort `xhigh`) in the same harness when DeepSeek refuses, declines or is out of balance (`IMPLEMENTER_PRIMARY=haiku` swaps the two) | Cheap long TDD loops against one goal. Sibling process. |
 | **Goal reviewer** | Claude Opus 5.5 (`claude-opus-5-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
 
 The Architect never silently switches into "just code it" mode. If the
@@ -29,7 +29,7 @@ do a direct edit.
 | 1 Recon + Interrogate (`crucible`) | shipped |
 | 2 Adversarial harden (Grok) | shipped |
 | 3 Decompose into a goal DAG (`to-goals`) | shipped |
-| 4 Per-goal implement (Haiku, DeepSeek fallback) + Opus review (`run-goal`) | shipped |
+| 4 Per-goal implement (DeepSeek, Haiku fallback) + Opus review (`run-goal`) | shipped |
 | 5 Orchestrate the DAG (`run-goals`) | shipped |
 | A Architecture health (periodic) | existing `improve-codebase-architecture` skill |
 
@@ -293,7 +293,8 @@ leaning on the bare name.
 
 - The Architect plans and arbitrates. Grok attacks the **plan** and the
   **oracles** (`grok-review.sh`, `--oracle`). Opus 5.5 reviews **code**
-  (`claude-goal-review.sh`). Haiku 5.5 implements (`claude-implement.sh`).
+  (`claude-goal-review.sh`). DeepSeek Flash implements, Haiku 5.5 its
+  fallback (`claude-implement.sh`).
   Nobody grades their own work: the Architect's plan is attacked by a
   different model, and the code Opus judges was written by the
   implementer in its own session, not by the Architect.
@@ -308,7 +309,7 @@ leaning on the bare name.
   **plan attacker** — that is the one role this session may not fill.
   If the attacker or the implementer cannot run, stop and tell the
   user. The implementer switches model in one case only: the primary
-  (`IMPLEMENTER_PRIMARY`, Haiku by default) refuses or declines the goal,
+  (`IMPLEMENTER_PRIMARY`, DeepSeek by default) refuses or declines the goal,
   or DeepSeek is out of balance (402), and the launcher reruns that pass
   once on the other model and journals it (`IMPLEMENTER_FALLBACK`).
   Nothing switches back. Never on a rate limit, another error, a missing

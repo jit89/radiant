@@ -1,7 +1,7 @@
 ---
 name: run-goal
 allowed-tools: Bash, Read
-description: Run one ready goal from GOALS.md — host script dispatches the implementer (Haiku 5.5, DeepSeek on a refusal, or the other way round with IMPLEMENTER_PRIMARY=deepseek) then Claude Opus 5.5 as reviewer. Use when the user says /run-goal, "implement this goal", or "run the next goal". Not for planning (/crucible), not for cutting the DAG (/to-goals), not for walking the whole DAG (/run-goals).
+description: Run one ready goal from GOALS.md — host script dispatches the implementer (DeepSeek Flash, Haiku 5.5 on a refusal, or the other way round with IMPLEMENTER_PRIMARY=haiku) then Claude Opus 5.5 as reviewer. Use when the user says /run-goal, "implement this goal", or "run the next goal". Not for planning (/crucible), not for cutting the DAG (/to-goals), not for walking the whole DAG (/run-goals).
 ---
 
 # Run Goal

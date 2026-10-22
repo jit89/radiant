@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # claude-implement.sh — one IMPLEMENTATION pass via headless Claude Code.
-# The primary (IMPLEMENTER_PRIMARY: Claude Haiku 5.5 or DeepSeek Flash, through
-# DeepSeek's Anthropic-compatible endpoint) implements; if it refuses the pass,
+# The primary (IMPLEMENTER_PRIMARY: DeepSeek Flash by default, through DeepSeek's
+# Anthropic-compatible endpoint, or Claude Haiku 5.5) implements; if it refuses the pass,
 # declines the goal, or (DeepSeek) is out of balance, the same pass runs ONCE on
 # the other one through the same harness, and nothing switches back
 # (docs/features/deepseek-primary). Replaces deepseek-code.sh (Codex) as
@@ -17,7 +17,7 @@
 # Optional env:
 #   IMPLEMENTER_MODEL           default claude-haiku-5-5
 #   IMPLEMENTER_EFFORT          default xhigh
-#   IMPLEMENTER_PRIMARY         haiku (default, also when empty) | deepseek;
+#   IMPLEMENTER_PRIMARY         deepseek (default, also when empty) | haiku;
 #                               anything else exits 1
 #   IMPLEMENTER_FALLBACK        on (default; `deepseek` and `haiku` also mean on)
 #                               | none or empty: off; anything else exits 1
@@ -89,7 +89,7 @@ MODEL="${IMPLEMENTER_MODEL:-claude-haiku-5-5}"
 EFFORT="${IMPLEMENTER_EFFORT:-xhigh}"
 # The provider a new goal starts on; the other one is the secondary. Only these
 # two values: a typo must not become a normal walk on the other model.
-PRIMARY="${IMPLEMENTER_PRIMARY:-haiku}"
+PRIMARY="${IMPLEMENTER_PRIMARY:-deepseek}"
 case "$PRIMARY" in
   haiku|deepseek) ;;
   *) echo "IMPLEMENTER_RESULT: error (IMPLEMENTER_PRIMARY must be haiku or deepseek, not '$PRIMARY')"; exit 1 ;;
