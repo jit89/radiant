@@ -721,6 +721,11 @@ with a test that fails if any test script names a path in it, so a later test
 that starts reading a doc file puts that file back in the key. Not "every
 `.md` file": skills and fixtures are Markdown that tests and agents read.
 
+DONE 2026-10-22: `lib/tree-key.py` leaves out `docs/**` and every top-level
+`*.md` but `GOALS.example.md` (`KEPT_TOP_MD`); `check-reuse-test.sh` checks a
+doc edit keeps the run, `GOALS.example.md` and a skill do not, and that no
+test reads a left-out path through `$HERE/../`.
+
 ## 21. GOAL-FORMAT "Registration points": a test glob breaks committed-red oracles (2026-10-22)
 
 The rule's example registers one test per file with a `foreach` over

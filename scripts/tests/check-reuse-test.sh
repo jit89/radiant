@@ -75,6 +75,45 @@ check "not reused" yes "$(lacks 'tests: reused' "$(cat "$TMP/out")")"
 check "both tests ran" 2 "$(runs)"
 check "--check's own run is kept for the new tree" "$(key) 0" "$(cat "$LAST/key" 2>/dev/null)"
 
+echo "== a doc-only edit keeps the run (FUTURE-WORK item 20)"
+rm -f "$TMP/ran"
+mkdir -p "$H/docs/features/x"
+printf '# Journal\n' >"$H/docs/features/x/journal.md"
+printf '# Readme\n' >"$H/README.md"
+printf '# Plan\n' >"$H/PLAN.md"
+check_out
+check "reused after docs/, README.md and PLAN.md changed" yes "$(has 'tests: reused the full run of' "$(cat "$TMP/out")")"
+check "no test ran" "" "$(runs)"
+printf 'more\n' >>"$H/GOALS.example.md"
+check_out
+check "GOALS.example.md is not a doc: a tests-read file makes the run stale" yes "$(lacks 'tests: reused' "$(cat "$TMP/out")")"
+check "GOALS.example.md: both tests ran" 2 "$(runs)"
+git -C "$H" checkout -q -- GOALS.example.md
+# A run for this exact tree first, so only the skill below can make it stale.
+"$H/scripts/tests/run-all.sh" >/dev/null 2>&1
+check_out
+check "the restored tree is reused again" yes "$(has 'tests: reused the full run of' "$(cat "$TMP/out")")"
+rm -f "$TMP/ran"
+mkdir -p "$H/skills/x" && printf '# Skill\n' >"$H/skills/x/SKILL.md"
+check_out
+check "Markdown outside docs/ and the top level (a skill) makes the run stale" yes "$(lacks 'tests: reused' "$(cat "$TMP/out")")"
+check "a skill: both tests ran" 2 "$(runs)"
+rm -rf "$H/skills" "$H/docs" "$H/README.md" "$H/PLAN.md"
+"$H/scripts/tests/run-all.sh" >/dev/null 2>&1
+
+echo "== no test reads a path the key leaves out"
+# Every house path a test script names through \$HERE/../ (the house's idiom
+# for the house top) must be in the key: a test that starts reading a doc file
+# that way makes this red until lib/tree-key.py keeps it (KEPT_TOP_MD for a
+# top-level file, excluded() for one under docs/). Reads
+# through another form, or inside the scripts the tests run, are not seen.
+read_paths="$(grep -ohE '\$HERE/\.\./[A-Za-z0-9._/-]+' "$HERE"/tests/*.sh | sed 's|^\$HERE/\.\./||' | sort -u)"
+check "the scan finds what tests read (GOALS.example.md)" yes "$(has GOALS.example.md "$read_paths")"
+# shellcheck disable=SC2086
+check "none of them is left out of the key" "" "$(python3 "$HERE/lib/tree-key.py" --excluded $read_paths)"
+check "--excluded flags the docs folder itself" docs "$(python3 "$HERE/lib/tree-key.py" --excluded docs)"
+check "--excluded keeps scripts and skills" "" "$(python3 "$HERE/lib/tree-key.py" --excluded scripts skills/run-goal/SKILL.md mods)"
+
 echo "== a run whose tree changed under it is not kept"
 before="$(cat "$LAST/key")"
 printf '#!/usr/bin/env bash\necho changed >>"%s/tracked.txt"\n' "$H" >"$H/scripts/tests/b-test.sh"
