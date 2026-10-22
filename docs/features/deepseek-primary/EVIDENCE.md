@@ -144,3 +144,27 @@ The Architect put the committed line back each time (the user's order, recovery 
 **Not measured:** whether any DeepSeek reply stopped at Claude Code's 32000-token output cap. The run folders of goals that succeed are removed, and no pass failed.
 
 **What this means for the flip.** On this DAG, DeepSeek matched Haiku on quality: every review passed first time, with no fix rounds. It cost roughly 40–60% less and took less wall time. Its one failure mode is editing a committed journal record. That stops a real walk at the first goal it touches, so it has to be fixed before the default flips. The fix is an implementer-prompt rule: take the time from `date -u` before writing a heading, and correct a committed record by appending, never by editing.
+
+### Step 10b: the confirming walk, after the prompt rule (2026-10-22)
+
+**Setup:**
+- house `6f1feba`, which adds the implementer-prompt rule: run `date -u` for each heading, and correct a written record by appending;
+- a fresh clone `~/dogfood/rbtree-ds2` at `990e342`;
+- the same settings: `IMPLEMENTER_PRIMARY=deepseek DEEPSEEK_EFFORT=high --jobs 3` under `caffeinate -i`;
+- no recovery loop.
+
+| | Step 10 (before the rule) | Step 10b (after) |
+|---|---|---|
+| Goals done | 7/7 | 7/7, exit 0 |
+| Stops | 2 `journal-tamper` | **0** |
+| Review verdicts | 7 DONE in round 0 | 6 DONE in round 0; g2 FIX in round 0, then DONE in round 1 |
+| Implementer passes | 9 | 8 (g2's fix round resumed its DeepSeek thread) |
+| Cost (rollup) | $0.3356 at peak | $0.2876 at peak. The walk ran 12:20–12:42 UTC on a Thursday, off-peak, so about **$0.144** at list price |
+| Wall time | 27m41s | **22m22s** |
+
+**g2's fix round.** It was the first live fix round of the day.
+- **The finding:** Opus's SIMPLER heading (house item 15) found that `rbtree_validate` still walked the tree when the root named a parent. PLAN 5 says it should report `RBTREE_ERR_PARENT` without walking. Two `!= root` guards existed only to keep that unneeded walk finite. The FIX was to skip the walk and drop the guards: smaller code that also matches the spec.
+- **The fix round:** DeepSeek's resumed thread made exactly that change (`a2117b8`, "a root that names a parent is not walked"). The round-1 review passed.
+- **What it confirms:** the item 3 fix handoff works live on a resumed DeepSeek thread, and the cost rollup reads the thread total for the fix round ($0.0951 against round 0's $0.0711, one thread).
+
+**The prompt rule.** Across 8 DeepSeek passes the journal shows 16 IMPLEMENTER records and no edited record. That compares with 2 edits in 9 passes before the rule.

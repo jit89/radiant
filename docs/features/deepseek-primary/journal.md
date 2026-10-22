@@ -32,3 +32,6 @@ rbtree --jobs 3 with IMPLEMENTER_PRIMARY=deepseek DEEPSEEK_EFFORT=high at d3f73c
 
 ## 2026-10-22T12:18:18Z — ARCHITECT prompt rule
 The implementer prompt (step 3 and the resume prompt) now says to run date -u for each heading's time and never to change a written record, correcting by appending. 4 checks, both removals planted red. Opus DONE; its notes logged as FUTURE-WORK 24 (a serial walk does not catch a committed edit of the journal) with the shell-append option in reserve.
+
+## 2026-10-22T12:42:58Z — ARCHITECT confirming walk
+rbtree --jobs 3 DeepSeek at 6f1feba (EVIDENCE step 10b): 7/7, 0 stops, g2 one review FIX (SIMPLER: do not walk a root that names a parent, PLAN 5) fixed on the resumed thread and DONE in r1, the rest DONE r0; about $0.14 off-peak; 22m22s. The prompt rule held across 8 passes. Ready for the flip on the user's OK.
