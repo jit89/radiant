@@ -1,0 +1,22 @@
+# Journal: deepseek-primary (house item 22)
+
+## 2026-10-22T08:04:58Z — ARCHITECT start
+Crucible for FUTURE-WORK item 22, on the user's order (after the rbtree --jobs 3 walk). Recon: claude-implement.sh runs Haiku first and DeepSeek once on a flag or decline; two probes through the launcher (2026-10-22): deepseek-flash answers, its envelope cost is Claude Code's default price (costBasis unknown, ~14x DeepSeek's list price); a bogus key returns api_error_status 401 with terminal_reason api_error. Decisions (user): Q1 a missing primary key fails closed; Q2 the fallback applies on new and resumed primary passes, one direction only; Q3 DeepSeek's content filter counts as a refusal only on a signature measured in step 0; Q4 the default stays haiku in the build commit and flips to deepseek only after an rbtree comparison walk and the user's OK. Earlier agreed: triggers refusal, decline and 402; 429/503 stop as a rate limit; every goal's code goes to DeepSeek once flipped. Cosmetic batch accepted. PLAN.md locked; Grok round 1 next.
+
+## 2026-10-22T08:13:00Z — ARCHITECT round 1
+Grok round 1: REVISE, 6 findings (402 classified after the rate-limit check, effort probe on an argv without --effort, cost formula and resume deltas, a 200 refusal reads ok, key and value rules, the comparison control and docs); all taken, one sub-point rejected (a separate key for the filter probe). PLAN.md revised; round 2 resumes session bef15b23.
+
+## 2026-10-22T08:18:17Z — ARCHITECT round 2
+Grok round 2: REVISE, 3 findings (DeepSeek stop_reason refusal must stay flagged, a cost delta with no baseline, 402 as a string); all taken. Added: step 0b probes CLAUDE_CODE_EFFORT_LEVEL, the launcher strips a stray one. Round 3 resumes session bef15b23.
+
+## 2026-10-22T08:23:34Z — ARCHITECT round 3
+Grok round 3: REVISE, 3 findings (cost rollup across cumulative and delta lines, cache field in input_tokens, one effort mechanism with a tested strip); all taken. Round 4 resumes session bef15b23.
+
+## 2026-10-22T08:27:12Z — ARCHITECT round 4
+Grok round 4: REVISE, 2 findings (a resumed Haiku cost counted twice and the basis lost with the run folder; a string 503); both taken. User decisions: the simpler cost design (thread total at peak price, COST_BASIS journaled) and DEEPSEEK_EFFORT=high for the comparison walk. Round 5 (the last under MAX_ROUNDS) resumes session bef15b23.
+
+## 2026-10-22T08:30:28Z — ARCHITECT round 5
+Grok round 5: REVISE, 2 findings (fix rounds have no ids line; a fallback's primary pass uncosted); both taken. MAX_ROUNDS reached; the two fixes are unattacked. Asked the user: sign off, or one narrow round 6 on the delta.
+
+## 2026-10-22T08:34:20Z — ARCHITECT round 6
+Grok round 6 (narrow, user-ordered): REVISE, 2 findings in the fallback cost (thread id prefix, a low fallback envelope replacing the total); both taken. Asked the user for sign-off.
