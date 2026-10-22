@@ -774,3 +774,16 @@ README intro, the run-goal skill description), and a goal that fell back to
 DeepSeek and resumes after the flip would treat its `deepseek:` thread as the
 primary (one switch back possible). Outside the plan: the `/walk-status` cost
 (`events.py`) ignores `fallback_from`, so it undercounts a goal that fell back.
+
+## 24. Serial walks check the journal against HEAD, not the goal's base (2026-10-22)
+
+Found by Opus reviewing the item 22 prompt rule (EVIDENCE step 10). In a
+serial walk, `run-goal.sh` holds the journal to HEAD (`orch_journal_problems
+--records`). A pass that edits a committed record **and commits that edit**
+leaves the working copy equal to HEAD, so nothing stops it. Only a `--jobs`
+integration (`journal-merge.py`, against the merge base) catches it. Today's two
+DeepSeek stops were caught only because the edit was left uncommitted. Fix:
+`run-goal.sh` also requires the journal to start with its copy at `BASE_SHA`.
+In reserve if the prompt rule is not enough: the implementer appends each
+heading from the shell (`echo "## $(date -u …) — IMPLEMENTER …" >> journal`), so a
+guessed time cannot be written at all.

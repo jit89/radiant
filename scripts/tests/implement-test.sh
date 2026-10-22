@@ -320,6 +320,14 @@ check "resume names the handoff" yes "$(has "Read the handoff: $HANDOFF" "$(cat 
 check "resume names the return handoff" yes "$(has "$RUN_DIR/return-handoff-g1-store-r0.md" "$(cat "$FAKE_DIR/prompt.1")")"
 check "resume restates the status line" yes "$(has "End your reply with one line IMPLEMENTER_STATUS: DONE, BLOCKED or DECLINED" "$(cat "$FAKE_DIR/prompt.1")")"
 check "resume restates the journal records" yes "$(has "Append a new START record for this pass" "$(cat "$FAKE_DIR/prompt.1")")"
+check "resume: each heading's time from date -u" yes "$(has "each heading's time from date -u as you write it" "$(cat "$FAKE_DIR/prompt.1")")"
+check "resume: a written record is never changed" yes "$(has "Never
+change a record already written, yours included: correct one by appending a new record." "$(cat "$FAKE_DIR/prompt.1")")"
+check "first pass: run the date command, never estimate" yes "$(has "Run that date command for each heading's
+   time as you write it; never type or estimate a time." "$(cat "$FAKE_DIR/prompt.2")")"
+check "first pass: a written record is never changed" yes "$(has "A record is never changed once
+   written, yours included: if one is wrong (a time, a claim), append a new record that
+   says what was wrong." "$(cat "$FAKE_DIR/prompt.2")")"
 check "resume keeps the rules by reference" yes "$(has "The rules from your first message still apply" "$(cat "$FAKE_DIR/prompt.1")")"
 check "resume omits the numbered steps" yes "$(lacks "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.1")")"
 check "fresh session keeps them" yes "$(has "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.2")")"

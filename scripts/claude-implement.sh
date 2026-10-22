@@ -595,7 +595,11 @@ You are the IMPLEMENTATION agent. You implement one goal; planning and review be
 3. JOURNAL: append (never overwrite) a START record naming the goal:
    "## <UTC from: date -u +%Y-%m-%dT%H:%M:%SZ> — IMPLEMENTER start <goal-id>"
    Every record you append (start, checkpoint, end) is a heading in exactly that shape,
-   naming THIS goal id, followed by its own lines. Under START write your understanding of
+   naming THIS goal id, followed by its own lines. Run that date command for each heading's
+   time as you write it; never type or estimate a time. A record is never changed once
+   written, yours included: if one is wrong (a time, a claim), append a new record that
+   says what was wrong. The host stops a goal whose journal was edited rather than
+   appended to. Under START write your understanding of
    the goal. When you finish or stop, append an END record: outcome, commit shas, test
    result, blockers. Keep every line you add inside one of your records. Stage the journal
    by path in each checkpoint commit; lines other agents added ride along, which is
@@ -694,7 +698,9 @@ if [[ "$MODE" == resume ]]; then
   PASS_PROMPT="Next pass for the same goal. Read the handoff: ${HANDOFF_ABS}
 Keep the return handoff at ${RETURN_DOC}. The rules from your first message still apply.
 Append a new START record for this pass and an END record when you stop, in the same
-heading shape, naming the goal id. Run the goal's proof before claiming DONE.
+heading shape, naming the goal id, each heading's time from date -u as you write it. Never
+change a record already written, yours included: correct one by appending a new record.
+Run the goal's proof before claiming DONE.
 End your reply with one line IMPLEMENTER_STATUS: DONE, BLOCKED or DECLINED (after
 DECLINED add \" — \" and one line saying why), nothing after it."
 fi

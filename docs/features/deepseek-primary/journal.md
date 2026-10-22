@@ -29,3 +29,6 @@ Built per PLAN.md and step 0: claude-implement.sh (IMPLEMENTER_PRIMARY, validate
 
 ## 2026-10-22T12:12:09Z — ARCHITECT comparison walk
 rbtree --jobs 3 with IMPLEMENTER_PRIMARY=deepseek DEEPSEEK_EFFORT=high at d3f73c0 (EVIDENCE step 10): 7/7, all reviews DONE r0, 0 fix rounds, 0 fallbacks, 2 journal-tamper stops (g2, g3 first attempts: a guessed future time in a checkpoint heading, committed, then edited in place; recut reruns clean), cost about $0.17 at the off-peak list price (peak upper bound $0.34) against Haiku $0.43, 27m41s wall with no sleep. Before the flip: an implementer-prompt rule against editing committed records.
+
+## 2026-10-22T12:18:18Z — ARCHITECT prompt rule
+The implementer prompt (step 3 and the resume prompt) now says to run date -u for each heading's time and never to change a written record, correcting by appending. 4 checks, both removals planted red. Opus DONE; its notes logged as FUTURE-WORK 24 (a serial walk does not catch a committed edit of the journal) with the shell-append option in reserve.
