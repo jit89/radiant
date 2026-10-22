@@ -37,6 +37,7 @@ source "$HERE/lib/git-guard.sh"
 source "$HERE/lib/orch-files.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/cache.sh"
+cw_keep_awake
 # run_step, proof_exec, tree_snapshot, proof_moved: shared with run-goals.sh.
 # shellcheck disable=SC1091
 source "$HERE/lib/proof.sh"

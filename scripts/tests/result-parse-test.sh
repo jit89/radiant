@@ -305,6 +305,16 @@ journal="$(cat "$TMP/repo/docs/journal/example.md")"
 check "implemented record: basis and the primary's thread and cost" "yes" \
   "$(has 'MODEL=claude-haiku-5-5 FALLBACK=(deepseek -> haiku (balance)) COST_USD=0.31 COST_BASIS=thread FROM=deepseek:u9 FROM_COST_USD=0.0042 FROM_COST_BASIS=thread' "$journal")"
 
+# AWAKE_PROBE: which ancestor (run-goals.sh or run-goal.sh) holds a
+# `caffeinate -i -w <its pid>` while this stub runs (FUTURE-WORK item 23).
+AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
+export AWAKE_OUT="$TMP/awake"
+rm -f "$AWAKE_OUT"
+stub claude-implement.sh "$AWAKE_PROBE"'
+printf "%s\n" "IMPLEMENTER_RESULT: error (exit 1)"; exit 1'
+run_goal
+check "a lone run-goal.sh keeps the host awake while the implementer runs" "run-goal.sh" "$(cat "$AWAKE_OUT" 2>/dev/null)"
+
 # Resume holds .claude/ to the baseline the stopped run took: a file planted
 # while the goal was paused is refused before any dispatch.
 "$HOUSE/scripts/goals.py" GOALS.md show g1-store | grep -q '"in_progress"' && paused=yes || paused=no

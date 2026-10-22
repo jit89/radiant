@@ -775,7 +775,12 @@ paused and resumed on the user's wake. `grok-review.sh` already holds
 `caffeinate -i` for its run (item 11.1); `run-goals.sh` and `run-goal.sh`
 hold nothing. Shape: the walker holds `caffeinate -i -w $$` for the walk
 (idle sleep only, so a closed lid still sleeps), and `run-goal.sh` does the
-same when run alone. A test asserts the assertion exists while a walk runs,
+same when run alone.
+
+DONE 2026-10-22: `lib/cache.sh` `cw_keep_awake` (`caffeinate -i -w $$`,
+`CW_KEEP_AWAKE=0` off), called by `run-goals.sh` and by every `run-goal.sh`
+(always, not only alone: simpler, and a wave's extra assertions are harmless).
+Tests find the assertion by the script's pid and check it ends with the walk. A test asserts the assertion exists while a walk runs,
 found by the helper's pid as in `650eb39`.
 
 Item 22 status (2026-10-22): plan `a7aefd7`, step 0 `5d2a829`, the build

@@ -22,6 +22,7 @@ source "$HERE/lib/git-guard.sh"
 source "$HERE/lib/orch-files.sh"
 # shellcheck disable=SC1091
 source "$HERE/lib/cache.sh"
+cw_keep_awake
 
 JOBS=1
 while [[ $# -gt 0 ]]; do

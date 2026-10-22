@@ -50,3 +50,13 @@ cw_prune() {
   done
   return 0
 }
+
+# cw_keep_awake — hold off idle sleep for as long as this shell runs: a walk or
+# a goal can take an hour, and an idle-asleep Mac pauses it (FUTURE-WORK item
+# 23: the rbtree walk of 2026-10-22 lost 24 min). Idle sleep only (-i), so a
+# closed lid still sleeps; -w ends the assertion when this process exits.
+# CW_KEEP_AWAKE=0 turns it off.
+cw_keep_awake() {
+  [[ "${CW_KEEP_AWAKE:-1}" != 0 && -x /usr/bin/caffeinate ]] || return 0
+  /usr/bin/caffeinate -i -w "$$" </dev/null >/dev/null 2>&1 &
+}

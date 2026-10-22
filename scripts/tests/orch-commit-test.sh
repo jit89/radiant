@@ -78,6 +78,28 @@ check "run-goals commits exclude staged user file" "0" "$(absorbed)"
 check "user file still staged after walk" "source.py" \
   "$(git diff --cached --name-only)"
 
+# AWAKE_PROBE: which ancestor (run-goals.sh or run-goal.sh) holds a
+# `caffeinate -i -w <its pid>` while this stub runs (FUTURE-WORK item 23).
+AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; echo "$p" >"$AWAKE_OUT.pid"; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
+export AWAKE_OUT="$TMP/awake"
+for setting in on off; do
+  rm -f "$AWAKE_OUT"
+  make_repo "$TMP/walk-$setting"
+  stub run-goal.sh "$AWAKE_PROBE"'
+echo "STOP_FILE: /dev/null"; exit 1'
+  if [[ "$setting" == on ]]; then
+    "$HOUSE/scripts/run-goals.sh" >/dev/null 2>&1 || true
+    check "the walker keeps the host awake while a goal runs" "run-goals.sh" "$(cat "$AWAKE_OUT" 2>/dev/null)"
+    wpid="$(cat "$AWAKE_OUT.pid" 2>/dev/null)"
+    gone=no
+    for _ in $(seq 40); do pgrep -f "^/usr/bin/caffeinate -i -w ${wpid:-none}\$" >/dev/null || { gone=yes; break; }; sleep 0.25; done
+    check "the assertion ends with the walk" yes "$gone"
+  else
+    CW_KEEP_AWAKE=0 "$HOUSE/scripts/run-goals.sh" >/dev/null 2>&1 || true
+    check "CW_KEEP_AWAKE=0: no assertion" "none" "$(cat "$AWAKE_OUT" 2>/dev/null)"
+  fi
+done
+
 # run-goal.sh: blocked id → refresh → orch_commit, then the dirty gate wakes.
 cp "$HERE/run-goal.sh" "$HOUSE/scripts/run-goal.sh"
 make_repo "$TMP/goal"
