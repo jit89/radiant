@@ -574,7 +574,8 @@ Follow-ups from the build's Opus review (2026-10-17), not closed by item 12:
   walk and once per goal (~1 s), and a red proof waits ~3 s for its denial
   listing. Cheap cuts: the walker passes its members "self-test passed" (only
   the walker sets their environment), a test-only setting skips the listing's
-  wait, and the walk tests split across more files for run-all -j.
+  wait, and the walk tests split across more files for run-all -j (done
+  2026-10-22 for the trust checks: four files, 20m09s alone → 7m35s side by side).
 - A walker resume that only integrates finished goals runs merged proofs
   under `CW_PROOF_SANDBOX=off` / `CW_ALLOW_DOTENV=1` without a journal record
   (the walker prints it; members journal their own).

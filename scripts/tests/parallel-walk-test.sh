@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Self-test: the parallel walker (docs/features/parallel-walker/PLAN.md).
-# Launchers are stubs; no model is called. Sections 1-5; the trust checks are in parallel-walk-trust-test.sh.
+# Launchers are stubs; no model is called. Sections 1-5; the trust checks are in
+# parallel-walk-trust*-test.sh.
 set -euo pipefail
 PW_NAME=parallel
 # shellcheck disable=SC1091

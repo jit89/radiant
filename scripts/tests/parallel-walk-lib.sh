@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared setup for parallel-walk-test.sh and parallel-walk-trust-test.sh: the
+# Shared setup for parallel-walk-test.sh and parallel-walk-trust*-test.sh: the
 # temp HOME, check(), a house copy whose implementer and reviewer are stubs, and
 # the four-goal fixture. Not named *-test.sh, so run-all.sh does not run it.
 
@@ -173,3 +173,8 @@ wave_result_after() {
   return 0
 }
 
+# Helpers shared by the parallel-walk-trust*-test.sh parts.
+common() { git rev-parse --path-format=absolute --git-common-dir; }
+impl_calls() { wc -l <"$CALLS/implement" 2>/dev/null | tr -d ' ' || echo 0; }
+noconflict() { sed -i '' 's/^    conflicts_with: \[g1-a\]$/    conflicts_with: []/' GOALS.md; git commit -qam "no conflict"; }
+stopfile_of() { sed -n "s/^- $1: [^ ]* — //p" "$pstop"; }
