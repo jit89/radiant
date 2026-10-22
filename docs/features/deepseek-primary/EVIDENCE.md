@@ -104,3 +104,43 @@ Not provoked; the account is funded. A bogus key gave the shape a 402 is
 expected to share: `api_error_status: 401`, `terminal_reason: "api_error"`,
 `is_error: true`, `result: "Failed to authenticate. API Error: 401 Authentication Fails, …"`.
 Plan steps 5 and 8 key on `402` / `"402"`, with fixtures.
+
+## Step 10: the comparison walk (2026-10-22)
+
+The same rbtree DAG as the Haiku walk (parallel-walker EVIDENCE step 12b):
+- a fresh clone `~/dogfood/rbtree-ds` at `990e342`, the commit that walk started from;
+- `IMPLEMENTER_PRIMARY=deepseek DEEPSEEK_EFFORT=high run-goals.sh --jobs 3` under `caffeinate -i`;
+- house at `d3f73c0`;
+- the proof sandbox on;
+- Opus 5.5 reviewing.
+
+**House control:** `git diff --stat c5297ca d3f73c0 -- scripts/ mods/` shows only this item's launcher, `run-goal.sh` journal fields, `lib/cost-rollup.py`, tests, and comment or message lines (the `/walk-status` rename, `install.sh`'s check text).
+
+| | Haiku 5.5 (`xhigh`), step 12b | DeepSeek Flash (`high`) |
+|---|---|---|
+| Goals done | 7/7 | 7/7 |
+| Review verdicts | 7 DONE in round 0 | 7 DONE in round 0 |
+| Fix rounds | 0 | 0 |
+| Fallbacks | 0 | 0 |
+| Stops | 0 | 2, both `journal-tamper` (below) |
+| Implementer passes | 7 | 9 (g2 and g3 were recut after their stops) |
+| Implementer cost | $0.4349 (Claude Code's estimate at Haiku's price) | $0.3356 at peak price (rollup $0.2340, plus the two discarded attempts: g2 $0.0717, g3 $0.0299). The walk ran 10:37–11:05 UTC on a Thursday, which is off-peak, so the list cost was about **$0.168** |
+| Wall time | 57m51s, of which 24m23s asleep; about 33.5 min awake | **27m41s**, no sleep. Includes both stops, both recuts and about 3 min of recovery between runs |
+| Source lines (`src/`) | 539 | 568 |
+
+**The two stops.** In g2's and g3's first attempts DeepSeek did the same thing:
+- it wrote an `IMPLEMENTER checkpoint` heading with a time it had not taken from `date -u`. Both times were a few minutes in the future: `10:47:30Z` when the real time was `10:42:39Z`, and `10:52:40Z` against `10:50:30Z`;
+- it committed that heading;
+- it then rewrote the committed heading to the real time.
+
+Editing committed journal text is `journal-tamper`, and the host stopped both goals before review. Everything else DeepSeek wrote to the journal was a proper append. Both goals' code and proofs had passed.
+
+The Architect put the committed line back each time (the user's order, recovery A). That turned out to be moot: the walker recuts a stopped goal and reruns it fresh. The reruns did not repeat the edit, and nor did g4–g7. So the edit happened in 2 of 9 DeepSeek passes; Haiku did it in 0 of 7 passes this morning.
+
+**Review notes (the SIMPLER heading).** The reviews asked for nothing. Two noted dead code:
+- g2: a branch that cannot be taken;
+- g6: four NULL guards in `delete_fixup` that a valid tree never needs.
+
+**Not measured:** whether any DeepSeek reply stopped at Claude Code's 32000-token output cap. The run folders of goals that succeed are removed, and no pass failed.
+
+**What this means for the flip.** On this DAG, DeepSeek matched Haiku on quality: every review passed first time, with no fix rounds. It cost roughly 40–60% less and took less wall time. Its one failure mode is editing a committed journal record. That stops a real walk at the first goal it touches, so it has to be fixed before the default flips. The fix is an implementer-prompt rule: take the time from `date -u` before writing a heading, and correct a committed record by appending, never by editing.
