@@ -1300,7 +1300,7 @@ EOF
         # against cw/<goal> before it records the goal as finished.
         printf 'reviewed=%s\ndone=%s\n' "$REVIEWED_HEAD" "$done_head" >"$WT_RESULT.tmp" &&
           mv -f "$WT_RESULT.tmp" "$WT_RESULT" || wake "result-write-failed" "$WT_RESULT"
-        # Display only (the /walk pane shows the goal as integrating).
+        # Display only (the /walk-status pane shows the goal as integrating).
         event_phase integrate
       else
         "$GOALS_PY" GOALS.md set "$GOAL_ID" done

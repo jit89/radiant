@@ -1,6 +1,6 @@
 import type { WalkGoal, WalkGraph } from '../types'
 
-// The /walk pane as lines of tinted parts, for a body `columns` cells wide.
+// The /walk-status pane as lines of tinted parts, for a body `columns` cells wide.
 // Pure, so the layout is tested without a surface.
 
 export type Tone = 'head' | 'line' | 'id' | 'title' | 'detail' | 'note' | WalkGoal['state']

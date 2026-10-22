@@ -18,7 +18,7 @@ Usage (from the target repo):
   events.py query  <journal> [--errors|--warnings] [--last N] [--since SPEC]
                    [--goal ID] [--walk ID|current] [--json]
   events.py status [--json]      # the goal running now, from anywhere in the repo
-  events.py graph [--json] [--dir DIR]   # every goal as a git graph (the /walk pane)
+  events.py graph [--json] [--dir DIR]   # every goal as a git graph (the /walk-status pane)
   events.py walks --session ID [--session ID ...] [--json]   # walks those sessions launched
   events.py --self-test
 """

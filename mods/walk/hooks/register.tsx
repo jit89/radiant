@@ -8,7 +8,7 @@ import { paneLines } from './view'
 import type { Tone } from './view'
 
 // The walk this session launched, as one task per goal in the session's task
-// list, kept current by a reconcile on every poll (reconcile.ts); and `/walk
+// list, kept current by a reconcile on every poll (reconcile.ts); and `/walk-status
 // [dir]`, a pane with every goal of that repo's GOALS.md as a git graph (bare,
 // outside a repo with one: the walk this session launched). The
 // walker runs as a background shell process, not as a subagent, so this reads
@@ -49,7 +49,7 @@ const TONES: Record<Tone, { color?: string; dimColor?: boolean; bold?: boolean }
   bounced: { color: 'error', bold: true },
 }
 
-// The running session's poll, for /walk to fill its pane at once.
+// The running session's poll, for /walk-status to fill its pane at once.
 let pollNow: (() => Promise<void>) | null = null
 
 export const register: Register = on => {
@@ -83,14 +83,14 @@ export const register: Register = on => {
       // sessions as an SDK client (not "interactive") and still draws one.
       if ((await $.session.surfaces()).length === 0) return
       const cwd = await $.session.cwd()
-      // The task poll first, so a bare /walk's fallback sees the walk it chose.
+      // The task poll first, so a bare /walk-status's fallback sees the walk it chose.
       await pollTasks()
       if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
         const { dir } = await read($, view)
         try {
           let graph = (await events(['graph', '--json', '--dir', dir ?? cwd], cwd)) as WalkGraph
           let via: string | null = null
-          // A bare /walk where the working folder has no GOALS.md shows the walk
+          // A bare /walk-status where the working folder has no GOALS.md shows the walk
           // this session launched, chosen as the task list chooses it.
           if (dir === null && !graph.found) {
             const { sessions, last } = await read($, tasks)
@@ -102,7 +102,7 @@ export const register: Register = on => {
               via = root
             }
           }
-          // A read for a repo /walk has since moved away from is dropped.
+          // A read for a repo /walk-status has since moved away from is dropped.
           await update($, view, v => (v.dir === dir ? { ...v, graph, error: null, via } : v))
         } catch (error) {
           // The pane keeps the last graph and says why it is not current.
@@ -110,7 +110,7 @@ export const register: Register = on => {
         }
       }
     }
-    // One poll at a time: a tick during one is skipped, and /walk waits for it
+    // One poll at a time: a tick during one is skipped, and /walk-status waits for it
     // and then reads again, so the pane it opened is filled at once.
     const poll = () =>
       (inflight ??= pollOnce()
@@ -126,7 +126,7 @@ export const register: Register = on => {
     }
 
     await $.command.register({
-      name: 'walk',
+      name: 'walk-status',
       description: 'Show the goal DAG of this repo (or DIR) as a git graph, live',
       argumentHint: '[dir]',
     })
@@ -134,7 +134,7 @@ export const register: Register = on => {
     return started
   })
 
-  on('command.run', { command: 'walk' }, async ($, e) => {
+  on('command.run', { command: 'walk-status' }, async ($, e) => {
     const dir = e.args.trim() || null
     await update($, view, v => ({ ...v, dir, ...(dir === v.dir ? {} : { graph: null, error: null, via: null }) }))
     await $.ui.open({ id: PANE, title: 'walk' })

@@ -70,7 +70,7 @@ function pane(surface: 'terminal' | 'desktop', bodyColumns: number) {
 }
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`/walk opens the pane with the goal graph (${surface})`, async ($, on) => {
+  test(`/walk-status opens the pane with the goal graph (${surface})`, async ($, on) => {
     mock.clock(on)
     const argvs: string[][] = []
     on('process.run', async ($, e) => {
@@ -81,7 +81,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const panes = engine(on, [surface])
     await $.session.start({ cwd: '/repo', surface, isInteractive: true })
 
-    const ran = await $.command.run({ command: 'walk', args: '' })
+    const ran = await $.command.run({ command: 'walk-status', args: '' })
     expect(ran.text).toBe('Walk pane opened for this repo.')
     expect(panes).toEqual(['walk'])
     expect(argvs.some(a => a.includes('graph') && a.at(-1) === '/repo')).toBe(true)
@@ -93,7 +93,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
-test('/walk DIR reads that repo, a failed read keeps the graph and says why', async ($, on) => {
+test('/walk-status DIR reads that repo, a failed read keeps the graph and says why', async ($, on) => {
   const clock = mock.clock(on)
   let fail = false
   const dirs: string[] = []
@@ -107,7 +107,7 @@ test('/walk DIR reads that repo, a failed read keeps the graph and says why', as
   })
   engine(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await $.command.run({ command: 'walk', args: ' ~/other ' })
+  await $.command.run({ command: 'walk-status', args: ' ~/other ' })
   expect(dirs.at(-1)).toBe('~/other')
 
   fail = true
@@ -247,8 +247,8 @@ test('a parallel walk counts the other running goals in the header', () => {
   expect(text(paneLines({ ...GRAPH, others: 2 }, 90))[0]).toBe('mailer · 1/3 done · g2-ack r1 · review +2')
 })
 
-// Outside a repo with a GOALS.md, a bare /walk shows the walk this session
-// launched (as the task list chooses it); /walk DIR never falls back.
+// Outside a repo with a GOALS.md, a bare /walk-status shows the walk this session
+// launched (as the task list chooses it); /walk-status DIR never falls back.
 function noGoalsHere(walks: unknown[], argvs: string[][]) {
   return async ($: unknown, e: { argv: readonly string[] }) => {
     argvs.push([...e.argv])
@@ -262,13 +262,13 @@ function noGoalsHere(walks: unknown[], argvs: string[][]) {
 }
 const LIVE = { root: '/target', walk_id: 'cfcda33d-1111-4000-8000-000000000001', journal: 'docs/journal/x.md', session: 'S1', mtime: 1, live: true, started: 5 }
 
-test('a bare /walk with no GOALS.md here shows the session\'s walk', async ($, on) => {
+test('a bare /walk-status with no GOALS.md here shows the session\'s walk', async ($, on) => {
   mock.clock(on)
   const argvs: string[][] = []
   on('process.run', noGoalsHere([LIVE], argvs))
   engine(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  const ran = await $.command.run({ command: 'walk', args: '' })
+  const ran = await $.command.run({ command: 'walk-status', args: '' })
   expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
   const walks = argvs.find(a => a.includes('walks')) ?? []
   expect(walks.slice(walks.indexOf('walks'))).toEqual(['walks', '--session', 'S1', '--json'])
@@ -276,32 +276,32 @@ test('a bare /walk with no GOALS.md here shows the session\'s walk', async ($, o
   expect((await ui.find({ key: 'head' }))?.text).toBe('mailer · 1/3 done · g2-ack r1 · review')
 })
 
-test('a bare /walk with no GOALS.md and no walk says so', async ($, on) => {
+test('a bare /walk-status with no GOALS.md and no walk says so', async ($, on) => {
   mock.clock(on)
   const argvs: string[][] = []
   on('process.run', noGoalsHere([], argvs))
   engine(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  const ran = await $.command.run({ command: 'walk', args: '' })
+  const ran = await $.command.run({ command: 'walk-status', args: '' })
   expect(ran.text).toBe('Walk pane opened for this repo.')
   const ui = await $.ui.mount(pane('terminal', 100))
   expect((await ui.find({ key: 'none' }))?.text).toBe('No GOALS.md at or above /repo')
 })
 
-test('/walk DIR with no GOALS.md never falls back', async ($, on) => {
+test('/walk-status DIR with no GOALS.md never falls back', async ($, on) => {
   mock.clock(on)
   const argvs: string[][] = []
   on('process.run', noGoalsHere([LIVE], argvs))
   engine(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  const ran = await $.command.run({ command: 'walk', args: '/elsewhere' })
+  const ran = await $.command.run({ command: 'walk-status', args: '/elsewhere' })
   expect(ran.text).toBe('Walk pane opened for /elsewhere.')
   expect(argvs.some(a => a.includes('graph') && a.at(-1) === '/target')).toBe(false)
   const ui = await $.ui.mount(pane('terminal', 100))
   expect((await ui.find({ key: 'none' }))?.text).toBe('No GOALS.md at or above /elsewhere')
 })
 
-test('with no walk live, a bare /walk keeps the walk the task list follows', async ($, on) => {
+test('with no walk live, a bare /walk-status keeps the walk the task list follows', async ($, on) => {
   const clock = mock.clock(on)
   const argvs: string[][] = []
   const newer = { ...LIVE, root: '/newer', walk_id: 'dbdbdbdb-2222-4000-8000-000000000002', live: false, started: null, mtime: 9 }
@@ -320,11 +320,11 @@ test('with no walk live, a bare /walk keeps the walk the task list follows', asy
   await clock.advance(3000) // the task list takes the live walk in /target
   // It ends; a newer idle walk file in /newer is left over.
   walks = [{ ...LIVE, live: false, started: null }, newer]
-  const ran = await $.command.run({ command: 'walk', args: '' })
+  const ran = await $.command.run({ command: 'walk-status', args: '' })
   expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
 })
 
-test('after /clear, a bare /walk still finds the walk the old session id launched', async ($, on) => {
+test('after /clear, a bare /walk-status still finds the walk the old session id launched', async ($, on) => {
   const clock = mock.clock(on)
   const argvs: string[][] = []
   let sid = 'S0'
@@ -344,11 +344,11 @@ test('after /clear, a bare /walk still finds the walk the old session id launche
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await clock.advance(3000) // the task poll has stored S0
   sid = 'S1' // /clear: a new id, no session.start
-  const ran = await $.command.run({ command: 'walk', args: '' })
+  const ran = await $.command.run({ command: 'walk-status', args: '' })
   expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
 })
 
-test('after a restart, a bare /walk shows the walk whose tasks are listed, as the task list does', async ($, on) => {
+test('after a restart, a bare /walk-status shows the walk whose tasks are listed, as the task list does', async ($, on) => {
   mock.clock(on)
   const argvs: string[][] = []
   const older = { ...LIVE, live: false, started: null, mtime: 1 }
@@ -360,6 +360,6 @@ test('after a restart, a bare /walk shows the walk whose tasks are listed, as th
   store.set('7', { id: '7', subject: 'g1-store — Persist inbound mail', status: 'completed', owner: 'walk:cfcda33d' })
   engine(on, ['terminal'], ['TaskCreate', 'TaskUpdate', 'TaskList'])
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  const ran = await $.command.run({ command: 'walk', args: '' })
+  const ran = await $.command.run({ command: 'walk-status', args: '' })
   expect(ran.text).toBe("Walk pane opened for this session's walk in /target.")
 })

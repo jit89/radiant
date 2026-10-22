@@ -152,7 +152,7 @@ def dump_yaml(data: dict) -> str:
 
 def atomic_write(path: Path, text: str) -> None:
     """Replace the file whole: a temp file beside it, flushed and fsynced, then
-    os.replace. A concurrent reader (the /walk pane, a goal starting) sees the
+    os.replace. A concurrent reader (the /walk-status pane, a goal starting) sees the
     old file or the new one, never half. Written through a symlink, as
     write_text did, and with the file's mode kept."""
     real = path.resolve()

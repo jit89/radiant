@@ -63,8 +63,8 @@ export type WalkGraph = {
   goals?: Record<string, WalkGoal>
 }
 
-/** What the /walk pane draws: the last graph read, the last read's failure, the repo asked for,
- * and, for a bare /walk outside a repo with a GOALS.md, the root of the session's walk it shows. */
+/** What the /walk-status pane draws: the last graph read, the last read's failure, the repo asked for,
+ * and, for a bare /walk-status outside a repo with a GOALS.md, the root of the session's walk it shows. */
 export type WalkView = { graph: WalkGraph | null; error: string | null; dir: string | null; via: string | null }
 
 declare module 'claude-code' {
