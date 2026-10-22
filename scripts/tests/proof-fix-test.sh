@@ -152,7 +152,11 @@ check "handoff carries the failure" yes "$(has 'FAIL: impl.txt is not FIXED' "$C
 check "handoff carries the exit code" yes "$(has 'exited 3' "$CALLS/handoff-2.md")"
 check "a nonzero exit gets no Ran-0-tests line" no "$(has 'which the host counts as a' "$CALLS/handoff-2.md")"
 check "the secret is redacted" no "$(has 'AKIAABCDEFGHIJKLMNOP' "$CALLS/handoff-2.md")"
-check "the redaction is counted" yes "$(has '1 value redacted' "$CALLS/handoff-2.md")"
+# At least one: the denial listing appended to a red proof is system-wide (other
+# tests' sandboxed proofs under run-all -j N land in it, and a long random
+# token there is redacted too). Exact counts are pinned on proof-excerpt.py
+# alone in section 12.
+check "the redaction is counted" yes "$(grep -Eq '^([1-9][0-9]* values|1 value) redacted\.' "$CALLS/handoff-2.md" && echo yes || echo no)"
 check "the fix is saved for a resume" yes "$([[ -f "$(art)/fix-r0.md" ]] && echo yes || echo no)"
 
 echo "== 2. a proof fix round that changes nothing: proof-red, no more rounds =="
