@@ -111,8 +111,10 @@ else
   rm -rf "$OLD" && mkdir -p "$OLD"
   git -C "$HERE/.." archive "$PRE_ITEM6" scripts | tar -x -C "$OLD"
   cp "$HOUSE/scripts/claude-implement.sh" "$HOUSE/scripts/claude-goal-review.sh" "$OLD/scripts/"
+  # The dispatch commit is newer than the pinned walker (FUTURE-WORK item 24):
+  # one journal-only commit per pass, left out of the comparison.
   norm() {
-    git log --reverse --format=%s
+    git log --reverse --format=%s | grep -v ': orchestrator dispatch r'
     sed -E 's/^## [0-9TZ:-]+ — /## T — /; s/(BASE_SHA|walk_id|merge)=[0-9a-f-]+/\1=X/g' docs/journal/p.md
   }
   pwalk_repo

@@ -804,7 +804,49 @@ In reserve if the prompt rule is not enough: the implementer appends each
 heading from the shell (`echo "## $(date -u …) — IMPLEMENTER …" >> journal`), so a
 guessed time cannot be written at all.
 
+DONE (2026-10-22): `run-goal.sh` commits the journal right after each dispatch
+line (and the fix line before it), so every record the implementer can see is
+committed. It then walks the journal's history (`orch_journal_chain_problems`,
+`orch-files.py journal-chain`): its copy at `BASE_SHA`, at each first-parent
+commit since that touched it, then the working copy. Each must start with the
+last one kept, and the working copy must be kept. A record edited and
+committed, in the same pass or an earlier one, stops the goal as
+`journal-tamper` after the pass, or refuses a resume before dispatch, whatever
+stop came between; putting the lines back (keeping what follows) clears it.
+Within a run the pass is also held to its copy from just before it ran, which
+covers a pass that amends or rebases the host's commits. Not caught: a pass
+that amends or squashes away the first committed copy of one of its own
+records, or rewrites history and then stops before the post-pass check (the
+before-pass copy lives in the run's own dir). `journal-records-test.sh`
+covers it.
+
 Item 22 SHIPPED (2026-10-22): DeepSeek Flash is the default implementer with
 Haiku 5.5 as the fallback, after the comparison walk (`12e6a6f`) and the
 confirming walk after the journal prompt rule (`4e486f8`). Still open from it:
-the `/walk-status` cost ignores `fallback_from` (above), and item 24.
+the `/walk-status` cost ignores `fallback_from` (above).
+
+## 25. A forged ORCHESTRATOR record can move a resume's BASE_SHA (2026-10-22)
+
+Found by Opus reviewing item 24. `orch-files.py --records` accepts
+ORCHESTRATOR records in what the implementer appends: they are pure appends of
+the documented shape. A forged `ORCHESTRATOR dispatch <goal> r0
+BASE_SHA=<its own commit>` would be read by `resume-state.py` as the attempt's
+base, so after a stop a plain rerun would compute `contract_drift` and the
+review diff from that later base, hiding an earlier contract commit. Fix
+direction: only the host writes ORCHESTRATOR records, so the appended text
+may hold no ORCHESTRATOR record the host did not write itself (the host's own
+lines are known: `journal_line` can keep them). That must hold at every
+journal commit, the one `record_wake` makes on an early stop included, not
+only after a pass.
+
+## 26. A reviewer that changes .git stops under the wrong reason (2026-10-23)
+
+Found by Opus reviewing item 24. Nothing checks `.git` right after the
+reviewer. On a FIX verdict the check before the next dispatch commit
+(item 24) reports it as `git-metadata-tamper`; on DONE, BLOCKED or bounced the
+first git call after review runs inside `$(...)`, so only that subshell is
+tainted, and the stop reads `head-moved-during-review` or
+`orchestration-files-changed`, with GOALS.md already set to `done` on the main
+checkout. Fix: `verify_git_meta "during review r${ROUND}"` right after the
+reviewer returns, which covers every verdict route.
+

@@ -5,6 +5,8 @@
 
 MODE:
   --none      the working copy must equal HEAD
+  --prefix    the working copy must start with HEAD_COPY, whatever follows
+              it (HEAD_COPY being the journal from before the implementer ran)
   --records   HEAD, then only whole journal records: a heading line
               "## <utc> — <ROLE> ..." and the lines under it, for ROLE in
               ORCHESTRATOR, IMPLEMENTER or REVIEWER. An ORCHESTRATOR record
@@ -19,6 +21,15 @@ MODE:
               walk-start belongs to the walk, not to a goal.
 
 Exit 0 when the mode holds; otherwise print why and exit 1.
+
+  orch-files.py journal-chain LABEL PATH [LABEL PATH ...]
+
+The journal's versions in order, oldest first: its copy at the goal's
+BASE_SHA, at each later commit that touched it, then the working copy last. A
+version is kept when it starts with the last version kept; the working copy
+must be kept. So a record edited and committed is caught however many commits
+later, and putting the edited lines back (keeping what follows) clears it
+(FUTURE-WORK item 24). An unreadable version is never kept.
 
 The journal is a shared file: the host appends to it, the implementer appends
 to it, and the host commits the result under its own name. Byte ownership
@@ -70,9 +81,42 @@ def check_records(extra, goal_id):
     return None
 
 
+def read(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def check_chain(pairs):
+    """Return a problem string, or None when the last version is kept."""
+    kept_label, kept = pairs[0][0], read(pairs[0][1])
+    if kept is None:
+        return f"the journal at {kept_label} is unreadable"
+    broke = None
+    for label, path in pairs[1:]:
+        text = read(path)
+        if text is not None and text.startswith(kept):
+            kept_label, kept, broke = label, text, None
+        elif broke is None:
+            broke = label
+    if broke is None:
+        return None
+    return (f"text already in the journal at {kept_label} was edited, not appended "
+            f"to (from {broke} on)")
+
+
 def main(argv):
+    if argv[:1] == ["journal-chain"] and len(argv) >= 5 and len(argv) % 2 == 1:
+        it = iter(argv[1:])
+        problem = check_chain(list(zip(it, it)))
+        if problem:
+            print(problem)
+            return 1
+        return 0
     if len(argv) not in (4, 5) or argv[0] != "journal" or argv[3] not in (
-        "--none", "--records"
+        "--none", "--records", "--prefix"
     ):
         sys.exit(__doc__)
     _, head_path, work_path, mode = argv[:4]
@@ -90,8 +134,11 @@ def main(argv):
     if work == head:
         return 0
     if not work.startswith(head):
-        print("committed text was edited, not appended to")
+        print("earlier text was edited, not appended to" if mode == "--prefix"
+              else "committed text was edited, not appended to")
         return 1
+    if mode == "--prefix":
+        return 0
     if mode == "--none":
         print("has uncommitted additions")
         return 1

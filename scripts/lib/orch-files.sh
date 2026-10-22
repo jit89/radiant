@@ -40,6 +40,44 @@ orch_journal_problems() {
   rm -f "$head"
 }
 
+# The journal along its history since BASE (lib/orch-files.py journal-chain):
+# its copy at BASE, at each first-parent commit that touched it, then the
+# working copy. HEAD can carry a committed edit of a record, which the check
+# against HEAD alone does not see. One problem a line.
+orch_journal_chain_problems() {
+  local base="$1" dir c revs args=()
+  [[ -n "${JOURNAL:-}" ]] || return 0
+  # Fail closed: run-goal.sh needs the journal committed before BASE_SHA is
+  # set, so a copy or a history it cannot read is a problem, not a pass.
+  if ! revs="$(git rev-list --reverse --first-parent "$base..HEAD" -- "$JOURNAL")"; then
+    echo "$JOURNAL: its history since ${base:0:12} cannot be listed"
+    return 0
+  fi
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/orch-chain-XXXXXX")"
+  if ! git show "$base:$JOURNAL" >"$dir/base" 2>/dev/null; then
+    rm -rf "$dir"
+    echo "$JOURNAL: not committed at BASE_SHA ${base:0:12}"
+    return 0
+  fi
+  args=("BASE_SHA ${base:0:12}" "$dir/base")
+  for c in $revs; do
+    git show "$c:$JOURNAL" >"$dir/$c" 2>/dev/null || rm -f "$dir/$c"
+    args+=("commit ${c:0:12}" "$dir/$c")
+  done
+  args+=("the working copy" "$JOURNAL")
+  { python3 "$ORCH_FILES_PY" journal-chain "${args[@]}" || true; } | sed "s|^|$JOURNAL: |"
+  rm -rf "$dir"
+}
+
+# The journal must still start with FILE, taken before a pass that may also
+# rewrite the history the chain walks (lib/orch-files.py --prefix).
+orch_journal_kept_problems() {
+  local file="$1" label="$2"
+  [[ -n "${JOURNAL:-}" && -f "$file" ]] || return 0
+  { python3 "$ORCH_FILES_PY" journal "$file" "$JOURNAL" --prefix || true; } |
+    sed "s|^|$JOURNAL: against $label: |"
+}
+
 orch_staged_problems() {
   local f
   for f in GOALS.md ${JOURNAL:+"$JOURNAL"}; do

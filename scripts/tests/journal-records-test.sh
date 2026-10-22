@@ -68,6 +68,32 @@ check "heading without a timestamp" "appended line 2 is a heading in no known sh
   "$(V "$(printf '\n## notes\n')")"
 check "records mode needs a goal" "1" \
   "$(python3 "$HERE/lib/orch-files.py" journal "$TMP/head.md" "$TMP/head.md" --records >/dev/null 2>&1; echo $?)"
+P() {  # P <kept copy> <working copy> -> "ok" or the problem (--prefix)
+  printf '%b' "$1" >"$TMP/kept.md"
+  printf '%b' "$2" >"$TMP/work.md"
+  python3 "$HERE/lib/orch-files.py" journal "$TMP/kept.md" "$TMP/work.md" --prefix && echo ok
+}
+check "prefix: anything appended" "ok" "$(P '# J\n' '# J\nloose text\n## notes\n')"
+C() {  # C <version> ... -> "ok" or the problem (journal-chain; the last is the working copy)
+  local i=0 args=()
+  for v in "$@"; do
+    i=$((i + 1))
+    if [[ "$v" == MISSING ]]; then rm -f "$TMP/v$i"; else printf '%b' "$v" >"$TMP/v$i"; fi
+    args+=("v$i" "$TMP/v$i")
+  done
+  python3 "$HERE/lib/orch-files.py" journal-chain "${args[@]}" && echo ok
+}
+check "chain: only appends" "ok" "$(C '# J\n' '# J\na\n' '# J\na\nb\n')"
+check "chain: an edit committed, then appended to" \
+  "text already in the journal at v2 was edited, not appended to (from v3 on)" \
+  "$(C '# J\n' '# J\na\n' '# J\nA\n' '# J\nA\nb\n')"
+check "chain: an edit put back, later lines kept" "ok" "$(C '# J\n' '# J\na\n' '# J\nA\n' '# J\na\nb\n')"
+check "chain: a commit that deleted the journal, then restored" "ok" "$(C '# J\n' MISSING '# J\nb\n')"
+check "chain: no readable first version" "the journal at v1 is unreadable" "$(C MISSING '# J\n')"
+check "chain: the working copy deleted" \
+  "text already in the journal at v1 was edited, not appended to (from v2 on)" "$(C '# J\n' MISSING)"
+check "prefix: an edited line" "earlier text was edited, not appended to" \
+  "$(P '# J\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g1-store\n' '# J\n## 2026-09-18T00:00:09Z — IMPLEMENTER start g1-store\n')"
 
 # --- run-goal.sh ------------------------------------------------------------
 HOUSE="$TMP/house"
@@ -95,6 +121,7 @@ run() {
   local stop
   stop="$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)"
   reason="$(sed -n 's/^- reason: //p' "$stop" 2>/dev/null || true)"
+  detail="$(sed -n 's/^- detail: //p' "$stop" 2>/dev/null || true)"
   reviewed="$(count claude-goal-review)"
   dispatched="$(count claude-implement)"
 }
@@ -135,6 +162,67 @@ run
 check "cross-goal record: journal-tamper" "journal-tamper" "$reason"
 check "cross-goal record: no review" "0" "$reviewed"
 
+# A record edited and committed leaves the file equal to HEAD (FUTURE-WORK
+# item 24): the copy at BASE_SHA, and the one from before the pass, catch it.
+stub claude-implement.sh 'sed -i "" "s/^# Journal: example/# Journal: rewritten/" docs/journal/example.md
+echo impl >impl.txt && git add impl.txt docs/journal/example.md && git commit -qm "wip(g1-store): impl"
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
+make_repo
+run
+check "committed edit of the title line at BASE_SHA: journal-tamper" "journal-tamper" "$reason"
+check "committed edit of the title line at BASE_SHA: no review" "0" "$reviewed"
+check "committed edit of the title line at BASE_SHA: named" "yes" \
+  "$([[ "$detail" == *"text already in the journal at "*" was edited"* ]] && echo yes || echo "no: $detail")"
+stub claude-implement.sh 'sed -i "" "s/ORCHESTRATOR dispatch g1-store r0/ORCHESTRATOR dispatch g1-store r9/" docs/journal/example.md
+echo impl >impl.txt && git add impl.txt docs/journal/example.md && git commit -qm "wip(g1-store): impl"
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
+make_repo
+run
+check "committed edit of this run's dispatch record: journal-tamper" "journal-tamper" "$reason"
+check "committed edit of this run's dispatch record: named" "yes" \
+  "$([[ "$detail" == *"text already in the journal at commit "*" was edited"* ]] && echo yes || echo "no: $detail")"
+# A pass that rewrites history: it amends the host's dispatch commit with an
+# edit, so no committed copy has the record as first written; the copy from
+# before the pass still does.
+stub claude-implement.sh 'sed -i "" "s/ORCHESTRATOR dispatch g1-store r0/ORCHESTRATOR dispatch g1-store r9/" docs/journal/example.md
+git commit -q --amend --no-edit -- docs/journal/example.md
+echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
+make_repo
+run
+check "an amended dispatch commit: journal-tamper" "journal-tamper" "$reason"
+check "an amended dispatch commit: named" "yes" \
+  "$([[ "$detail" == *"against its copy before implementer r0: earlier text was edited"* ]] && echo yes || echo "no: $detail")"
+
+# The pass edits its dispatch record's BASE_SHA, then stops early (blocked).
+# The dispatch record was committed before the pass, so the stop does not
+# commit the edit, and the resume refuses it.
+stub claude-implement.sh 'sed -i "" "s/ORCHESTRATOR dispatch g1-store r0 BASE_SHA=[0-9a-f]*/ORCHESTRATOR dispatch g1-store r0 BASE_SHA=0000000/" docs/journal/example.md
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "IMPLEMENTER_STATUS: BLOCKED" "THREAD_ID: t1"'
+make_repo
+run
+check "an edited dispatch record, then a blocked stop: stopped as blocked" "implementer-blocked" "$reason"
+check "an edited dispatch record, then a blocked stop: the dispatch record was committed first" "1" \
+  "$(git log --format=%s | grep -c 'orchestrator dispatch r0' || true)"
+check "an edited dispatch record, then a blocked stop: the stop did not commit the edit" "0" \
+  "$(git log -p --format= -- "$J" | grep -c '^+.*BASE_SHA=0000000 ' || true)"
+rm -f "$STUBS"
+run
+check "an edited dispatch record, then a blocked stop: resume dispatched" "0" "$dispatched"
+check "an edited dispatch record, then a blocked stop: resume refused" "gate" "$reason"
+# The incident itself: a record committed, then edited and committed again in
+# the same pass. Both copies from before the pass are clean.
+stub claude-implement.sh 'printf "\n## 2099-01-01T00:00:00Z — IMPLEMENTER start g1-store\nbeginning\n" >>docs/journal/example.md
+git add docs/journal/example.md && git commit -qm "wip(g1-store): start"
+sed -i "" "s/^## 2099-01-01T00:00:00Z — IMPLEMENTER start/## 2026-09-18T00:00:00Z — IMPLEMENTER start/" docs/journal/example.md
+echo impl >impl.txt && git add impl.txt docs/journal/example.md && git commit -qm "wip(g1-store): impl"
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
+make_repo
+run
+check "a record committed and edited in one pass: journal-tamper" "journal-tamper" "$reason"
+check "a record committed and edited in one pass: names the commit" "yes" \
+  "$([[ "$detail" == *"text already in the journal at commit "*" was edited"* ]] && echo yes || echo "no: $detail")"
+
 # --- resume (F3-05) ---------------------------------------------------------
 # A crash leaves the journal mid-record. Each documented checkpoint must
 # resume; anything else must refuse before a launcher runs.
@@ -164,6 +252,49 @@ resume_with "resume with a loose note" '\nUSER PRIVATE NOTE\n' 0
 resume_with "resume with another goal's record" \
   '\n## 2026-09-18T00:00:01Z — IMPLEMENTER start g2-ack\nwrong goal\n' 0
 resume_with "resume with an unknown heading" '\n## 2026-09-18T00:00:01Z — INTRUDER start g1-store\n' 0
+# An earlier pass edited a record and committed it: HEAD carries the edit, so
+# only the journal's history shows it (FUTURE-WORK item 24). First a record
+# from before BASE_SHA.
+make_repo
+base="$(git rev-parse HEAD)"
+"$HERE/goals.py" GOALS.md set g1-store in_progress >/dev/null
+printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=%s THREAD_ID=- SESSION_ID=-\n' "$base" >>"$J"
+sed -i "" "s/^# Journal: example/# Journal: rewritten/" "$J"
+git commit -qam "wip(g1-store): an earlier pass"
+run
+check "resume with a committed edit of the title line from before BASE_SHA: dispatched" "0" "$dispatched"
+check "resume with a committed edit of the title line from before BASE_SHA: gate" "gate" "$reason"
+check "resume with a committed edit of the title line from before BASE_SHA: named" "yes" \
+  "$([[ "$detail" == *"text already in the journal at BASE_SHA "*" was edited"* ]] && echo yes || echo "no: $detail")"
+# Then one of this goal's own, written after BASE_SHA by a pass that stopped
+# for another reason; putting it back clears it, and a committed ARCHITECT
+# note between stop and resume is an append.
+resume_after_edit() {  # resume_after_edit <put back: 0|1> <architect note: 0|1>
+  make_repo
+  local base
+  base="$(git rev-parse HEAD)"
+  "$HERE/goals.py" GOALS.md set g1-store in_progress >/dev/null
+  printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=%s THREAD_ID=- SESSION_ID=-\n' "$base" >>"$J"
+  printf '\n## 2099-01-01T00:00:00Z — IMPLEMENTER start g1-store\nbeginning\n' >>"$J"
+  git commit -qam "wip(g1-store): start"
+  sed -i "" "s/^## 2099-01-01T00:00:00Z/## 2026-09-18T00:00:01Z/" "$J"
+  git commit -qam "wip(g1-store): an edit"
+  if [[ "$1" == 1 ]]; then
+    sed -i "" "s/^## 2026-09-18T00:00:01Z/## 2099-01-01T00:00:00Z/" "$J"
+    git commit -qam "journal: put the record back"
+  fi
+  if [[ "$2" == 1 ]]; then
+    printf '\n## 2026-09-18T00:00:02Z — ARCHITECT note g1-store\nresuming\n' >>"$J"
+    git commit -qam "journal: architect note"
+  fi
+  run
+}
+resume_after_edit 0 0
+check "resume with a committed edit after BASE_SHA: dispatched" "0" "$dispatched"
+check "resume with a committed edit after BASE_SHA: names the commit" "yes" \
+  "$([[ "$detail" == *"text already in the journal at commit "*" was edited"* ]] && echo yes || echo "no: $detail")"
+resume_after_edit 1 1
+check "resume after the record was put back, with an ARCHITECT note: dispatched" "1" "$dispatched"
 
 # --- the walker (F4-03) -----------------------------------------------------
 # run-goals.sh recovers the same way, for the one goal that is in progress:

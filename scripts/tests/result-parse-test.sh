@@ -126,6 +126,20 @@ printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 run_goal
 check "fix round crash: implementer-error" "implementer-error" "$reason"
 check "fix round crash: thread kept" "t1" "$thread"
+# FUTURE-WORK item 24: each pass's records are committed before it runs, the
+# review, fix and r1 dispatch records included.
+c="$(git log -1 --format=%H --grep=': orchestrator dispatch r1$')"
+check "fix round: the r1 dispatch commit holds the review, fix and dispatch records" "1 1 1" \
+  "$(for r in 'review g1-store r0' 'fix g1-store r0' 'dispatch g1-store r1 '; do git show "$c:docs/journal/example.md" 2>/dev/null | grep -c "ORCHESTRATOR $r" || true; done | paste -sd ' ' -)"
+# A reviewer that changes .git stops the goal on that, before the dispatch
+# commit (the first git call after review) can stop it as commit-failed.
+stub claude-goal-review.sh "printf '#!/bin/sh\nexit 0\n' >.git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' 'VERDICT: FIX' 'VERDICT_FILE: $TMP/fix-verdict.md'"
+run_goal
+check "reviewer changed .git: git-metadata-tamper" "git-metadata-tamper" "$reason"
+check "reviewer changed .git: named before dispatch r1" "yes" "$(has 'before dispatch r1' "$detail")"
+stub claude-goal-review.sh "printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' \
+  'VERDICT: FIX' 'VERDICT_FILE: $TMP/fix-verdict.md'"
 
 # A goal whose attempt fell back resumes with the fallback off, so it stays on
 # the model it fell back to (docs/features/deepseek-primary Q2), even if the

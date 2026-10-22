@@ -79,6 +79,8 @@ RUN_DIR=""
 STOP_FILE=""
 ART_DIR=""
 JOURNAL=""
+# The journal as the current implementer pass found it ($RUN_DIR).
+JOURNAL_BEFORE=""
 ORACLE=""
 PROOF=""
 PLAN_PATH=""
@@ -464,7 +466,7 @@ contract_report() {
 
 # no_change_since SHA — true when nothing outside GOALS.md and the journal
 # changed between SHA and HEAD. Journal-only commits (the implementer's
-# checkpoints, the host's stop commit) are not progress. An empty or unknown
+# checkpoints, the host's dispatch and stop commits) are not progress. An empty or unknown
 # SHA counts as a change: there is nothing to judge against.
 no_change_since() {
   [[ -n "$1" ]] || return 1
@@ -904,6 +906,11 @@ else
 fi
 
 git show "$BASE_SHA:GOALS.md" >"$RUN_DIR/goals-base.md"
+# A resume can find a record an earlier pass edited and committed: the
+# journal's history since BASE_SHA must only ever have grown.
+journal_problems="$(orch_journal_chain_problems "$BASE_SHA" | paste -sd ';' -)"
+[[ -z "$journal_problems" ]] ||
+  die_gate "$journal_problems — a journal record was edited after it was written. Nothing was dispatched. Put the edited lines back as that copy has them (git show <commit>:$JOURNAL), keep everything after them, commit, and record any correction by appending; then rerun. Or hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
 ORACLE="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("oracle") or "")')"
 PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof") or "")')"
 # The signed plan as it stood at BASE_SHA. Both agents read this copy: the live
@@ -1005,6 +1012,17 @@ while :; do
       --summary "dispatch ${GOAL_ID} r${ROUND} BASE_SHA=${BASE_SHA}" \
       --payload "$(printf '{"thread_id":"%s","session_id":"%s",%s}' "${THREAD_ID:--}" "${SESSION_ID:--}" "$(events_pid_json)")"
 
+    # Every host record the pass can see is committed first (dispatch, and a
+    # fix line before it), so an edit of one is in the history the chain
+    # walks whatever stop follows, including one record_wake commits.
+    # The reviewer ran since the last .git check: a change there is its own stop.
+    verify_git_meta "before dispatch r${ROUND}"
+    orch_commit_journal "chore(${GOAL_ID}): orchestrator dispatch r${ROUND}" ||
+      wake "commit-failed" "dispatch r${ROUND}: $(orch_journal_problems --records "$GOAL_ID" | paste -sd ';' -)"
+    # The journal as the implementer finds it; the pass may only append to
+    # it, even if it rewrites history.
+    JOURNAL_BEFORE="$RUN_DIR/journal-r${ROUND}-before.md"
+    if [[ -n "$JOURNAL" && -f "$JOURNAL" ]]; then cp "$JOURNAL" "$JOURNAL_BEFORE"; else rm -f "$JOURNAL_BEFORE"; fi
     DS_OUT="$RUN_DIR/implementer-r${ROUND}.out"
     PHASE="implementer r${ROUND}"
     set +e
@@ -1107,9 +1125,15 @@ while :; do
   # The journal is the one file the implementer shares with the host, and the
   # host commits it under its own name. Check its shape here, before review
   # and before any commit, not only at commit time.
-  journal_problems="$(orch_journal_problems --records "$GOAL_ID" | paste -sd ';' -)"
+  # A record edited and committed leaves the file equal to HEAD, so its
+  # history since BASE_SHA, and its copy from before this pass, are checked too.
+  journal_problems="$({
+    orch_journal_problems --records "$GOAL_ID"
+    orch_journal_chain_problems "$BASE_SHA"
+    [[ "$PROOF_FIRST" -eq 1 ]] || orch_journal_kept_problems "$JOURNAL_BEFORE" "its copy before implementer r${ROUND}"
+  } | paste -sd ';' -)"
   if [[ -n "$journal_problems" ]]; then
-    wake "journal-tamper" "$journal_problems — the journal grew by something other than this goal's records. Review those lines, then commit or restore them."
+    wake "journal-tamper" "$journal_problems — the journal grew by something other than this goal's records, or a record already written was edited (even if committed). Review those lines; put an edited one back as the named copy has it (git show <commit>:$JOURNAL, or the copy from before the pass in $RUN_DIR), keep what follows, commit, and rerun."
   fi
 
 
