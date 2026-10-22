@@ -740,6 +740,12 @@ one-file-per-goal pattern, and say why a glob over the oracles themselves is
 wrong when they are committed up front. Prose only; to-goals quiz wording to
 match.
 
+DONE 2026-10-22: GOAL-FORMAT.md "Registration points" and the to-goals quiz
+(SKILL.md question 4) now say: sources by glob; no step of a proof may build,
+type-check or collect a later goal's red oracle (a self-discovering runner with
+each proof naming its files, or one registration file, package or include per
+goal for a build that compiles every oracle together).
+
 ## 22. DeepSeek as the primary implementer, Haiku second (2026-10-22)
 
 User, 2026-10-22, after reading the DeepSeek API docs: DeepSeek implements

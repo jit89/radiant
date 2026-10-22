@@ -47,8 +47,11 @@ Ask:
    without touching the same lines? Name every shared registration point the
    plan's harness has (a source list, a test list, a module or export list)
    and, for each, either make the harness pick the goals' files up itself
-   (a glob, a loop over `tests/acceptance/`) or declare `conflicts_with`
-   between the goals that edit it (GOAL-FORMAT.md, "Registration points").
+   (a source glob; for the oracles, no proof that builds or collects a later
+   goal's red oracle: a runner that finds tests itself with each proof naming
+   its own files, or one registration file per goal for a build that compiles
+   them together) or declare `conflicts_with` between the goals that edit it
+   (GOAL-FORMAT.md, "Registration points").
 
 Iterate until the user approves the breakdown. Then write files.
 

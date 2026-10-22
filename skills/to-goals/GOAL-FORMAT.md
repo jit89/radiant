@@ -96,11 +96,34 @@ stopped `merge-conflict`.
 For every shared registration point in the plan's harness (a build source
 list, a test list, a module, export or route table), choose one:
 
-- **The harness picks the files up itself**, so no goal edits the list. For
-  example `file(GLOB rbtree_src CONFIGURE_DEPENDS src/*.c)`, plus a
-  `foreach` over `tests/acceptance/*.c` that registers one test per file;
-  Python packages that import nothing by name in `__init__.py`. Prefer this:
-  it keeps goals truly parallel.
+- **The harness picks the files up itself**, so no goal edits the list.
+  Prefer this: it keeps goals truly parallel.
+  - **Sources:** glob them, e.g. `file(GLOB rbtree_src CONFIGURE_DEPENDS src/*.c)`;
+    Python packages that import nothing by name in `__init__.py`.
+  - **Oracles: no step of a goal's proof may build, type-check or collect a
+    later goal's oracle.** The oracles are committed before any goal runs, red
+    against an API that does not exist yet, so a later goal's oracle in an
+    earlier goal's build fails every earlier goal's proof as a build or
+    collection error. Two ways to meet it:
+    - **A runner that finds test files itself** (pytest, Vitest, node:test) is
+      fine when each proof names its own oracle files ("Proof composition"
+      below); so is `cargo test --test <name>`. A bare `pytest`, `pnpm test`,
+      `go test ./...` or `cargo test` stays red until the last goal lands: never
+      use one as a proof.
+    - **A build that compiles every oracle together** gets one unit per goal:
+      - one Go package of oracles per goal (`tests/acceptance/<id>/`, selected
+        by the proof) and one `tier.<id>.tsconfig.json` per goal, both the
+        Architect's, committed with the oracles in Phase 3, never one shared
+        package or `include` over every oracle;
+      - for a harness that collects registrations by glob (CMake test targets),
+        one registration file per goal, written by that goal and named in its
+        body as its edit: e.g. `tests/register/<name>.cmake` holding its one
+        `add_acceptance(<name>)` call. Committed up front it would land in every
+        earlier goal's build. A Tier 1 run of a later goal writes it beside its
+        stubs and deletes it with them.
+    The rbtree plan was amended this way after the first parallel walk; on the
+    re-run (2026-10-22) g4, g5 and g7 merged in one wave with no conflict
+    (`docs/features/parallel-walker/EVIDENCE.md` step 12b).
 - **The goals that edit it name each other in `conflicts_with`**, so they run
   in different waves. Correct, but those goals no longer run side by side.
 

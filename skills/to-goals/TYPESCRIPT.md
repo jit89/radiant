@@ -40,7 +40,11 @@ export default defineConfig({ test: { include: ["tests/acceptance/**/*.test.ts"]
 
 `tier.tsconfig.json`: `strict`, `target: es2022`, `module: esnext`,
 `moduleResolution: bundler`, `noEmit`, `skipLibCheck`, `types: []`;
-`include` = the oracle and the code it imports.
+`include` = the oracle and the code it imports. With more than one goal, one
+`tier.<id>.tsconfig.json` per goal, its `include` naming that goal's oracle
+only, and the proof's `-p` names it: one shared file listing every oracle makes
+`tsc` fail every earlier goal on a later goal's red oracle (GOAL-FORMAT.md,
+"Registration points").
 
 **node:test** (dev dependencies `typescript` and `@types/node`):
 
