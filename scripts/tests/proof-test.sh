@@ -76,7 +76,9 @@ has() { [[ "$detail" == *"$1"* ]] && echo yes || echo "no: $detail"; }
 # 1. A proof that never ends (watch mode, a server, a wait on input).
 PROOF_TIMEOUT=2 proof 'sleep "$NAP"'
 check "hang: proof-timeout" "proof-timeout" "$reason"
-check "hang: stops near the limit" "yes" "$([[ $secs -le 15 ]] && echo yes || echo "no (${secs}s)")"
+# The whole run, not the proof alone (gates, the sandbox self-test, commits):
+# 16 s was seen under run-all -j 8. Under the 41 s nap, so still the timeout's.
+check "hang: stops near the limit" "yes" "$([[ $secs -le 30 ]] && echo yes || echo "no (${secs}s)")"
 check "hang: proof process killed" "0" "$(pgrep -f "sleep $NAP" | wc -l | tr -d ' ')"
 check "hang: no review" "no" "$reviewed"
 

@@ -236,17 +236,19 @@ make_key_file() {
 
 # `env -u` arguments for every exported variable named like a credential (a
 # whole _-separated part KEY, APIKEY, TOKEN, SECRET, PASSWORD, PASSWD or
-# CREDENTIAL(S)), except git's own GIT_CONFIG_*, plus ANTHROPIC_BASE_URL. The
-# rule run-goal.sh's proof uses.
+# CREDENTIAL(S)), except git's own GIT_CONFIG_*, plus ANTHROPIC_BASE_URL (the
+# rule run-goal.sh's proof uses), and every CW_* setting.
 env_unsets() {
   local name
   printf '%s\n' -u ANTHROPIC_BASE_URL
-  # The house's own folder settings are for this launcher, not the model's shell.
-  printf '%s\n' -u CW_OUT_DIR -u CW_KEEP_RAW -u CW_PRUNE_DAYS -u CW_IMPL_TMP_ROOT
   # Effort is set by this launcher only (--effort); a value left in the user's
   # shell would change it unseen.
   printf '%s\n' -u CLAUDE_CODE_EFFORT_LEVEL
   for name in $(compgen -e); do
+    # Every CW_* setting is for the house's scripts (this launcher reads its
+    # own above), not the model's shell: the walker's (CW_PROOF_DEPS, CW_PIN_*,
+    # CW_DENY_WRITE_FILE) and the tests' (CW_PROOF_DENIALS) included.
+    if [[ "$name" == CW_* ]]; then printf '%s\n' -u "$name"; continue; fi
     [[ "$name" != GIT_CONFIG_* ]] || continue
     if grep -qiE '(^|_)(API)?KEY(_|$)|(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)' <<<"$name"; then
       printf '%s\n' -u "$name"

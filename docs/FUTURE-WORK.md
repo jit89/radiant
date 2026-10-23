@@ -876,3 +876,19 @@ folders), and presumably the rest of the per-user `/var/folders/…` tree (`C/`,
 module cache live under `C/`): measure a C, Python and Node build under it,
 with the private TMPDIR in place, before adding it.
 
+
+## 28. Two other places hand a child the house's environment (2026-10-23)
+
+Found by Opus reviewing the implementer's `CW_*` strip (the batch gate caught
+run-all's `CW_PROOF_DENIALS=off` reaching the implementer's shell; the
+launcher now strips every `CW_*`):
+- Host proofs (`proof_env_unsets`, `lib/proof.sh`) strip only credential
+  names, so a proof run by run-goal.sh sees the walk's `CW_*` settings
+  (`CW_EVENTS_ROOT`, `CW_PROOF_DEPS`, `CW_PIN_*`, `CW_DENY_WRITE_FILE`) while
+  the same proof run by the implementer does not. It matters only for a repo
+  whose tests read `CW_*` (the house walking its own goals); strip them so
+  both runs see the same environment.
+- The legacy `IMPLEMENTER=codex` launcher (`deepseek-code.sh`) hands the
+  Codex implementer's shell the full environment: every `CW_*` setting and
+  any credential the caller exported. Give it `claude-implement.sh`'s
+  `env_unsets`, or retire it now that DeepSeek runs through Claude Code.

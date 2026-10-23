@@ -199,7 +199,7 @@ rm -f "$REPO"/made-by-child-*
 echo "== 5. implementer under CW_OUT_DIR: an ok BLOCKED pass deletes nothing =="
 OD="$TMP/od-impl" && mkdir -p "$OD"
 before="$(count "$CACHE/runs" 'claude-implement-*')"; reset "$IMPL_BLOCKED"
-impl CW_OUT_DIR="$OD"
+impl CW_OUT_DIR="$OD" CW_PROOF_DEPS=/x CW_SOME_FUTURE_SETTING=1
 check "result ok" ok "$(line IMPLEMENTER_RESULT)"
 check "status BLOCKED" BLOCKED "$(line IMPLEMENTER_STATUS)"
 check "LOG kept in CW_OUT_DIR" "$OD" "$(dirname "$(line LOG)")"
