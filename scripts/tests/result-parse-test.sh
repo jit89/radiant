@@ -131,13 +131,28 @@ check "fix round crash: thread kept" "t1" "$thread"
 c="$(git log -1 --format=%H --grep=': orchestrator dispatch r1$')"
 check "fix round: the r1 dispatch commit holds the review, fix and dispatch records" "1 1 1" \
   "$(for r in 'review g1-store r0' 'fix g1-store r0' 'dispatch g1-store r1 '; do git show "$c:docs/journal/example.md" 2>/dev/null | grep -c "ORCHESTRATOR $r" || true; done | paste -sd ' ' -)"
-# A reviewer that changes .git stops the goal on that, before the dispatch
-# commit (the first git call after review) can stop it as commit-failed.
+# A reviewer that changes .git stops the goal on that, right after the review
+# (FUTURE-WORK item 26), not later as commit-failed.
 stub claude-goal-review.sh "printf '#!/bin/sh\nexit 0\n' >.git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
 printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' 'VERDICT: FIX' 'VERDICT_FILE: $TMP/fix-verdict.md'"
 run_goal
 check "reviewer changed .git: git-metadata-tamper" "git-metadata-tamper" "$reason"
-check "reviewer changed .git: named before dispatch r1" "yes" "$(has 'before dispatch r1' "$detail")"
+check "reviewer changed .git: named during review r0" "yes" "$(has 'during review r0' "$detail")"
+# FUTURE-WORK item 26: on a DONE verdict too, before the route marks the goal
+# done; and Claude Code's own config, the same way.
+printf 'VERDICT: DONE\n' >"$TMP/done-verdict.md"
+stub claude-goal-review.sh "printf '#!/bin/sh\nexit 0\n' >.git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' 'VERDICT: DONE' 'VERDICT_FILE: $TMP/done-verdict.md'"
+run_goal
+check "reviewer changed .git, DONE: git-metadata-tamper" "git-metadata-tamper" "$reason"
+check "reviewer changed .git, DONE: named during review r0" "yes" "$(has 'during review r0' "$detail")"
+check "reviewer changed .git, DONE: the goal is not marked done" in_progress \
+  "$("$HERE/goals.py" GOALS.md show g1-store | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+stub claude-goal-review.sh "mkdir -p .claude && printf '{}\n' >.claude/settings.json
+printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' 'VERDICT: DONE' 'VERDICT_FILE: $TMP/done-verdict.md'"
+run_goal
+check "reviewer changed .claude/: claude-config-tamper" "claude-config-tamper" "$reason"
+check "reviewer changed .claude/: named during review r0" "yes" "$(has 'during review r0' "$detail")"
 stub claude-goal-review.sh "printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' \
   'VERDICT: FIX' 'VERDICT_FILE: $TMP/fix-verdict.md'"
 

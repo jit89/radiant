@@ -866,6 +866,15 @@ tainted, and the stop reads `head-moved-during-review` or
 checkout. Fix: `verify_git_meta "during review r${ROUND}"` right after the
 reviewer returns, which covers every verdict route.
 
+DONE (2026-10-23): `run-goal.sh` runs `verify_git_meta` and
+`verify_claude_meta` "during review rN" right after the reviewer returns,
+before any route, so a change to `.git` or to Claude Code's config stops the
+goal under its own reason on every way out of the review (a verdict, a
+timeout, an error, a rate limit). `result-parse-test.sh` covers three cases:
+`.git` on FIX, `.git` on DONE, `.claude/` on DONE. The proof also gets a
+`.claude/` check ("during proof rN"); the check before the dispatch commit
+stays for a dispatch that follows a proof fix.
+
 ## 27. The implementer can read the user's macOS temp folder (2026-10-23)
 
 Found while measuring item 12's shared `/tmp/claude-<uid>`: a sandboxed

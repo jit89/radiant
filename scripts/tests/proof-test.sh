@@ -176,6 +176,13 @@ CW_PROOF_SANDBOX_CHECKED=1 proof 'exit 0'
 mv "$HOUSE/scripts/lib/proof-sandbox.py.away" "$HOUSE/scripts/lib/proof-sandbox.py"
 check "a lone run ignores CW_PROOF_SANDBOX_CHECKED: the self-test still stops it" yes "$(has 'proof-sandbox-unavailable')"
 
+# 3e. A proof that edits Claude Code's config the snapshot cannot see (an
+#     existing ignored file): stopped as that, during the proof (item 26).
+IGNORE='.claude/' PRE='mkdir -p .claude && echo "{}" >.claude/settings.local.json' \
+  proof 'echo "{\"hooks\":1}" >.claude/settings.local.json'
+check "proof edits ignored .claude config: claude-config-tamper" "claude-config-tamper" "$reason"
+check "  ...named during the proof" yes "$(has 'during proof r0')"
+
 # 4. Proof code that edits a tracked source file.
 proof 'echo changed >impl.txt'
 check "tracked edit: proof-tamper" "proof-tamper" "$reason"

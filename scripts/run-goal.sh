@@ -1019,7 +1019,8 @@ while :; do
     # Every host record the pass can see is committed first (dispatch, and a
     # fix line before it), so an edit of one is in the history the chain
     # walks whatever stop follows, including one record_wake commits.
-    # The reviewer ran since the last .git check: a change there is its own stop.
+    # Only host steps ran since the last .git check (after the proof, or at
+    # start); checked here, a change is its own stop, not commit-failed.
     verify_git_meta "before dispatch r${ROUND}"
     orch_commit_journal "chore(${GOAL_ID}): orchestrator dispatch r${ROUND}" ||
       wake "commit-failed" "dispatch r${ROUND}: $(orch_journal_problems --records "$GOAL_ID" | paste -sd ';' -)"
@@ -1167,6 +1168,7 @@ while :; do
     set -e
     PHASE="assess r${ROUND}"
     verify_git_meta "during proof r${ROUND}"
+    verify_claude_meta "during proof r${ROUND}"
     if [[ -n "$PROOF_SANDBOX_REASON" ]]; then
       wake "$PROOF_SANDBOX_REASON" "the proof sandbox stopped the proof before it ran. Output: $PROOF_FILE"
     fi
@@ -1291,11 +1293,16 @@ EOF
   rv_rc=$?
   set -e
   PHASE="route r${ROUND}"
+  # This review's result first (no git in these), so a stop below reports it.
   [[ -s "$RV_OUT.wrap" ]] && cat "$RV_OUT.wrap" >&2 || true
   LAST_CLAUDE="$(kv "$RV_OUT" CLAUDE_REVIEW_RESULT)"
   kv_keep SESSION_ID "$RV_OUT" SESSION_ID
-  journal_ids
   VERDICT_FILE="$(kv "$RV_OUT" VERDICT_FILE)"
+  # Before any route: a DONE route commits GOALS.md, and a git call inside
+  # $(...) would taint only its subshell (FUTURE-WORK item 26).
+  verify_git_meta "during review r${ROUND}"
+  verify_claude_meta "during review r${ROUND}"
+  journal_ids
   if [[ -n "$VERDICT_FILE" ]]; then
     cp -f "$VERDICT_FILE" "$ART_DIR/verdict-r${ROUND}.md" 2>/dev/null || true
   fi
