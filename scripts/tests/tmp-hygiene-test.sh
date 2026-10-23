@@ -313,8 +313,10 @@ check "wake: reviewer --add-dir names the run folder" yes \
 
 echo "== 9. run-all.sh: parallel, ordered report, leaks and failures caught =="
 RA="$TMP/ra/tests"
-mkdir -p "$RA"
+mkdir -p "$RA" "$TMP/ra/lib"
 cp "$HERE/tests/run-all.sh" "$RA/"
+# run-all.sh sources ../lib/cache.sh (cw_keep_awake): the house layout.
+cp "$HERE/lib/cache.sh" "$TMP/ra/lib/"
 fake_test() { printf '#!/usr/bin/env bash\n%s\n' "$2" >"$RA/$1-test.sh"; }
 fake_test a-pass 'sleep 4; echo fine'
 fake_test b-pass 'sleep 4; echo fine'
