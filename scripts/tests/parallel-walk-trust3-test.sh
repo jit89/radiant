@@ -49,6 +49,10 @@ prun --jobs 3
 check "signal in the join: the rerun completes" 0 "$prc"
 [[ "$prc" -eq 0 ]] || tail -20 "$TMP/pout" | sed 's/^/    | /'
 check "signal in the join: g1-a not dispatched again" "$before" "$(grep -c '^g1-a$' "$CALLS/implement" || true)"
+# The rerun's merged proofs ran unsandboxed (this file's CW_PROOF_SANDBOX=off):
+# its own overrides record is committed before g1-a's merge (FUTURE-WORK item 12).
+check "signal in the join: the rerun journals its overrides before merging g1-a" yes \
+  "$(git log --reverse --format=%s | awk '/^chore: orchestrator overrides$/ { n++; o = NR } /^chore\(g1-a\): orchestrator integrate$/ { m = NR } END { print (n == 2 && o < m) ? "yes" : "no: " n " " o " " m }')"
 
 # Something moves the scratch tree's HEAD after the merge commit: refused, the
 # walk branch never fast-forwards onto it.

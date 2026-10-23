@@ -94,6 +94,9 @@ cp "$J/ours.keep" "$J/ours"
 { cat "$J/theirs"; printf '\n## 2026-10-15T00:06:00Z — ORCHESTRATOR finished g2-b head=%040d\n' 0; } >"$J/forged"
 check "goal suffix with a walker-only record: refused" \
   "g2-b journal: holds a walker-only record (finished)" "$(jm forged || true)"
+{ cat "$J/theirs"; printf '\n## 2026-10-15T00:06:00Z — ORCHESTRATOR overrides walk proof-sandbox=off\n'; } >"$J/forged"
+check "goal suffix with the walker's overrides record: refused" \
+  "g2-b journal: holds a walker-only record (overrides walk)" "$(jm forged || true)"
 # Already joined (a bounce appended the records, then a recut): no duplicate.
 cat "$J/ours" >"$J/joined"
 tail -c +$(($(wc -c <"$J/base") + 1)) "$J/theirs" >>"$J/joined"
@@ -381,6 +384,7 @@ SH
 sprun --jobs 3
 cp "$TMP/psb.sh.orig" "$HOUSE/scripts/lib/proof-sandbox.sh"
 check "sandbox: a plain walk completes" 0 "$prc"
+check "sandbox: nothing overridden, no overrides record" 0 "$(git show HEAD:docs/journal/p.md | grep -c 'ORCHESTRATOR overrides' || true)"
 check "sandbox: the self-test ran once, in the walker, not in its members" walker "$(paste -sd ' ' - <"$CALLS/selftest" 2>/dev/null)"
 check "sandbox: every goal done" "done done done done" "$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
 check "sandbox: the walk's dependency folder is removed at the end" "$deps_before" "$(ls "$HOME/.cache/claude-coding-workflow/deps" 2>/dev/null | grep -c '^walk-' || true)"
@@ -396,6 +400,27 @@ check "sandbox deps: the walk completes" 0 "$prc"
 [[ "$prc" -eq 0 ]] || tail -15 "$TMP/pout" | sed 's/^/    | /'
 check "sandbox deps: g2-b done (it read the dependency and could not write there)" done "$(status_of g2-b)"
 
+# The proof sandbox stopping the walker's own steps (FUTURE-WORK item 12): a
+# hard link to a file outside every tree appears in the walk's dependency
+# folder after g1-a's own proof passed (its reviewer plants it), so g1-a's
+# integration meets it. (g2-b, proving at the same time, may meet it too.)
+# The folder is found by name, not through a variable the reviewer happens to
+# inherit; pwalk_repo clears $CALLS, so the action makes the outside file.
+plant_link='echo outside >"$CALLS/outside" && ln "$CALLS/outside" "$(ls -td "$HOME/.cache/claude-coding-workflow/deps/walk-"* | head -n1)/pulled-$RANDOM"'
+pwalk_repo
+printf '%s\n' "$plant_link" >"$CALLS/review-action-g1-a"
+sprun --jobs 3
+check "sandbox: a merged proof the sandbox stops is the integration's stop" proof-hardlink "$(reason_in g1-a)"
+check "  ...naming the merged proof" yes "$(grep -q 'stopped the merged proof of g1-a' "$(stopfile_of g1-a)" && echo yes || echo no)"
+check "  ...nothing merged" 0 "$(git log --merges --oneline | wc -l | tr -d ' ')"
+pwalk_repo
+sed -i '' 's|^journal: docs/journal/p.md$|journal: docs/journal/p.md\nworktree_setup: true|' GOALS.md
+git commit -qam "setup key"
+printf '%s\n' "$plant_link" >"$CALLS/review-action-g1-a"
+sprun --jobs 3
+check "sandbox: a scratch worktree_setup the sandbox stops is the integration's stop" proof-hardlink "$(reason_in g1-a)"
+check "  ...naming the setup" yes "$(grep -q 'worktree_setup in the scratch tree after merging g1-a' "$(stopfile_of g1-a)" && echo yes || echo no)"
+
 # A live .env in the main checkout stops the walk before any worktree is cut.
 pwalk_repo
 printf '.env.local\n' >>.gitignore && git add .gitignore && git commit -qm "ignore .env.local"
@@ -407,6 +432,7 @@ check "secrets-in-checkout: no worktree was cut" "" "$(ls "$WTROOT"/*/ 2>/dev/nu
 CW_ALLOW_DOTENV=1 sprun --jobs 3
 check "CW_ALLOW_DOTENV=1: the walk goes ahead" 0 "$prc"
 check "CW_ALLOW_DOTENV=1: the header says so" yes "$(grep -q 'CW_ALLOW_DOTENV=1' "$TMP/pout" && echo yes || echo no)"
+check "CW_ALLOW_DOTENV=1: the walker journals it (committed)" 1 "$(git show HEAD:docs/journal/p.md | grep -c '^## .* — ORCHESTRATOR overrides walk dotenv=allowed$' || true)"
 rm -f .env.local
 # A .env inside another worktree of the repo stops the walk too.
 pwalk_repo

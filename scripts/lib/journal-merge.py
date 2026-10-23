@@ -25,7 +25,7 @@ import sys
 # what run-goal.sh and its implementer write, never these: a planted
 # `finished` line copied onto the walk journal would read as the walker's.
 WALKER_ONLY = re.compile(
-    r"^## \S+ — ORCHESTRATOR (finished|recut|integrated|wave|wave-stop|walk|walk-start|walk-end|walk-stuck)(\s|$)",
+    r"^## \S+ — ORCHESTRATOR (finished|recut|integrated|wave|wave-stop|walk|walk-start|walk-end|walk-stuck|overrides walk)(\s|$)",
     re.M,
 )
 

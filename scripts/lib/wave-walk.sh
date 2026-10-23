@@ -785,9 +785,14 @@ walk_check
 # The proof sandbox (docs/features/proof-sandbox/PLAN.md step 4, Amendment 1
 # B, D): once per walk, before any worktree is cut or set up (setup has the
 # network). Each member's run-goal.sh checks the .env files again and
-# journals an override as its own goal's record; the walker only prints it.
+# journals an override as its own goal's record. The walker's worktree_setup
+# and merged proofs run under the same overrides, and a resume that only
+# integrates has no member to journal them, so the walker journals them too
+# (WALK_NOTE, after walk-start; FUTURE-WORK item 12).
 # Members skip the self-test itself (CW_PROOF_SANDBOX_CHECKED=1, below).
+WALK_NOTE=""
 if [[ "${CW_ALLOW_DOTENV:-}" == 1 ]]; then
+  WALK_NOTE+=" dotenv=allowed"
   echo "NOTE: CW_ALLOW_DOTENV=1 — .env files in the checkouts stay readable to proofs and implementers"
 else
   checkouts=()
@@ -799,6 +804,7 @@ else
   fi
 fi
 if proof_sandbox_off; then
+  WALK_NOTE+=" proof-sandbox=off"
   echo "NOTE: CW_PROOF_SANDBOX=off — proofs, worktree_setup and merged proofs run unsandboxed"
 elif ! sbx_why="$(proof_sandbox_selftest)"; then
   walk_stop proof-sandbox-unavailable "the proof sandbox self-test failed — ${sbx_why//$'\n'/; }. CW_PROOF_SANDBOX=off runs proofs unsandboxed, deliberately."
@@ -818,6 +824,11 @@ events_journal_walk_start
 if [[ "${EVENTS_MINTED:-0}" -eq 1 ]]; then
   cp "$JOURNAL" "$JOURNAL_EXPECT"
   wave_commit "chore: orchestrator walk-start" ""
+fi
+if [[ -n "$WALK_NOTE" ]]; then
+  walk_check
+  journal_line "## $(utc) — ORCHESTRATOR overrides walk${WALK_NOTE}"
+  wave_commit "chore: orchestrator overrides" ""
 fi
 
 # Start (PLAN Amendment 3 C). A list, not a read loop: a merged proof run below

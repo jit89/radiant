@@ -567,12 +567,16 @@ Follow-ups from the build's Opus review (2026-10-17), not closed by item 12:
   (`CLAUDE_CODE_TMPDIR`), and the sandbox denies reads of both roots but that
   folder (proof-sandbox EVIDENCE, "The implementer's private TMPDIR"). The
   legacy `IMPLEMENTER=codex` launcher is unchanged.
-- Probes not yet in the tests: `/System/Volumes/Data` firmlink paths and
-  `.GIT` case variants against the secret and `.git` rules; a mach-lookup
-  probe apart from the exec layer (a ctypes `bootstrap_look_up` of securityd);
-  the sandboxed walker block never takes the `PROOF_SANDBOX_REASON` branches
-  of `run_setup` or `integrate`; plan step 0's hard-linked-secret plant from
-  inside the implementer's sandbox.
+- Probes not yet in the tests, all from inside the implementer's sandbox (each
+  needs a model pass): the firmlink spelling of the temp roots
+  (`/System/Volumes/Data/private/tmp/claude-<uid>`); a hard link that pulls
+  another session's file into the implementer's re-allowed TMPDIR; plan step
+  0's hard-linked-secret plant. In the tests since 2026-10-23
+  (`proof-sandbox-test.sh`, `parallel-walk-test.sh`): the firmlink and case
+  spellings (`.SSH`, `.GIT`, `.Git`) against the proof sandbox's secret, `.git`
+  and temp-area rules, each with a control outside the sandbox; a ctypes
+  `bootstrap_look_up` of securityd (1100 inside, 0 outside); the walker's
+  `PROOF_SANDBOX_REASON` branches in `integrate` and `run_setup`.
 - Test time: item 12 took the full suite from ~22 to ~49 min, mostly the
   parallel-walk files (~37 walks each). The sandbox self-test runs once per
   walk and once per goal (~1 s), and a red proof waits ~3 s for its denial
@@ -586,7 +590,9 @@ Follow-ups from the build's Opus review (2026-10-17), not closed by item 12:
   (`cw_keep_awake`).
 - A walker resume that only integrates finished goals runs merged proofs
   under `CW_PROOF_SANDBOX=off` / `CW_ALLOW_DOTENV=1` without a journal record
-  (the walker prints it; members journal their own).
+  (the walker prints it; members journal their own). Done 2026-10-23: the walker
+  journals `ORCHESTRATOR overrides walk <notes>` after walk-start whenever an
+  override is set (a walker-only record in `journal-merge.py`).
 
 ## 13. Parallel walker: dynamic dispatch (2026-10-15)
 

@@ -56,6 +56,11 @@ check "write outside the root" no "$(sbx ": >\"$HOME/outside\"")"
 check "write the root's .git" no "$(sbx ': >.git/hook')"
 check "write the private TMPDIR (under a denied house folder)" yes "$(sbx ": >\"$T/t\" && cat \"$T/t\"")"
 check "write another run folder" no "$(sbx ": >\"$HOME/.cache/claude-coding-workflow/runs/x/w\"")"
+check "outside the sandbox .GIT is the root's .git" yes "$(: >"$ROOT/.GIT/probe" && [[ -e "$ROOT/.git/probe" ]] && rm "$ROOT/.git/probe" && echo yes || echo no)"
+check "write .GIT (case)" no "$(sbx ': >.GIT/hook')"
+check "write .Git/config (case)" no "$(sbx ': >.Git/config')"
+check "write the root through the firmlink" yes "$(sbx ": >\"/System/Volumes/Data$ROOT/fw\"")"
+check "write the root's .git through the firmlink" no "$(sbx ": >\"/System/Volumes/Data$ROOT/.git/hook\"")"
 
 echo "== reads"
 mkdir -p "$HOME/.ssh" "$HOME/.config/cw-secrets/p" "$HOME/.cache/claude-coding-workflow/run-goal-g1" "$HOME/.cache/claude-coding-workflow/logs"
@@ -72,6 +77,13 @@ check "read the logs" no "$(sbx "cat \"$HOME/.cache/claude-coding-workflow/logs/
 check "read the temp area outside root and TMPDIR" no "$(sbx "cat \"$TMP/elsewhere-in-var-folders\"")"
 check "read the root itself (under the temp area)" yes "$(sbx 'cat inside')"
 check "a symlink in the root to a secret" no "$(sbx "ln -s \"$HOME/.ssh/id_test\" sym && cat sym")"
+# The temp area through the firmlink under /System/Volumes/Data (FUTURE-WORK
+# item 12): shown to reach the file outside the sandbox first. The secret
+# rule's spellings are probed inside the root below, where the temp-area rule
+# cannot refuse them.
+FW="/System/Volumes/Data"
+check "outside the sandbox the firmlink reaches the temp area" v "$(cat "$FW$TMP/elsewhere-in-var-folders")"
+check "read the temp area through the firmlink" no "$(sbx "cat \"$FW$TMP/elsewhere-in-var-folders\"")"
 
 # The same denials inside the root: a HOME under the checkout, so only the
 # secret and house-state rules can refuse these (the temp-area rule cannot:
@@ -84,6 +96,16 @@ HOME="$IH" "$GEN" --root "$ROOT" --tmp "$T" --out "$OUT" >"$TMP/p.sb"
 check "inside the root: a plain file is readable" yes "$(sbx 'cat inside')"
 check "inside the root: ~/.ssh refused" no "$(sbx "cat \"$IH/.ssh/id_test\"")"
 check "inside the root: ~/.ssh not writable either" no "$(sbx ": >\"$IH/.ssh/new\"")"
+# Other spellings of the same secret: any case on a case-insensitive volume,
+# and the firmlink. Each reaches the file outside the sandbox, and a plain
+# file in the root is readable through the firmlink inside it, so a refusal
+# is the secret rule's.
+check "inside the root: outside the sandbox the case and firmlink spellings reach the secret" "k k k" \
+  "$(cat "$IH/.SSH/id_test") $(cat "$FW$IH/.ssh/id_test") $(cat "$FW$IH/.Ssh/id_test")"
+check "inside the root: a plain file through the firmlink is readable" yes "$(sbx "cat \"$FW$ROOT/inside\"")"
+check "inside the root: ~/.SSH refused (case)" no "$(sbx "cat \"$IH/.SSH/id_test\"")"
+check "inside the root: ~/.ssh refused through the firmlink" no "$(sbx "cat \"$FW$IH/.ssh/id_test\"")"
+check "inside the root: ~/.Ssh refused through the firmlink" no "$(sbx "cat \"$FW$IH/.Ssh/id_test\"")"
 check "inside the root: ~/.config/cw-secrets refused" no "$(sbx "cat \"$IH/.config/cw-secrets/p/env\"")"
 check "inside the root: a run-goal-* folder refused" no "$(sbx "cat \"$IH/.cache/claude-coding-workflow/run-goal-g1/fix-r0.md\"")"
 check "inside the root: the logs refused" no "$(sbx "cat \"$IH/.cache/claude-coding-workflow/logs/events.jsonl\"")"
@@ -188,6 +210,17 @@ check "pnpm's trust lookup only under setup" "1 0" \
   "$(grep -c trustd "$TMP/p.sb") $("$GEN" --root "$ROOT" --tmp "$T" | grep -c trustd || true)"
 
 echo "== escapes"
+profile
+# A mach lookup straight from a process, not through a refused executable:
+# bootstrap_look_up of securityd returns 1100 (BOOTSTRAP_NOT_PRIVILEGED).
+MACH='import ctypes, ctypes.util
+lib = ctypes.CDLL(ctypes.util.find_library("System"))
+port = ctypes.c_uint(0)
+print(lib.bootstrap_look_up(ctypes.c_uint.in_dll(lib, "bootstrap_port"), b"com.apple.SecurityServer", ctypes.byref(port)))'
+check "outside the sandbox securityd is found" 0 "$("$PY" -c "$MACH")"
+check "a mach lookup of securityd is refused" 1100 "$(errno "$MACH")"
+profile --setup
+check "a mach lookup of securityd is refused under setup too" 1100 "$(errno "$MACH")"
 profile
 check "open is refused" no "$(sbx '/usr/bin/open -g -j -a Calculator')"
 check "osascript is refused" no "$(sbx "/usr/bin/osascript -e 'return 1'")"
