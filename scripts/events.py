@@ -859,6 +859,21 @@ def short_model(model: str) -> str:
     return model
 
 
+def _add_cost(threads: dict, key: str, usd, basis) -> None:
+    """One implementer cost value into THREADS ({thread: (basis, [usd...])}).
+    No thread recorded: the last unnamed one, or a new one where it drops."""
+    try:
+        c = float(usd)
+    except (TypeError, ValueError):
+        return
+    if not key:
+        unnamed = [k for k in threads if k.startswith("#")]
+        key = unnamed[-1] if unnamed and c >= max(threads[unnamed[-1]][1]) else f"#{len(unnamed)}"
+    # A thread's basis is its first value's (cost-rollup.py judges each line;
+    # they differ only on a thread with both bases, which no launcher writes).
+    threads.setdefault(key, (str(basis or "thread"), []))[1].append(c)
+
+
 def goal_stats(rows: list[dict], live: dict | set = frozenset()) -> dict[str, dict]:
     """Per goal from the event index: its last round, the model of its last
     implementer pass, whether a fallback ran, the time spent in its runs, and
@@ -866,10 +881,14 @@ def goal_stats(rows: list[dict], live: dict | set = frozenset()) -> dict[str, di
 
     Time adds each run, `walk`/`dispatch` to a terminal event (to the last row
     naming the goal when its process died without one; to now while it runs).
-    A pass's `cost_usd` is its thread's running total, so the cost adds the
-    last total of each thread (its payload `thread`; a record from before that
-    was kept starts a new thread where the total drops): an estimate, and the
-    implementer's alone (not the review's).
+    The cost follows lib/cost-rollup.py's rule (docs/features/deepseek-primary
+    step 7): a pass's `cost_usd` with `cost_basis` `thread` (or none, as before
+    the basis existed) is its thread's running total, so such a thread costs
+    its largest value; `pass` values are summed. A pass that fell back also
+    carries the primary's cost in `fallback_from` ("<thread> COST_USD=<x>
+    COST_BASIS=<b>"), a value of the primary's thread. Threads are the payload's
+    `thread`; a record from before that was kept starts a new one where the
+    total drops. An estimate, and the implementer's alone (not the review's).
     """
     now = datetime.now(timezone.utc)
     stats: dict[str, dict] = {}
@@ -895,22 +914,17 @@ def goal_stats(rows: list[dict], live: dict | set = frozenset()) -> dict[str, di
                 s["model"] = short_model(str(p["model"]))
             if p.get("fallback"):
                 s["fallback"] = True
-            try:
-                c = float(p.get("cost_usd"))
-            except (TypeError, ValueError):
-                c = None
-            if c is not None:
-                threads = s["_threads"]
-                key = str(p.get("thread") or "")
-                if not key:  # no thread recorded: the last unnamed one, or a new one where it drops
-                    unnamed = [k for k in threads if k.startswith("#")]
-                    key = unnamed[-1] if unnamed and c >= threads[unnamed[-1]] else f"#{len(unnamed)}"
-                threads[key] = c
+            fb = str(p.get("fallback_from") or "").split()
+            if fb:
+                fields = dict(f.split("=", 1) for f in fb[1:] if "=" in f)
+                _add_cost(s["_threads"], fb[0], fields.get("COST_USD"), fields.get("COST_BASIS"))
+            _add_cost(s["_threads"], str(p.get("thread") or ""), p.get("cost_usd"), p.get("cost_basis"))
     for gid, s in stats.items():
         if s["_since"] is not None:
             end = now if gid in live else s["_last"]
             s["secs"] += max(0.0, (end - s["_since"]).total_seconds())
-        s["cost"] = round(sum(s["_threads"].values()), 4) if s["_threads"] else None
+        s["cost"] = round(sum(sum(v) if b == "pass" else max(v) for b, v in s["_threads"].values()), 4) \
+            if s["_threads"] else None
         s["secs"] = int(s["secs"]) or None
         for k in ("_threads", "_since", "_last"):
             del s[k]

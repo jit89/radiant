@@ -110,12 +110,33 @@ check "graph: rows (g2 under g1, g3 a root of its own)" "●|◉|◉" \
 check "graph: --dir reads another repo" True "$(cd "$TMP" && python3 "$HERE/events.py" graph --json --dir "$REPO" | gfield 'd["found"]')"
 check "graph: no GOALS.md" False "$(graph "$TMP" | gfield 'd["found"]')"
 
-# The implementer's cost: the last total of each thread, summed.
+# The implementer's cost (lib/cost-rollup.py's rule): each thread's largest
+# running total, summed.
 for c in "0.10 haiku:a" "0.30 haiku:a" "0.05 deepseek:b" "0.20 deepseek:b"; do
   set -- $c
   printf '{"event":"implemented","goal_id":"g3-other","round":0,"payload":{"model":"claude-haiku-5-5","cost_usd":"%s","thread":"%s"}}\n' "$1" "$2" >>"$JSONL"
 done
-check "graph: cost adds each thread's last total" 0.5 "$(graph | gfield 'd["goals"]["g3-other"]["cost"]')"
+check "graph: cost adds each thread's largest total" 0.5 "$(graph | gfield 'd["goals"]["g3-other"]["cost"]')"
+# A pass that fell back carries the primary's cost in fallback_from: a value of
+# the primary's thread, added too. A pass-basis thread sums its values.
+cost_of() {  # cost_of <payload rows...> -> the goal's cost
+  local j="$TMP/cost.jsonl" r
+  : >"$j"
+  for r in "$@"; do printf '{"event":"implemented","goal_id":"g9","round":0,"payload":%s}\n' "$r" >>"$j"; done
+  python3 -c 'import json,sys; sys.path.insert(0, sys.argv[1]); import events
+print(events.goal_stats([json.loads(l) for l in open(sys.argv[2])])["g9"]["cost"])' "$HERE" "$j"
+}
+check "cost: a fallback adds the primary's cost" 0.35 \
+  "$(cost_of '{"cost_usd":"0.30","thread":"haiku:h","cost_basis":"thread","fallback_from":"deepseek:d COST_USD=0.05 COST_BASIS=thread"}')"
+check "cost: the primary's thread counts once across rows" 0.37 \
+  "$(cost_of '{"cost_usd":"0.02","thread":"deepseek:d","cost_basis":"thread"}' \
+    '{"cost_usd":"0.30","thread":"haiku:h","cost_basis":"thread","fallback_from":"deepseek:d COST_USD=0.07 COST_BASIS=thread"}')"
+check "cost: a pass-basis thread sums its values" 0.3 \
+  "$(cost_of '{"cost_usd":"0.10","thread":"t","cost_basis":"pass"}' '{"cost_usd":"0.20","thread":"t","cost_basis":"pass"}')"
+check "cost: a thread-basis thread keeps its largest (a refused pass reports less)" 0.4 \
+  "$(cost_of '{"cost_usd":"0.40","thread":"t","cost_basis":"thread"}' '{"cost_usd":"0.01","thread":"t","cost_basis":"thread"}')"
+check "cost: a fallback_from cost of - is skipped, not an error" 0.3 \
+  "$(cost_of '{"cost_usd":"0.30","thread":"haiku:h","fallback_from":"deepseek:d COST_USD=- COST_BASIS=thread"}')"
 
 # The layout alone: a diamond forks and joins.
 check "layout: a diamond" "○|├─╮|○ │|│ ○|○─╯" "$(python3 -c '

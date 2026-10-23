@@ -836,8 +836,10 @@ covers it.
 
 Item 22 SHIPPED (2026-10-22): DeepSeek Flash is the default implementer with
 Haiku 5.5 as the fallback, after the comparison walk (`12e6a6f`) and the
-confirming walk after the journal prompt rule (`4e486f8`). Still open from it:
-the `/walk-status` cost ignores `fallback_from` (above).
+confirming walk after the journal prompt rule (`4e486f8`). The `/walk-status`
+cost was done 2026-10-23: `events.py goal_stats` follows `lib/cost-rollup.py`'s
+rule (a fallback's `fallback_from` counted on the primary's thread, a thread's
+largest running total, `pass` values summed).
 
 ## 25. A forged ORCHESTRATOR record can move a resume's BASE_SHA (2026-10-22)
 
