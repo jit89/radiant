@@ -889,3 +889,16 @@ this amendment wins.
        the walk journal;
      - the reviewed-SHA check reading the record that existed before the
        rerun.
+
+## Amendment 6 — a merge conflict recuts the goal once (user-approved, 2026-10-23)
+
+House item 17, its own crucible: `docs/features/merge-conflict-recut/PLAN.md`
+(Grok, 3 rounds, approved; signed off by the user). A plain `merge-conflict` at
+integration no longer stops the walk the first time: the walker saves the
+conflicted paths, aborts the merge, removes the scratch tree, and after the
+wave's integrations (and at the top of `wave_stop`) recuts the goal from its
+verified SHA, keeping the attempt at `refs/cw-conflict/<g>/<n>` and writing
+`recut <g> reason=merge-conflict`. The goal runs fresh in a later wave from the
+new tip. One such recut per goal per walk, counted from the journal since the
+walk's `walk-start`; a second conflict stops as before. Every other
+integration stop is unchanged.

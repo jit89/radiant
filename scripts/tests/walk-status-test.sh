@@ -110,6 +110,21 @@ check "graph: rows (g2 under g1, g3 a root of its own)" "●|◉|◉" \
 check "graph: --dir reads another repo" True "$(cd "$TMP" && python3 "$HERE/events.py" graph --json --dir "$REPO" | gfield 'd["found"]')"
 check "graph: no GOALS.md" False "$(graph "$TMP" | gfield 'd["found"]')"
 
+# A goal recut after a merge conflict waits to run fresh: ready, not paused
+# (docs/features/merge-conflict-recut). Its next run's rows take over again.
+python3 - "$REPO/GOALS.md" <<'PY'
+import re,sys
+p=sys.argv[1]; t=open(p).read()
+t=re.sub(r"(id: g2-ack[\s\S]*?status: )\w+", r"\1in_progress", t, count=1)
+open(p,"w").write(t)
+PY
+row wake g2-ack 2 "" "" ""
+check "graph: a stopped in_progress goal is paused" paused "$(graph | gfield 'd["goals"]["g2-ack"]["state"]')"
+row recut g2-ack 2 "" "" ""
+check "graph: recut after a merge conflict reads as ready" ready "$(graph | gfield 'd["goals"]["g2-ack"]["state"]')"
+row walk g2-ack "" "$DEAD" "" ""
+check "graph: a later row of its own takes over" paused "$(graph | gfield 'd["goals"]["g2-ack"]["state"]')"
+
 # The implementer's cost (lib/cost-rollup.py's rule): each thread's largest
 # running total, summed.
 for c in "0.10 haiku:a" "0.30 haiku:a" "0.05 deepseek:b" "0.20 deepseek:b"; do

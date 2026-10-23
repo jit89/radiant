@@ -55,6 +55,9 @@ EVENTS = (
     # the walker's pid), and one walker-owned row per wave with no goal.
     "integrate",
     "join_wait",
+    # A goal recut after a merge conflict: it runs fresh in a later wave
+    # (docs/features/merge-conflict-recut). Not a stop.
+    "recut",
 )
 SEVERITIES = ("info", "warning", "error")
 SUMMARY_MAX = 200
@@ -486,7 +489,8 @@ def cmd_self_test() -> int:
 PHASE_OF = {"walk": "start", "dispatch": "implement", "implemented": "proof", "fix": "fix",
             "integrate": "integrate"}
 # Events after which no orchestrator process is working on that goal.
-TERMINAL = {"done", "bounced", "wake", "walk_end"}
+# A conflict recut ends the goal's attempt too: it runs again in a later wave.
+TERMINAL = {"done", "bounced", "wake", "walk_end", "recut"}
 
 
 def find_goals_root(start: Path) -> Path | None:
@@ -951,6 +955,7 @@ def walk_graph(start: Path) -> dict:
     live = live_goals(rows)
     running = next(iter(live), None)
     stats = goal_stats(rows, live)
+    last_goal_event = {r["goal_id"]: r.get("event") for r in rows if r.get("goal_id")}
     idx = goals.by_id(data)
     out: dict[str, dict] = {}
     for g in data.get("goals", []):
@@ -962,6 +967,8 @@ def walk_graph(start: Path) -> dict:
             state = "running"
         elif st == "bounced":
             state = "bounced"
+        elif st == "in_progress" and last_goal_event.get(gid) == "recut":
+            state = "ready"  # recut after a merge conflict: runs fresh in a later wave
         elif st == "in_progress":
             state = "paused"  # stopped mid-goal: the next walk resumes it first
         else:

@@ -46,6 +46,10 @@ RUNNING_IDS=()
 EXIT_AT=()
 # One "<goal>|<reason>|<stop file>" per stopped goal, for the combined stop.
 STOPS=()
+# Merge conflicts awaiting their automatic recut ("<goal> <verified sha>"), and
+# the goals recut that way in this run (docs/features/merge-conflict-recut).
+CONFLICT_RECUTS=()
+RECUT_DONE=()
 # 1 from a wave's start to its join's end (and while a start-of-walk
 # integration runs): every stop then goes into the combined stop.
 IN_WAVE=0
@@ -106,6 +110,15 @@ walk_problem() {
   return 0
 }
 
+# walk_check's test without the stop: 0 when the walker may write, else
+# SOFT_WHY says why (the conflict recut inside wave_stop).
+walk_ok() {
+  local problem
+  git_meta_verify "$GIT_META_SAVED" || { SOFT_WHY=".git changed: ${GIT_META_CHANGED}"; return 1; }
+  problem="$(walk_problem)"
+  [[ -z "$problem" ]] || { SOFT_WHY="${problem#*|}"; return 1; }
+}
+
 # Before every walker git write.
 walk_check() {
   local problem
@@ -150,20 +163,35 @@ commit_problem() {
   return 0
 }
 
-# wave_commit MSG ALLOW — commit GOALS.md and the journal together, after the
-# fail-closed checks: GOALS.md moved only by ALLOW, the journal is exactly what
-# this walker expects, nothing else staged in either. Updates WALK_TIP.
+# wave_commit MSG ALLOW [soft] — commit GOALS.md and the journal together, after
+# the fail-closed checks: GOALS.md moved only by ALLOW, the journal is exactly
+# what this walker expects, nothing else staged in either. Updates WALK_TIP. A
+# refusal stops the walk, or with "soft" sets SOFT_WHY and returns 1 (the
+# conflict recut, where walk_stop could exit without the stop file).
+SOFT_WHY=""
 wave_commit() {
-  local msg="$1" allow="$2" problems
-  walk_check
+  local msg="$1" allow="$2" soft="${3:-}" problems
+  if [[ -n "$soft" ]]; then
+    walk_ok || return 1
+  else
+    walk_check
+  fi
   problems="$(commit_problem "$allow")"
-  [[ -z "$problems" ]] ||
+  if [[ -n "$problems" ]]; then
+    [[ -z "$soft" ]] || { SOFT_WHY="not committed ($msg): $problems"; return 1; }
     walk_stop orchestration-files-changed "not committed ($msg): $problems. Something other than the walker edited GOALS.md or the journal; review, then commit or restore."
+  fi
   local files=(GOALS.md)
   [[ -n "$JOURNAL" && -f "$JOURNAL" ]] && files+=("$JOURNAL")
-  git add -- "${files[@]}" || walk_stop commit-failed "$msg"
+  if ! git add -- "${files[@]}"; then
+    [[ -z "$soft" ]] || { SOFT_WHY="git add failed ($msg)"; return 1; }
+    walk_stop commit-failed "$msg"
+  fi
   if ! git diff --cached --quiet -- "${files[@]}"; then
-    git commit -q -m "$msg" -- "${files[@]}" || walk_stop commit-failed "$msg"
+    if ! git commit -q -m "$msg" -- "${files[@]}"; then
+      [[ -z "$soft" ]] || { SOFT_WHY="the commit failed ($msg)"; return 1; }
+      walk_stop commit-failed "$msg"
+    fi
   fi
   WALK_TIP="$(git rev-parse HEAD)"
 }
@@ -287,14 +315,21 @@ cut_worktree() {
   return 0
 }
 
-# recut GOAL — drop a goal's old attempt: its journal suffix onto the walk
-# journal when it passes the journal check (walker-only records refused), a
-# `recut` record, then its worktree and branch are removed (PLAN Amendment 3 C).
+# recut GOAL [SHA [REASON [soft]]] — drop a goal's old attempt: its journal
+# suffix onto the walk journal when it passes the journal check (walker-only
+# records refused), a `recut` record, then its worktree and branch are removed
+# (PLAN Amendment 3 C). SHA: the commit to keep the suffix from (the verified
+# one for a conflict, not the live branch); REASON goes on every form of the
+# record; soft: a refusal sets SOFT_WHY and returns 1.
 recut() {
-  local g="$1" tip base m note=""
-  walk_check
-  if branch_exists "$g"; then
-    tip="$(git rev-parse "refs/heads/cw/$g")"
+  local g="$1" sha="${2:-}" reason="${3:-}" soft="${4:-}" tip base m note=""
+  if [[ -n "$soft" ]]; then
+    walk_ok || return 1
+  else
+    walk_check
+  fi
+  if [[ -n "$sha" ]] || branch_exists "$g"; then
+    tip="${sha:-$(git rev-parse "refs/heads/cw/$g")}"
     base="$(git merge-base HEAD "$tip" || true)"
     if [[ -n "$base" ]]; then
       git show "$base:$JOURNAL" >"$WAVE_DIR/$g.rbase" 2>/dev/null || : >"$WAVE_DIR/$g.rbase"
@@ -308,12 +343,25 @@ recut() {
       fi
     fi
   fi
-  journal_line "## $(utc) — ORCHESTRATOR recut $g${note}"
-  wave_commit "chore($g): orchestrator recut" ""
+  # The reason first: a reader takes the goal id as the first word.
+  journal_line "## $(utc) — ORCHESTRATOR recut $g${reason:+ reason=$reason}${note}"
+  wave_commit "chore($g): orchestrator recut" "" "$soft" || return 1
+  # The record is in: the old result must never be integrated or kept again,
+  # nor kept back by wave_stop's member scan from the wave's own copy.
+  rm -f "$RESULTS_DIR/$g" "${WAVE_DIR:+$WAVE_DIR/$g.result}"
   git worktree remove -f -f "$(wt_path "$g")" 2>/dev/null || rm -rf "$(wt_path "$g")"
   git worktree prune
-  ! branch_exists "$g" || git branch -q -D "cw/$g" || walk_stop commit-failed "delete cw/$g"
-  rm -f "$RESULTS_DIR/$g"
+  if branch_exists "$g" && ! git branch -q -D "cw/$g"; then
+    [[ -z "$soft" ]] || { SOFT_WHY="cannot delete cw/$g"; return 1; }
+    walk_stop commit-failed "delete cw/$g"
+  fi
+}
+
+# in_recut GOAL — true when GOAL was recut for a merge conflict in this run.
+in_recut() {
+  local s
+  for s in ${RECUT_DONE[@]+"${RECUT_DONE[@]}"}; do [[ "$s" != "$1" ]] || return 0; done
+  return 1
 }
 
 # The one stop file for everything that stopped (PLAN step 9, Amendment 3 D).
@@ -329,11 +377,14 @@ wave_stop() {
   local code="${1:-1}" dir stop s g r f ids="" why i
   trap - INT TERM
   WAVE_STOPPING=1
+  # A conflict recut still queued is done first, without stopping on a refusal.
+  flush_conflict_recuts soft
   # Every member of the wave, from its state (Amendment 5): nothing is lost
   # whatever order the join or a signal stopped in.
   for i in ${RUNNING_IDS[@]+"${!RUNNING_IDS[@]}"}; do
     g="${RUNNING_IDS[$i]}"
     ! in_stops "$g" || continue
+    ! in_recut "$g" || continue
     [[ "$(goal_field "$g" status 2>/dev/null || true)" != done ]] || continue
     f="$(cat "$WAVE_DIR/$g.ptr" 2>/dev/null || true)"
     if [[ -z "${EXIT_AT[$i]:-}" ]]; then
@@ -380,6 +431,12 @@ wave_stop() {
       IFS='|' read -r g r f <<<"$s"
       printf -- '- %s: %s — %s\n' "$g" "$r" "${f:-(no stop file)}"
     done
+    if ((${#RECUT_DONE[@]})); then
+      printf '\n## Recut\n'
+      for g in "${RECUT_DONE[@]}"; do
+        printf -- '- %s: recut (merge-conflict): runs fresh on rerun\n' "$g"
+      done
+    fi
     printf '\n## graph\n'
     "$GOALS_PY" GOALS.md graph
   } >"$stop"
@@ -437,6 +494,9 @@ deny_list() {
     # packed-refs.lock stays writable: denying it makes every commit print a
     # false error (git 2.54); the walker checks for a stray one instead.
     printf '%s\n' "$GIT_COMMON/packed-refs"
+    # The walker's evidence of conflicted attempts (refs/cw-conflict/<g>/<n>):
+    # no goal writes or pre-plants one.
+    printf '%s\n%s\n' "$GIT_COMMON/refs/cw-conflict" "$GIT_COMMON/logs/refs/cw-conflict"
     for m in "${WAVE_MEMBERS[@]}"; do
       [[ "$m" != "$me" ]] || continue
       for p in "$GIT_COMMON/refs/heads/cw/$m" "$GIT_COMMON/logs/refs/heads/cw/$m"; do
@@ -503,6 +563,64 @@ for l in lines[start:]:
     if m:
         print(m.group(1))
 PY
+}
+
+# conflict_recuts_used GOAL — how many times GOAL was recut for a merge
+# conflict in this walk: its `recut <g> reason=merge-conflict` records in the
+# walk journal at HEAD after this walk's walk-start (whole headings only). A
+# journal it cannot read counts as used (fail closed: the conflict stops).
+# The Python is a heredoc, as walk_record's: its em dash must not depend on the
+# locale the command line is read in.
+conflict_recuts_used() {
+  local f="$WAVE_DIR/budget-journal"
+  git show "HEAD:$JOURNAL" >"$f" 2>/dev/null || { echo 1; return 0; }
+  python3 - "$1" "${WALK_ID:-}" "$f" <<'PY' || echo 1
+import re, sys
+g, wid, path = sys.argv[1:4]
+text = open(path, "rb").read().decode("utf-8", "replace")
+n = 0
+for line in text.split("\n"):
+    if re.match(r"^## \S+ \u2014 ORCHESTRATOR walk-start walk_id=" + re.escape(wid) + r"(\s|$)", line):
+        n = 0
+    elif re.match(r"^## \S+ \u2014 ORCHESTRATOR recut " + re.escape(g) + r" reason=merge-conflict(\s|$)", line):
+        n += 1
+print(n)
+PY
+}
+
+# flush_conflict_recuts [soft] — recut each goal queued in CONFLICT_RECUTS
+# from its verified SHA: the attempt kept at refs/cw-conflict/<g>/<n>
+# (create-only), a `recut <g> reason=merge-conflict` record, an info `recut`
+# event naming the conflicted paths. soft (inside wave_stop): a refusal lists
+# the goal as a merge-conflict stop instead of stopping the walk.
+# Entries leave the queue one at a time, so a stop or a signal part way
+# through leaves the rest for wave_stop's own flush. A goal whose recut fails
+# is a merge-conflict stop in either mode; the flush goes on to the next.
+flush_conflict_recuts() {
+  local soft="${1:-}" e g sha n ref paths
+  while ((${#CONFLICT_RECUTS[@]})); do
+    e="${CONFLICT_RECUTS[0]}"
+    CONFLICT_RECUTS=(${CONFLICT_RECUTS[@]+"${CONFLICT_RECUTS[@]:1}"})
+    g="${e%% *}"
+    sha="${e#* }"
+    SOFT_WHY=""
+    if ! walk_ok; then
+      :
+    elif ! n="$(git for-each-ref --format='%(refname)' "refs/cw-conflict/$g/" 2>/dev/null |
+      sed -n "s|^refs/cw-conflict/$g/\([1-9][0-9]*\)\$|\1|p" | sort -n | tail -n1)"; then
+      SOFT_WHY="cannot list refs/cw-conflict/$g/"
+    elif ref="refs/cw-conflict/$g/$(( ${n:-0} + 1 ))" && ! git update-ref "$ref" "$sha" "" 2>/dev/null; then
+      SOFT_WHY="cannot create $ref"
+    elif recut "$g" "$sha" merge-conflict "$soft"; then
+      RECUT_DONE+=("$g")
+      paths="$(python3 -c 'import json,sys; print(json.dumps([p.decode("utf-8","replace") for p in open(sys.argv[1],"rb").read().split(b"\0") if p]))' \
+        "$WAVE_DIR/$g.conflict-files" 2>/dev/null || echo '[]')"
+      events_append --event recut --severity info --goal "$g" --summary "recut $g: merge conflict, runs fresh" \
+        --payload "{\"reason\":\"merge-conflict\",\"files\":$paths,\"evidence\":\"$ref\"}"
+      continue
+    fi
+    goal_stop "$g" merge-conflict "cw/$g conflicted and its automatic recut failed: $SOFT_WHY. Its verified commit is $sha. Hand it back ($GOALS_PY GOALS.md set $g ready, commit) and rerun to recut it."
+  done
 }
 
 # integration_stop GOAL REASON DETAIL [SCRATCH] — an integration failure.
@@ -592,7 +710,8 @@ check_scratch_at() {
 # integrate GOAL SHA — PLAN Amendment 3 B. Everything happens in a new scratch
 # worktree; the walk branch moves only by a fast-forward to its green result.
 # 0: integrated. 1: stopped, the join goes on. 2: stopped, the join ends (the
-# main checkout is not clean).
+# main checkout is not clean). 4: a plain merge conflict, queued for its
+# automatic recut (CONFLICT_RECUTS): not integrated, not a stop.
 integrate() {
   local g="$1" sha="$2" s base m mrc conflicted p proof out rc moved=() red=() expect M F
   walk_check
@@ -630,7 +749,21 @@ integrate() {
     { integration_stop "$g" merge-failed "cannot stage the checked journal" "$s"; return 1; }
   conflicted="$(sgit diff --name-only --diff-filter=U | paste -sd ',' -)"
   if [[ -n "$conflicted" ]]; then
-    integration_stop "$g" merge-conflict "cw/$g conflicts with the walk branch in: $conflicted. Merge it by hand, or rework the goal; declare conflicts_with next time." "$s"
+    # One automatic recut per goal per walk (docs/features/merge-conflict-recut):
+    # the paths saved before the abort clears them, the scratch tree removed,
+    # the recut queued; status 4 is "not integrated, not a stop".
+    if [[ "$(conflict_recuts_used "$g")" == 0 ]]; then
+      sgit diff -z --name-only --diff-filter=U >"$WAVE_DIR/$g.conflict-files" 2>/dev/null || : >"$WAVE_DIR/$g.conflict-files"
+      sgit merge --abort >/dev/null 2>&1 || true
+      git worktree remove -f -f "$s" >/dev/null 2>&1 || rm -rf "$s"
+      git worktree prune
+      CUR_SCRATCH=""
+      S_TREE="" S_ADMIN=""
+      CONFLICT_RECUTS+=("$g $sha")
+      echo "merge conflict: $g, recut to run fresh from the new tip (its one automatic recut in this walk)"
+      return 4
+    fi
+    integration_stop "$g" merge-conflict "cw/$g conflicts with the walk branch in: $conflicted. This goal's automatic recut for a merge conflict was already used in this walk (or the walk journal could not be read to tell). Merge it by hand, or rework the goal; declare conflicts_with next time." "$s"
     return 1
   fi
   if ! sgit diff --cached --quiet HEAD -- GOALS.md; then
@@ -865,6 +998,7 @@ for g in ${INFLIGHT[@]+"${INFLIGHT[@]}"}; do
   integrate "$g" "$sha" || rc=$?
   [[ "$rc" -ne 2 ]] || wave_stop 1
 done
+flush_conflict_recuts
 IN_WAVE=0
 ((${#STOPS[@]} == 0)) || wave_stop 1
 
@@ -887,6 +1021,23 @@ while :; do
     scratch_left="$(ls -d "$INT_DIR"/* 2>/dev/null | paste -sd ',' - || true)"
     [[ -z "$scratch_left" ]] || leftover="${leftover:+$leftover,}$scratch_left"
     [[ -z "$leftover" ]] || echo "leftover worktrees (not deleted): $leftover"
+    # Every goal recut for a merge conflict in this walk, one line each: no
+    # stop said so. (A heredoc, as walk_record: the em dash and the locale.)
+    git show "HEAD:$JOURNAL" >"$WAVE_DIR/end-journal" 2>/dev/null || : >"$WAVE_DIR/end-journal"
+    python3 - "${WALK_ID:-}" "$WAVE_DIR/end-journal" <<'PY' || true
+import re, sys
+wid, path = sys.argv[1:3]
+text = open(path, "rb").read().decode("utf-8", "replace")
+seen = []
+for line in text.split("\n"):
+    if re.match(r"^## \S+ \u2014 ORCHESTRATOR walk-start walk_id=" + re.escape(wid) + r"(\s|$)", line):
+        seen = []
+    m = re.match(r"^## \S+ \u2014 ORCHESTRATOR recut (\S+) reason=merge-conflict(\s|$)", line)
+    if m:
+        seen.append(m.group(1))
+for g in seen:
+    print(f"recut after a merge conflict: {g} (ran fresh; the old attempt is under refs/cw-conflict/{g}/)")
+PY
     journal_line "## $(utc) — ORCHESTRATOR walk-end${leftover:+ leftover=$leftover}"
     events_append --event walk_end --severity info --summary "walk-end"
     wave_commit "chore: orchestrator walk-end" ""
@@ -915,13 +1066,16 @@ while :; do
         goal_stop "$g" worktree-exists "cw/$g or $(wt_path "$g") already exists for a goal this walk never started. Inspect it, then remove it (git worktree remove -f -f $(wt_path "$g"); git branch -D cw/$g) and rerun."
         continue
       fi
-    elif [[ "$st" == in_progress ]]; then
+    elif [[ "$st" == in_progress ]] && ! in_recut "$g"; then
       # Stopped before its worktree was cut: a recut record, nothing to remove.
+      # (A goal recut for a conflict in this run has its record already.)
       recut "$g"
     fi
     WAVE_MEMBERS+=("$g")
   done
   ((${#WAVE_MEMBERS[@]})) || wave_stop 1
+  # The conflict recuts listed in a stop are this wave's own.
+  RECUT_DONE=()
 
   WAVE_N=$((WAVE_N + 1))
   walk_check
@@ -1039,6 +1193,8 @@ while :; do
     integrate "${pair%% *}" "${pair#* }" || rc=$?
     [[ "$rc" -ne 2 ]] || wave_stop 1
   done
+  # Before any stop (Q3): a conflicted goal recut now runs fresh next wave.
+  flush_conflict_recuts
   IN_WAVE=0
   ((${#STOPS[@]} == 0)) || wave_stop 1
 done

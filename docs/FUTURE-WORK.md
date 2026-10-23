@@ -673,6 +673,14 @@ and review per conflicted goal, and every wave still integrates at least one
 goal, so the walk finishes. It touches the integration and recut state the
 item 6 reviews hardened over five rounds: its own crucible.
 
+DONE (2026-10-23): `docs/features/merge-conflict-recut/` (PLAN, Grok 3 rounds
+approved, journal) and parallel-walker Amendment 6. A plain merge conflict
+recuts the goal once per walk (counted from the journal since the walk's
+`walk-start`) and the walk goes on; the goal runs fresh from the new tip, the
+old attempt kept at `refs/cw-conflict/<g>/<n>`. A second conflict in the same
+walk stops as before. Tests in `parallel-walk-recut-test.sh` and
+`walk-status-test.sh`.
+
 ## 18. `/walk` with no argument outside the target repo (2026-10-16)
 
 `/walk` opens the pane for the session's working folder; from the house repo

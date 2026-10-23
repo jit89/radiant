@@ -245,15 +245,7 @@ check "recut: the fresh attempt's base is a new wave base" yes \
      [[ "$b1" != "$b2" && "$(git log -1 --format=%s "$b2")" == "chore: orchestrator wave"* ]] &&
        git merge-base --is-ancestor "$(git log -1 --format=%H --grep='orchestrator bounced')" "$b2" && echo yes || echo no)"
 
-# Merge conflict: both goals write the same file differently.
-pwalk_repo
-printf 'echo %s >shared.txt; echo $gid >$letter.txt; git add shared.txt $letter.txt; git commit -qm "feat($gid): $letter"\n' one >"$CALLS/action-g1-a"
-printf 'echo %s >shared.txt; echo $gid >$letter.txt; git add shared.txt $letter.txt; git commit -qm "feat($gid): $letter"\n' two >"$CALLS/action-g2-b"
-prun --jobs 3
-check "merge conflict: first goal integrated" done "$(status_of g1-a)"
-check "merge conflict: second stops merge-conflict" merge-conflict "$(reason_in g2-b)"
-check "merge conflict: merge aborted, tree clean" "" "$(git status --porcelain)"
-check "merge conflict: second stays in_progress" in_progress "$(status_of g2-b)"
+# Merge conflict: parallel-walk-recut-test.sh (docs/features/merge-conflict-recut).
 
 # integration-red: g2-b is green alone, red with g1-a merged.
 pwalk_repo
