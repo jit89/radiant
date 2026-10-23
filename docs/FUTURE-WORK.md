@@ -855,6 +855,26 @@ lines are known: `journal_line` can keep them). That must hold at every
 journal commit, the one `record_wake` makes on an early stop included, not
 only after a pass.
 
+DONE (2026-10-23): a resume no longer reads the journal. `run-goal.sh`'s
+`journal_line` appends each record to the goal's host ledger
+(`orch_host_ledger`:
+`~/.cache/claude-coding-workflow/run-goal-<id>/host-records-<key>`, keyed by
+the checkout's own git dir, worked out once at start while host git
+is trusted) before the journal, and
+`resume-state.py` and `attempt_fell_back` read the ledger. A line anyone writes
+or commits to the journal (a forged dispatch, a body line, a replay of an old
+record) changes nothing a resume decides. The ledger outlives a stop and the
+implementer's sandbox cannot write it; a proof under `CW_PROOF_SANDBOX=off`
+runs the implementer's code unsandboxed and could. A goal paused before
+ledgers existed, run in another checkout, or in a repo since moved has none:
+its resume stops and says how to hand it back safely (find the attempt's base,
+review or reset the commits since, since a fresh start takes HEAD as its base). The journal's uncommitted tail is still held to the ledger
+(`orch-files.py --records --host`), so a forged record is not committed under
+the host's name. Tests: `journal-records-test.sh` (a forgery uncommitted, with
+an early stop, committed with a contract change; another clone; a linked
+worktree; a resume after a `.git` tamper stop),
+`orch-commit-test.sh`.
+
 ## 26. A reviewer that changes .git stops under the wrong reason (2026-10-23)
 
 Found by Opus reviewing item 24. Nothing checks `.git` right after the
@@ -901,3 +921,15 @@ launcher now strips every `CW_*`):
   Codex implementer's shell the full environment: every `CW_*` setting and
   any credential the caller exported. Give it `claude-implement.sh`'s
   `env_unsets`, or retire it now that DeepSeek runs through Claude Code.
+
+## 29. The walker's done_this_walk reads unanchored journal text (2026-10-23)
+
+Found by Opus reviewing item 25. `wave-walk.sh`'s `done_this_walk` reads the
+working journal with substring searches (`walk-start walk_id=<id>` in a
+line, `— ORCHESTRATOR integrated`), and `journal-merge.py` refuses walker-only
+records only as headings. An integrated member could plant a body line
+`walk-start walk_id=<id>` (the id is in its own journal); later integrations
+would then skip the merged proofs of goals integrated before it. A planted
+`integrated` line only adds proofs. Fix: anchor both on
+`^## \S+ — ORCHESTRATOR `, as `walk_record` already is.
+

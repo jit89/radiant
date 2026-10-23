@@ -156,9 +156,13 @@ make_repo "$TMP/g3" && "$HERE/goals.py" GOALS.md set g2-ack bounced >/dev/null
 refused "walk, GOALS status no step makes" "$walker"
 
 # A stopped goal's own leftovers are not user edits: in_progress, and its
-# ORCHESTRATOR lines. The walker takes them and dispatches.
+# ORCHESTRATOR lines (in its ledger, as run-goal.sh writes them; FUTURE-WORK
+# item 25). The walker takes them and dispatches.
+WAKE='## 2026-09-17T00:00:00Z — ORCHESTRATOR wake g2-ack r0 reason=interrupted'
 make_repo "$TMP/r1" && "$HERE/goals.py" GOALS.md set g2-ack in_progress >/dev/null
-printf '\n## 2026-09-17T00:00:00Z — ORCHESTRATOR wake g2-ack r0 reason=interrupted\n' >>"$J"
+LEDGER="$(source "$HERE/lib/orch-files.sh" && orch_host_ledger g2-ack)"
+mkdir -p "$(dirname "$LEDGER")" && printf '%s\n' "$WAKE" >>"$LEDGER"
+printf '\n%s\n' "$WAKE" >>"$J"
 "$walker" >"$TMP/r1.out" 2>&1 || true
 check "walk, in-flight state: goal dispatched" "yes" "$([[ -f "$TMP/dispatched" ]] && echo yes || echo no)"
 check "walk, in-flight state: user file still staged" "source.py" "$(git diff --cached --name-only)"
@@ -167,6 +171,9 @@ rm -f "$TMP/dispatched"
 make_repo "$TMP/r2" && "$HERE/goals.py" GOALS.md set g2-ack in_progress >/dev/null
 printf '\n## 2026-09-17T00:00:00Z — ORCHESTRATOR wake g2-ack r0 reason=interrupted\n\nUSER NOTE\n' >>"$J"
 refused "walk, in-flight state plus a user line" "$walker"
+make_repo "$TMP/r3" && "$HERE/goals.py" GOALS.md set g2-ack in_progress >/dev/null
+printf '\n## 2026-09-17T00:00:01Z — ORCHESTRATOR wake g2-ack r0 reason=interrupted\n' >>"$J"
+refused "walk, in-flight state with a record the host did not write" "$walker"
 
 # Checked again after each goal, not only at the start: a goal that returns
 # success with an edit left in the journal stops the walk uncommitted.

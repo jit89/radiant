@@ -24,10 +24,28 @@ orch_goals_problems() {
   rm -f "$head"
 }
 
+# orch_host_ledger GOAL — the records run-goal.sh wrote for GOAL in this
+# checkout, one a line (journal_line appends each before writing it to the
+# journal). What a resume reads (lib/resume-state.py), not the journal. Under
+# the goal's artifact folder, which outlives a stop and which the implementer's
+# sandbox cannot write (a proof under CW_PROOF_SANDBOX=off runs its code
+# unsandboxed and could); keyed by the checkout's own git dir (a linked
+# worktree's, not the common one), so two checkouts of one plan, a --jobs
+# member and the main checkout included, keep apart (FUTURE-WORK item 25).
+# Fails, printing nothing, when git names no git dir (host git off after a
+# tamper): a key of nothing would join every checkout's ledger.
+orch_host_ledger() {
+  local dir
+  dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  [[ -n "$dir" ]] || return 1
+  printf '%s\n' "$HOME/.cache/claude-coding-workflow/run-goal-$1/host-records-$(printf '%s' "$dir" | shasum | cut -c1-12)"
+}
+
 # The journal against HEAD, in MODE (lib/orch-files.py), for goal $2 when the
-# mode takes one. One problem a line.
+# mode takes one; --records also holds ORCHESTRATOR records to the goal's
+# ledger (FUTURE-WORK item 25). One problem a line.
 orch_journal_problems() {
-  local mode="$1" goal="${2:-}" head
+  local mode="$1" goal="${2:-}" head host=()
   [[ -n "${JOURNAL:-}" ]] || return 0
   head="$(mktemp "${TMPDIR:-/tmp}/orch-journal-XXXXXX")"
   if ! git show "HEAD:$JOURNAL" >"$head" 2>/dev/null; then
@@ -35,7 +53,16 @@ orch_journal_problems() {
     echo "$JOURNAL: not committed"
     return 0
   fi
-  { python3 "$ORCH_FILES_PY" journal "$head" "$JOURNAL" "$mode" ${goal:+"$goal"} || true; } |
+  # run-goal.sh keyed its goal's ledger once, while git was trusted (HOST_LEDGER);
+  # a ledger that cannot be keyed holds nothing.
+  if [[ "$mode" == --records && -n "$goal" ]]; then
+    if [[ "$goal" == "${GOAL_ID:-}" && -n "${HOST_LEDGER:-}" ]]; then
+      host=(--host "$HOST_LEDGER")
+    else
+      host=(--host "$(orch_host_ledger "$goal" || echo /nonexistent/no-ledger)")
+    fi
+  fi
+  { python3 "$ORCH_FILES_PY" journal "$head" "$JOURNAL" "$mode" ${goal:+"$goal"} "${host[@]+"${host[@]}"}" || true; } |
     sed "s|^|$JOURNAL: |"
   rm -f "$head"
 }

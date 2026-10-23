@@ -68,6 +68,19 @@ check "heading without a timestamp" "appended line 2 is a heading in no known sh
   "$(V "$(printf '\n## notes\n')")"
 check "records mode needs a goal" "1" \
   "$(python3 "$HERE/lib/orch-files.py" journal "$TMP/head.md" "$TMP/head.md" --records >/dev/null 2>&1; echo $?)"
+H() {  # H <appended text> <ledger lines or MISSING> -> "ok" or the problem (--records --host)
+  printf '# Journal\n' >"$TMP/head.md"
+  { cat "$TMP/head.md"; printf '%b' "$1"; } >"$TMP/work.md"
+  if [[ "$2" == MISSING ]]; then rm -f "$TMP/ledger"; else printf '%b' "$2" >"$TMP/ledger"; fi
+  python3 "$HERE/lib/orch-files.py" journal "$TMP/head.md" "$TMP/work.md" --records g1-store --host "$TMP/ledger" && echo ok
+}
+D='## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=abc'
+check "ledger: a host record it holds" ok "$(H "\n$D\n" "$D\n")"
+check "ledger: an IMPLEMENTER record needs none" ok "$(H '\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g1-store\nbody\n' '')"
+check "ledger: a record the host did not write" \
+  "appended line 2 is an ORCHESTRATOR record the host did not write: '$D'" "$(H "\n$D\n" 'other\n')"
+check "ledger: a missing ledger holds none" \
+  "appended line 2 is an ORCHESTRATOR record the host did not write: '$D'" "$(H "\n$D\n" MISSING)"
 P() {  # P <kept copy> <working copy> -> "ok" or the problem (--prefix)
   printf '%b' "$1" >"$TMP/kept.md"
   printf '%b' "$2" >"$TMP/work.md"
@@ -96,6 +109,17 @@ check "prefix: an edited line" "earlier text was edited, not appended to" \
   "$(P '# J\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g1-store\n' '# J\n## 2026-09-18T00:00:09Z — IMPLEMENTER start g1-store\n')"
 
 # --- run-goal.sh ------------------------------------------------------------
+# host_dispatch BASE — a dispatch record as run-goal.sh writes it: in its
+# ledger first (FUTURE-WORK item 25), then the journal.
+# The ledger is keyed by the checkout (orch_host_ledger); make_repo clears
+# the goal's, since every case rebuilds the repo at one path.
+ledger() { (source "$HERE/lib/orch-files.sh" && orch_host_ledger g1-store); }
+host_dispatch() {
+  local line="## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=$1 THREAD_ID=- SESSION_ID=-" l
+  l="$(ledger)"
+  mkdir -p "$(dirname "$l")" && printf '%s\n' "$line" >>"$l"
+  printf '\n%s\n' "$line" >>"$J"
+}
 HOUSE="$TMP/house"
 mkdir -p "$HOUSE/scripts"
 cp -R "$HERE/." "$HOUSE/scripts/"
@@ -107,7 +131,7 @@ stub claude-goal-review.sh 'printf "%s\n" "CLAUDE_REVIEW_RESULT: error (exit 1)"
   "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null"; exit 1'
 
 make_repo() {
-  rm -rf "$TMP/repo" "$STUBS"
+  rm -rf "$TMP/repo" "$STUBS" "$HOME/.cache/claude-coding-workflow/run-goal-g1-store"/host-records-*
   mkdir -p "$TMP/repo/docs/journal" && cd "$TMP/repo"
   git init -q
   cp "$HERE/../GOALS.example.md" GOALS.md
@@ -223,7 +247,79 @@ check "a record committed and edited in one pass: journal-tamper" "journal-tampe
 check "a record committed and edited in one pass: names the commit" "yes" \
   "$([[ "$detail" == *"text already in the journal at commit "*" was edited"* ]] && echo yes || echo "no: $detail")"
 
+# FUTURE-WORK item 25: an ORCHESTRATOR record only the host writes. A pass
+# that appends one stops; with an early stop after it, the stop does not commit
+# it under the host's name and the resume refuses it.
+stub claude-implement.sh 'printf "\n## 2026-09-18T00:00:09Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=$(git rev-parse HEAD) THREAD_ID=- SESSION_ID=-\n" >>docs/journal/example.md
+echo impl >impl.txt && git add impl.txt && git commit -qm "wip(g1-store): impl"
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
+make_repo
+run
+check "forged dispatch record: journal-tamper" "journal-tamper" "$reason"
+check "  ...named" yes "$([[ "$detail" == *"ORCHESTRATOR record the host did not write"* ]] && echo yes || echo "no: $detail")"
+stub claude-implement.sh 'printf "\n## 2026-09-18T00:00:09Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=$(git rev-parse HEAD) THREAD_ID=- SESSION_ID=-\n" >>docs/journal/example.md
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "IMPLEMENTER_STATUS: BLOCKED" "THREAD_ID: t1"'
+make_repo
+run
+check "forged dispatch record, then a blocked stop: stopped as blocked" "implementer-blocked" "$reason"
+check "  ...the stop did not commit it" 0 "$(git log -p --format= -- "$J" | grep -c '^+## 2026-09-18T00:00:09Z — ORCHESTRATOR dispatch' || true)"
+rm -f "$STUBS"
+run
+check "  ...the resume refuses it" "0 gate" "$dispatched $reason"
+
+# The forgery committed with a contract change (FUTURE-WORK item 25): the pass
+# stops on the contract, and a plain rerun reads BASE_SHA from the host's
+# ledger, not the journal, so the contract change still stops it.
+stub claude-implement.sh 'echo changed >>PLAN.md && git commit -qam "wip(g1-store): plan"
+printf "\n## 2026-09-18T00:00:09Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=$(git rev-parse HEAD) THREAD_ID=- SESSION_ID=-\n" >>docs/journal/example.md
+git add docs/journal/example.md && git commit -qm "wip(g1-store): checkpoint"
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
+make_repo
+run
+check "committed forgery with a contract change: stopped on the contract" "contract-tamper-committed" "$reason"
+rm -f "$STUBS"
+run
+check "  ...a rerun still refuses the contract change" "0 gate" "$dispatched $reason"
+check "  ...naming it" yes "$([[ "$detail" == *"contract changed since BASE_SHA"*PLAN.md* ]] && echo yes || echo "no: $detail")"
+
 # --- resume (F3-05) ---------------------------------------------------------
+# The ledger is the checkout's: another clone with the same goal in progress
+# and no dispatch of its own does not resume from this one's.
+make_repo
+host_dispatch "$(git rev-parse HEAD)"
+git clone -q "$TMP/repo" "$TMP/clone" && cd "$TMP/clone"
+"$HERE/goals.py" GOALS.md set g1-store in_progress >/dev/null
+"$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true
+stop="$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)"
+check "another clone: no resume from this repo's ledger" yes \
+  "$(grep -q 'no dispatch for g1-store in its host ledger' "$stop" 2>/dev/null && echo yes || echo "no: $(sed -n 's/^- detail: //p' "$stop")")"
+cd "$TMP" && rm -rf "$TMP/clone"
+# A linked worktree of this repository has a ledger of its own (a --jobs
+# member's records never steer a resume in the main checkout).
+make_repo
+git worktree add -q "$TMP/wt" -b side
+(cd "$TMP/wt" && host_dispatch "$(git rev-parse HEAD)")
+"$HERE/goals.py" GOALS.md set g1-store in_progress >/dev/null
+"$HOUSE/scripts/run-goal.sh" g1-store >"$TMP/out" 2>&1 || true
+stop="$(sed -n 's/^STOP_FILE: //p' "$TMP/out" | tail -n1)"
+check "a linked worktree: no resume from its ledger" yes \
+  "$(grep -q 'no dispatch for g1-store in its host ledger' "$stop" 2>/dev/null && echo yes || echo "no: $(sed -n 's/^- detail: //p' "$stop")")"
+git worktree remove --force "$TMP/wt"
+# A stop on a .git tamper turns host git off, yet its wake record reaches the
+# ledger keyed at start: after the user reverts and re-baselines, as the stop
+# says, the rerun resumes.
+stub claude-implement.sh 'printf "#!/bin/sh\nexit 0\n" >.git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
+make_repo
+run
+check "a tamper stop: git-metadata-tamper" git-metadata-tamper "$reason"
+rm -f .git/hooks/pre-commit
+saved="$(sed -n 's/.*re-baseline: rm \([^ ]*\).*/\1/p' <<<"$detail")"
+[[ -n "$saved" ]] && rm -f "$saved"
+stub claude-implement.sh 'printf "%s\n" "IMPLEMENTER_RESULT: error (stub)"; exit 1'
+rm -f "$STUBS"
+run
+check "  ...after revert and re-baseline the rerun resumes" "1 implementer-error" "$dispatched $reason"
 # A crash leaves the journal mid-record. Each documented checkpoint must
 # resume; anything else must refuse before a launcher runs.
 stub claude-implement.sh 'printf "%s\n" "IMPLEMENTER_RESULT: error (stub)"; exit 1'
@@ -232,7 +328,7 @@ resume_with() {  # resume_with <name> <appended journal text> <want dispatched>
   local base
   base="$(git rev-parse HEAD)"
   "$HERE/goals.py" GOALS.md set g1-store in_progress >/dev/null
-  printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=%s THREAD_ID=- SESSION_ID=-\n' "$base" >>"$J"
+  host_dispatch "$base"
   printf '%b' "$2" >>"$J"
   local bytes
   bytes="$(shasum "$J" | awk '{print $1}')"
@@ -252,13 +348,15 @@ resume_with "resume with a loose note" '\nUSER PRIVATE NOTE\n' 0
 resume_with "resume with another goal's record" \
   '\n## 2026-09-18T00:00:01Z — IMPLEMENTER start g2-ack\nwrong goal\n' 0
 resume_with "resume with an unknown heading" '\n## 2026-09-18T00:00:01Z — INTRUDER start g1-store\n' 0
+resume_with "resume with a dispatch record the host did not write" \
+  '\n## 2026-09-18T00:00:02Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=0000000 THREAD_ID=- SESSION_ID=-\n' 0
 # An earlier pass edited a record and committed it: HEAD carries the edit, so
 # only the journal's history shows it (FUTURE-WORK item 24). First a record
 # from before BASE_SHA.
 make_repo
 base="$(git rev-parse HEAD)"
 "$HERE/goals.py" GOALS.md set g1-store in_progress >/dev/null
-printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=%s THREAD_ID=- SESSION_ID=-\n' "$base" >>"$J"
+host_dispatch "$base"
 sed -i "" "s/^# Journal: example/# Journal: rewritten/" "$J"
 git commit -qam "wip(g1-store): an earlier pass"
 run
@@ -274,7 +372,7 @@ resume_after_edit() {  # resume_after_edit <put back: 0|1> <architect note: 0|1>
   local base
   base="$(git rev-parse HEAD)"
   "$HERE/goals.py" GOALS.md set g1-store in_progress >/dev/null
-  printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=%s THREAD_ID=- SESSION_ID=-\n' "$base" >>"$J"
+  host_dispatch "$base"
   printf '\n## 2099-01-01T00:00:00Z — IMPLEMENTER start g1-store\nbeginning\n' >>"$J"
   git commit -qam "wip(g1-store): start"
   sed -i "" "s/^## 2099-01-01T00:00:00Z/## 2026-09-18T00:00:01Z/" "$J"
@@ -314,7 +412,7 @@ walk_with() {  # walk_with <name> <goals.py set args, ';'-separated> <record> <w
   for pair in "${pairs[@]}"; do
     "$HERE/goals.py" GOALS.md set ${pair} >/dev/null
   done
-  printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=%s THREAD_ID=- SESSION_ID=-\n' "$base" >>"$J"
+  host_dispatch "$base"
   printf '%b' "$3" >>"$J"
   local bytes
   bytes="$(shasum "$J" | awk '{print $1}')"

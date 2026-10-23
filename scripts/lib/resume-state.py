@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""resume-state.py JOURNAL GOAL_ID — where an in_progress goal stopped.
+"""resume-state.py RECORDS GOAL_ID — where an in_progress goal stopped.
+
+RECORDS is the goal's host ledger (lib/orch-files.sh orch_host_ledger): the
+ORCHESTRATOR records run-goal.sh wrote, one a line, in the order it wrote
+them. Not the journal: anyone with the checkout can write or commit a line
+there, and a forged `dispatch` naming a later BASE_SHA would hide contract
+commits from a resume (FUTURE-WORK item 25). Only `## <utc> — ORCHESTRATOR`
+headings count, never text inside another line.
 
 Prints one tab-separated line (empty fields as "-"):
   BASE_SHA  ROUND  THREAD_ID  SESSION_ID  PENDING_FIX_ROUND  PENDING_FIX_HASH
   PENDING_FIX_SOURCE  PENDING_FIX_HEAD  PENDING_FIX_STUCK
-or nothing when the journal has no dispatch for the goal.
+or nothing when RECORDS has no dispatch for the goal (or does not exist).
 
 Reads the ORCHESTRATOR dispatch / ids / review / fix lines of the current
 attempt only — from the last `dispatch <id> r0` on; an earlier attempt's
@@ -27,7 +34,7 @@ import sys
 
 journal, gid = sys.argv[1], sys.argv[2]
 EVENT = re.compile(
-    r"— ORCHESTRATOR (dispatch|ids|review|fix|wake) " + re.escape(gid) + r" r(\d+)(?=\s|$)"
+    r"^## \S+ — ORCHESTRATOR (dispatch|ids|review|fix|wake) " + re.escape(gid) + r" r(\d+)(?=\s|$)"
 )
 
 
@@ -39,7 +46,7 @@ def field(line: str, key: str) -> str:
 try:
     with open(journal, encoding="utf-8", errors="replace") as f:
         events = [(m.group(1), int(m.group(2)), line)
-                  for line in f if (m := EVENT.search(line))]
+                  for line in f if (m := EVENT.match(line))]
 except OSError:
     events = []
 

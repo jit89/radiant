@@ -514,9 +514,14 @@ orch_commit_journal() {
   git commit -m "$1" -- "$JOURNAL"
 }
 
+# Each record goes to the goal's ledger first (orch_host_ledger): a record
+# in the journal is always one the ledger holds.
 journal_line() {
   local line="$1"
   [[ -n "$JOURNAL" ]] || return 0
+  if [[ -n "${HOST_LEDGER:-}" ]]; then
+    (umask 077 && mkdir -p "$(dirname "$HOST_LEDGER")" && printf '%s\n' "$line" >>"$HOST_LEDGER") || return 1
+  fi
   mkdir -p "$(dirname "$JOURNAL")"
   printf '\n%s\n' "$line" >>"$JOURNAL"
 }
@@ -529,22 +534,24 @@ journal_line() {
 # with the fallback off: the goal stays on the model it fell back to even if
 # IMPLEMENTER_PRIMARY changed while it was paused, so nothing switches back
 # (docs/features/deepseek-primary Q2).
+# Read from the goal's ledger, not the journal (FUTURE-WORK item 25).
 attempt_fell_back() {
-  [[ -n "$JOURNAL" && -f "$JOURNAL" ]] || return 1
+  local ledger="${HOST_LEDGER:-}"
+  [[ -n "$ledger" && -f "$ledger" ]] || return 1
   awk -v d="— ORCHESTRATOR dispatch ${GOAL_ID} r0 " -v i="— ORCHESTRATOR implemented ${GOAL_ID} r" \
     -v t="— ORCHESTRATOR ids ${GOAL_ID} r" '
     index($0, d) && index($0, " THREAD_ID=- ") { fb = 0 }
     (index($0, i) || index($0, t)) && index($0, " FALLBACK=(") { fb = 1 }
-    END { exit fb ? 0 : 1 }' "$JOURNAL"
+    END { exit fb ? 0 : 1 }' "$ledger"
 }
 
-# Where this in_progress goal stopped, from the journal (lib/resume-state.py).
+# Where this in_progress goal stopped, from its ledger (lib/resume-state.py).
 # Sets BASE_SHA, ROUND, THREAD_ID, SESSION_ID, PENDING_FIX_ROUND,
 # PENDING_FIX_HASH, PENDING_FIX_SOURCE and PENDING_FIX_HEAD (empty when no FIX
 # is owed) and PENDING_FIX_STUCK (1 when a proof fix's no-progress stop fired).
 load_resume_state() {
   local state
-  state="$(python3 "$HERE/lib/resume-state.py" "$JOURNAL" "$1")" || return 1
+  state="$(python3 "$HERE/lib/resume-state.py" "$HOST_LEDGER" "$1")" || return 1
   [[ -n "$state" ]] || return 1
   IFS=$'\t' read -r BASE_SHA ROUND THREAD_ID SESSION_ID PENDING_FIX_ROUND PENDING_FIX_HASH \
     PENDING_FIX_SOURCE PENDING_FIX_HEAD PENDING_FIX_STUCK <<<"$state"
@@ -703,6 +710,9 @@ git_meta_init || die_gate "cannot locate the gitdir"
 # Per repo and goal: ART_DIR is keyed by the goal id alone.
 CLAUDE_META_SAVED="$ART_DIR/claude-meta-$(printf '%s' "$ROOT" | shasum -a 256 | cut -c1-16).txt"
 verify_git_meta "since the last run in this repo"
+# The goal's host ledger, keyed now while host git is trusted: after a tamper
+# git answers nothing, and the stop's own record must still reach this ledger.
+HOST_LEDGER="$(orch_host_ledger "$GOAL_ID")" || die_gate "cannot key the host ledger: git names no git dir"
 
 [[ -f GOALS.md ]] || die_gate "GOALS.md missing — commit the DAG and oracles first"
 git rev-parse --verify HEAD >/dev/null 2>&1 || die_gate "repo has no commits"
@@ -900,7 +910,7 @@ if [[ "$IMPLEMENTER" == codex ]] && ! load_key_from_files DEEPSEEK_API_KEY .env 
 fi
 
 if [[ "$RESUME" -eq 1 ]]; then
-  load_resume_state "$GOAL_ID" || die_gate "in_progress but no journaled BASE_SHA for $GOAL_ID"
+  load_resume_state "$GOAL_ID" || die_gate "in_progress but no dispatch for $GOAL_ID in its host ledger ($HOST_LEDGER), the run's own record of what it wrote. A goal paused before ledgers existed (2026-10-23), run in another checkout, or in a repo since moved has none. A fresh start takes HEAD as its base, so first find this attempt's base (the journal's last 'ORCHESTRATOR dispatch $GOAL_ID r0' BASE_SHA, checked with git log), review git log <base>..HEAD and git diff <base> -- the plan, the oracle and tests/acceptance, and reset to the base unless you accept those commits; then hand it back ($HOUSE/scripts/goals.py GOALS.md set $GOAL_ID ready, commit) and rerun."
   git merge-base --is-ancestor "$BASE_SHA" HEAD || \
     die_gate "journaled BASE_SHA $BASE_SHA is not an ancestor of HEAD"
 else

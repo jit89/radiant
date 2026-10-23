@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare a journal's committed text to its working copy.
 
-  orch-files.py journal HEAD_COPY WORKTREE_FILE MODE [GOAL_ID]
+  orch-files.py journal HEAD_COPY WORKTREE_FILE MODE [GOAL_ID] [--host LEDGER]
 
 MODE:
   --none      the working copy must equal HEAD
@@ -19,6 +19,11 @@ MODE:
               implementer to — so a record from another run or another goal
               cannot pass as this one's. An ORCHESTRATOR record need not:
               walk-start belongs to the walk, not to a goal.
+              With --host, every appended ORCHESTRATOR record must also be a
+              line of LEDGER, the records run-goal.sh wrote for this goal
+              (a missing LEDGER holds none): only the host writes them, so a
+              record forged by anyone else is not committed under its name.
+              (A resume reads the ledger, not the journal: FUTURE-WORK item 25.)
 
 Exit 0 when the mode holds; otherwise print why and exit 1.
 
@@ -51,14 +56,18 @@ OTHER_ROLE = re.compile(r"^## \S+ — ([A-Z]{3,}) ")
 GOAL_ID = re.compile(r"\bg\d+-[a-z0-9-]+\b")
 
 
-def check_records(extra, goal_id):
+def check_records(extra, goal_id, host=None):
     """Return a problem string, or None when every appended line belongs to a
-    record of this goal."""
+    record of this goal (and, with HOST, every ORCHESTRATOR record is one of
+    those lines)."""
     role = None
     for n, line in enumerate(extra.splitlines(), 1):
         m = HEADING.match(line)
         if m:
             role = m.group(2)
+            if host is not None and role == "ORCHESTRATOR" and line not in host:
+                return (f"appended line {n} is an ORCHESTRATOR record the host did not "
+                        f"write: {line[:80]!r}")
             named = set(GOAL_ID.findall(m.group(3) or ""))
             if goal_id and named - {goal_id}:
                 other = ", ".join(sorted(named - {goal_id}))
@@ -115,6 +124,14 @@ def main(argv):
             print(problem)
             return 1
         return 0
+    host = None
+    if len(argv) >= 2 and argv[-2] == "--host":
+        try:
+            with open(argv[-1], encoding="utf-8", errors="replace") as f:
+                host = set(f.read().splitlines())
+        except OSError:
+            host = set()
+        argv = argv[:-2]
     if len(argv) not in (4, 5) or argv[0] != "journal" or argv[3] not in (
         "--none", "--records", "--prefix"
     ):
@@ -142,7 +159,7 @@ def main(argv):
     if mode == "--none":
         print("has uncommitted additions")
         return 1
-    problem = check_records(work[len(head):].decode("utf-8", "replace"), goal_id)
+    problem = check_records(work[len(head):].decode("utf-8", "replace"), goal_id, host)
     if problem:
         print(problem)
         return 1
