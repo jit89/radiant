@@ -18,6 +18,9 @@ unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL DEEPSEEK_API_KEY IMPLEMENTER_MODEL \
   DEEPSEEK_EFFORT CLAUDE_CODE_EFFORT_LEVEL DEEPSEEK_PRICE_MISS DEEPSEEK_PRICE_HIT DEEPSEEK_PRICE_OUT \
   IMPLEMENTER_SMOKE_PROVIDER
 export FAKE_SECRET_TOKEN=not-for-the-child
+# The implementer's private TMPDIR root stays inside this test's folder (2d
+# checks the default once, as a dry run).
+export CW_IMPL_TMP_ROOT="$TMP/tr"
 # Sections 1-11 are written for Haiku first; the default is DeepSeek (section 0).
 export IMPLEMENTER_PRIMARY=haiku
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost
@@ -70,11 +73,19 @@ for ((i = 0; i < ${#args[@]}; i++)); do
   esac
 done
 printf '%s' "$settings" >"$d/settings.$n"
+# FAKE_TMP_LOCKED=1: leave what a model can leave in its TMPDIR, a read-only
+# folder holding a locked file.
+if [[ "${FAKE_TMP_LOCKED:-}" == 1 && -n "${CLAUDE_CODE_TMPDIR:-}" ]]; then
+  mkdir -p "$CLAUDE_CODE_TMPDIR/ro/deep" && echo x >"$CLAUDE_CODE_TMPDIR/ro/f"
+  echo y >"$CLAUDE_CODE_TMPDIR/ro/deep/g" && chflags uappnd "$CLAUDE_CODE_TMPDIR/ro/deep/g"
+  chmod 000 "$CLAUDE_CODE_TMPDIR/ro/deep"
+  chflags uchg "$CLAUDE_CODE_TMPDIR/ro/f"; chmod 555 "$CLAUDE_CODE_TMPDIR/ro"
+fi
 printf '%s' "${args[1]:-}" >"$d/prompt.$n"
 helper="$(printf '%s' "$settings" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("apiKeyHelper",""))')"
 helper_out=""
 [[ -z "$helper" ]] || helper_out="$(eval "$helper")"
-echo "model=$model sid=$sid resume=$res effort=$effort safe=$safe bare=$bare tools=$tools allow=$allow base=${ANTHROPIC_BASE_URL:-} anthkey=${ANTHROPIC_API_KEY:+set} dskey=${DEEPSEEK_API_KEY:+set} secret=${FAKE_SECRET_TOKEN:+set} helper_out=$helper_out adddirs=$adddirs budget=$budget cel=${CLAUDE_CODE_EFFORT_LEVEL:-}" >>"$d/calls"
+echo "model=$model sid=$sid resume=$res effort=$effort safe=$safe bare=$bare tools=$tools allow=$allow base=${ANTHROPIC_BASE_URL:-} anthkey=${ANTHROPIC_API_KEY:+set} dskey=${DEEPSEEK_API_KEY:+set} secret=${FAKE_SECRET_TOKEN:+set} helper_out=$helper_out adddirs=$adddirs budget=$budget cel=${CLAUDE_CODE_EFFORT_LEVEL:-} tmpdir=${CLAUDE_CODE_TMPDIR:-} tmpmode=$(stat -f %Lp "${CLAUDE_CODE_TMPDIR:-/nonexistent}" 2>/dev/null) tmproot=${CW_IMPL_TMP_ROOT:-}" >>"$d/calls"
 [[ -f "$d/resp.$n" ]] || { echo "no canned response $n" >&2; exit 9; }
 [[ -f "$d/err.$n" ]] && cat "$d/err.$n" >&2
 sed "s/SID/${sid:-$res}/" "$d/resp.$n"
@@ -247,6 +258,59 @@ check "deny-read: the Read tool is denied too" yes "$(has 'Read(//x/runs)' "$(se
 reset "$DONE"
 run -- --deny-read relative/path "$HANDOFF"
 check "deny-read: a relative path is refused" 2 "$RC"
+
+echo "== 2d. a private TMPDIR per run (FUTURE-WORK item 12) =="
+# Claude Code's own /tmp/claude-<uid> is shared by every session of the user.
+uid="$(id -u)"
+reset "$REFUSAL" "$DONE"
+run -- "$HANDOFF"
+check "private tmp: exit 0" 0 "$RC"
+t1="$(call_field 1 tmpdir)"
+check "private tmp: the pass gets CLAUDE_CODE_TMPDIR under the root" yes "$([[ "$t1" == "$TMP/tr/"?* ]] && echo yes || echo "no: $t1")"
+check "private tmp: it exists during the pass, 0700" 700 "$(call_field 1 tmpmode)"
+check "private tmp: the fallback pass shares it" "$t1" "$(call_field 2 tmpdir)"
+check "private tmp: removed after the run" no "$([[ -e "$t1" ]] && echo yes || echo no)"
+check "private tmp: the root setting is not passed on" "" "$(call_field 1 tmproot)"
+for p in "/private/tmp/claude-$uid" "/tmp/claude-$uid" "$TMP/tr"; do
+  check "private tmp: reads denied under $p" yes "$(has "\"$p\"" "$(setting 1 sandbox.filesystem.denyRead)")"
+done
+check "private tmp: only its own folder re-allowed" "[\"$t1\"]" "$(setting 1 sandbox.filesystem.allowRead)"
+reset "$DONE"
+run -u CW_IMPL_TMP_ROOT IMPLEMENTER_DRY_RUN=1 -- "$HANDOFF"
+check "private tmp: by default under /private/tmp/cw-<uid>, a short path" yes \
+  "$([[ "$OUT" =~ CLAUDE_CODE_TMPDIR=/private/tmp/cw-$uid/[A-Za-z0-9]{8}[[:space:]] ]] && echo yes || echo "no: $OUT")"
+mkdir -p "$TMP/elsewhere" && chmod 755 "$TMP/elsewhere" && ln -s "$TMP/elsewhere" "$TMP/link"
+reset "$DONE"
+run CW_IMPL_TMP_ROOT="$TMP/link" -- "$HANDOFF"
+check "private tmp: a symlinked root fails closed" "1 0" "$RC $(calls)"
+check "private tmp: and says why" yes "$(has 'is not a folder this user owns' "$OUT")"
+check "private tmp: the link's target is left as it was" 755 "$(stat -f %Lp "$TMP/elsewhere")"
+: >"$TMP/plainfile"
+reset "$DONE"
+run CW_IMPL_TMP_ROOT="$TMP/plainfile" -- "$HANDOFF"
+check "private tmp: a file at the root fails closed" "1 0" "$RC $(calls)"
+reset "$DONE"
+run CW_IMPL_TMP_ROOT=relative/root -- "$HANDOFF"
+check "private tmp: a relative root fails closed" "1 0 no" "$RC $(calls) $([[ -e "$REPO/relative" ]] && echo yes || echo no)"
+mkdir -p "$TMP/tr755" && chmod 755 "$TMP/tr755"
+reset "$DONE"
+run CW_IMPL_TMP_ROOT="$TMP/tr755" -- "$HANDOFF"
+check "private tmp: an existing root is made 0700" "0 700" "$RC $(stat -f %Lp "$TMP/tr755")"
+reset "$DONE"
+run FAKE_TMP_LOCKED=1 -- "$HANDOFF"
+t1="$(call_field 1 tmpdir)"
+check "private tmp: a read-only, locked leftover: the run is still ok" "0 ok" "$RC $(line IMPLEMENTER_RESULT)"
+check "private tmp: and the folder is removed" no "$([[ -e "$t1" ]] && echo yes || echo no)"
+# Both spellings of a root under /tmp (a real one, removed here).
+short="/private/tmp/cw-test-$$"
+reset "$DONE"
+run CW_IMPL_TMP_ROOT="$short" -- "$HANDOFF"
+for p in "$short" "/tmp/cw-test-$$"; do
+  check "private tmp: reads denied under $p" yes "$(has "\"$p\"" "$(setting 1 sandbox.filesystem.denyRead)")"
+done
+check "private tmp: its own folder re-allowed in both spellings" 2 \
+  "$(setting 1 sandbox.filesystem.allowRead | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+rm -rf "$short"
 
 echo "== 3. DECLINED -> fallback =="
 reset "$DECLINED" "$DONE"

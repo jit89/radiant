@@ -10,7 +10,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/cw-tmp-hygiene-XXXXXX")" && pwd)"
-export TMPDIR="$TMP" HOME="$TMP/home"
+export TMPDIR="$TMP" HOME="$TMP/home" CW_IMPL_TMP_ROOT="$TMP/impl-tmp"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$HOME"
 export GIT_AUTHOR_NAME=mock GIT_AUTHOR_EMAIL=mock@localhost

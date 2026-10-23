@@ -36,6 +36,9 @@
 #                               ~/.cache/claude-coding-workflow/runs/, and an
 #                               `ok` pass removes its raw output and .err
 #   CW_KEEP_RAW=1               keep them after an `ok` pass anyway
+#   CW_IMPL_TMP_ROOT            tests only: an absolute folder in place of
+#                               /private/tmp/cw-<uid> for the implementer's
+#                               private TMPDIR (made and removed even on a dry run)
 #
 # Result lines (stdout):
 #   IMPLEMENTER_RESULT: ok | rate_limited (exit N) | declined (<provider>)
@@ -108,6 +111,14 @@ DS_MODEL="${DEEPSEEK_MODEL:-deepseek-flash}"
 DS_EFFORT="${DEEPSEEK_EFFORT:-}"
 DS_BASE="${DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
 KEYS_DIR="$HOME/.cache/claude-coding-workflow/keys"
+# The implementer's TMPDIR. Claude Code's own default, /tmp/claude-<uid>, is
+# shared by every session of the user (their background tasks' output too), so
+# each run gets a private folder under TMP_ROOT instead (CLAUDE_CODE_TMPDIR),
+# and the sandbox denies reads of both roots but this run's folder
+# (docs/features/proof-sandbox, FUTURE-WORK item 12). Short on purpose: Claude
+# Code falls back to the shared folder when the path is too long for a socket.
+TMP_ROOT="${CW_IMPL_TMP_ROOT:-/private/tmp/cw-$(id -u)}"
+PASS_TMP=""
 
 SMOKE=0
 RESUME_ID=""
@@ -183,6 +194,31 @@ KEY_FILES=()
 cleanup() {
   local f
   for f in "${KEY_FILES[@]+"${KEY_FILES[@]}"}"; do rm -f "$f"; done
+  # The implementer may leave read-only or locked folders there (a Go module
+  # cache, a chmod 555 fixture): unlock first, and never fail the exit on it.
+  # Twice: a locked file in a 000 folder is reached only once chmod opened it.
+  if [[ -n "$PASS_TMP" ]]; then
+    local i
+    for i in 1 2; do
+      chflags -R nouchg,noschg,nouappnd "$PASS_TMP" 2>/dev/null || true
+      chmod -R u+rwx "$PASS_TMP" 2>/dev/null || true
+    done
+    rm -rf "$PASS_TMP" 2>/dev/null || true
+  fi
+}
+
+# Sets PASS_TMP to this run's private TMPDIR, made once (the fallback pass
+# shares it). /tmp is shared by every user: a TMP_ROOT that is not this
+# user's own folder, or a symlink, fails closed.
+make_pass_tmp() {
+  [[ -z "$PASS_TMP" ]] || return 0
+  [[ "$TMP_ROOT" != /* ]] || (umask 077 && mkdir -p "$TMP_ROOT") 2>/dev/null || true
+  if [[ "$TMP_ROOT" != /* || -L "$TMP_ROOT" || ! -d "$TMP_ROOT" || ! -O "$TMP_ROOT" ]]; then
+    echo "IMPLEMENTER_RESULT: error ($TMP_ROOT is not a folder this user owns; remove it and rerun)"
+    exit 1
+  fi
+  chmod 700 "$TMP_ROOT"
+  PASS_TMP="$(mktemp -d "$TMP_ROOT/XXXXXXXX")"
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
@@ -206,7 +242,7 @@ env_unsets() {
   local name
   printf '%s\n' -u ANTHROPIC_BASE_URL
   # The house's own folder settings are for this launcher, not the model's shell.
-  printf '%s\n' -u CW_OUT_DIR -u CW_KEEP_RAW -u CW_PRUNE_DAYS
+  printf '%s\n' -u CW_OUT_DIR -u CW_KEEP_RAW -u CW_PRUNE_DAYS -u CW_IMPL_TMP_ROOT
   # Effort is set by this launcher only (--effort); a value left in the user's
   # shell would change it unseen.
   printf '%s\n' -u CLAUDE_CODE_EFFORT_LEVEL
@@ -225,10 +261,10 @@ new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 settings_json() {
   python3 - "$1" "${IMPLEMENTER_ALLOWED_DOMAINS:-}" \
     "$(printf '%s\n' "${DENY_WRITES[@]+"${DENY_WRITES[@]}"}")" \
-    "$HOUSE" "$HERE/lib/secret-paths.txt" "$KEYS_DIR" \
+    "$HOUSE" "$HERE/lib/secret-paths.txt" "$KEYS_DIR" "$TMP_ROOT" "$PASS_TMP" "$(id -u)" \
     "${DENY_READS[@]+"${DENY_READS[@]}"}" <<'PY'
 import json, os, shlex, sys
-key_file, domains, deny_writes, house, listing, keys_dir, *extra = sys.argv[1:]
+key_file, domains, deny_writes, house, listing, keys_dir, tmp_root, pass_tmp, uid, *extra = sys.argv[1:]
 # lib/secret-paths.txt, shared with the proof sandbox: ~/ is the home, @HOUSE/
 # the house checkout. The keys folder this launcher writes, and the run's
 # --deny-read paths, are added to it.
@@ -261,6 +297,16 @@ settings = {
     },
     "permissions": {"deny": deny},
 }
+# The shared temp roots, both spellings (/tmp is a link to /private/tmp);
+# allowRead re-opens this run's own folder inside them.
+tmp_roots = [f"/private/tmp/claude-{uid}", f"/tmp/claude-{uid}", tmp_root]
+allow = [pass_tmp]
+for a, b in (("/private/tmp/", "/tmp/"), ("/tmp/", "/private/tmp/")):
+    if tmp_root.startswith(a):
+        tmp_roots.append(b + tmp_root[len(a):])
+        allow.append(b + pass_tmp[len(a):])
+settings["sandbox"]["filesystem"]["denyRead"] += [p for p in tmp_roots if p not in secrets]
+settings["sandbox"]["filesystem"]["allowRead"] = allow
 writes = [p for p in deny_writes.splitlines() if p]
 if writes:
     settings["sandbox"]["filesystem"]["denyWrite"] = writes
@@ -295,6 +341,8 @@ run_pass() {
   local provider="$1" mode="$2" sid="$3" prompt="$4" tools="$5"
   local key_file="" unsets=() u envs=() model_flags=()
   while IFS= read -r u; do unsets+=("$u"); done < <(env_unsets)
+  make_pass_tmp
+  envs+=("CLAUDE_CODE_TMPDIR=$PASS_TMP")
   mkdir -p "$KEYS_DIR"
   case "$provider" in
     haiku)
@@ -700,7 +748,8 @@ Keep the return handoff at ${RETURN_DOC}. The rules from your first message stil
 Append a new START record for this pass and an END record when you stop, in the same
 heading shape, naming the goal id, each heading's time from date -u as you write it. Never
 change a record already written, yours included: correct one by appending a new record.
-Run the goal's proof before claiming DONE.
+Run the goal's proof before claiming DONE. \$TMPDIR is new for this pass: scratch files
+from an earlier pass are gone.
 End your reply with one line IMPLEMENTER_STATUS: DONE, BLOCKED or DECLINED (after
 DECLINED add \" — \" and one line saying why), nothing after it."
 fi

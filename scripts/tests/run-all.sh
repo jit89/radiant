@@ -161,7 +161,9 @@ run_one() {
   mkdir -p "$d/tmp" "$d/home"
   # No denial listing after a red proof (lib/proof.sh): ~4 s each, and only
   # proof-test.sh reads it, which turns it back on.
-  "${START_TEST[@]}" env "${UNSETS[@]}" TMPDIR="$d/tmp" HOME="$d/home" CW_PROOF_DENIALS=off \
+  # The implementer launcher's private TMPDIR root, inside the test's own
+  # folder (not /private/tmp/cw-<uid>), so what it leaves counts as a leak.
+  "${START_TEST[@]}" env "${UNSETS[@]}" TMPDIR="$d/tmp" HOME="$d/home" CW_PROOF_DENIALS=off CW_IMPL_TMP_ROOT="$d/tmp" \
     bash "$t" </dev/null >"$d/out" 2>&1 &
   pid=$!
   echo "$pid" >"$d/pid"

@@ -562,7 +562,11 @@ Follow-ups from the build's Opus review (2026-10-17), not closed by item 12:
   processes' environments.
 - `/tmp/claude-<uid>` (Claude Code's TMPDIR for every sandbox of the user) is
   shared by all of them; the implementer can read what another Claude Code
-  session left there. Not reachable by proofs.
+  session left there. Not reachable by proofs. Done 2026-10-23: each
+  implementer run gets its own TMPDIR under `/private/tmp/cw-<uid>`
+  (`CLAUDE_CODE_TMPDIR`), and the sandbox denies reads of both roots but that
+  folder (proof-sandbox EVIDENCE, "The implementer's private TMPDIR"). The
+  legacy `IMPLEMENTER=codex` launcher is unchanged.
 - Probes not yet in the tests: `/System/Volumes/Data` firmlink paths and
   `.GIT` case variants against the secret and `.git` rules; a mach-lookup
   probe apart from the exec layer (a ctypes `bootstrap_look_up` of securityd);
@@ -853,4 +857,14 @@ tainted, and the stop reads `head-moved-during-review` or
 `orchestration-files-changed`, with GOALS.md already set to `done` on the main
 checkout. Fix: `verify_git_meta "during review r${ROUND}"` right after the
 reviewer returns, which covers every verdict route.
+
+## 27. The implementer can read the user's macOS temp folder (2026-10-23)
+
+Found while measuring item 12's shared `/tmp/claude-<uid>`: a sandboxed
+implementer reads `$(getconf DARWIN_USER_TEMP_DIR)` (`/var/folders/…/T/`),
+which holds other programs' temp files (database `-wal`/`-shm` files, service
+folders), and presumably the rest of the per-user `/var/folders/…` tree (`C/`,
+`X/`). What a `denyRead` of it breaks is unmeasured (caches such as clang's
+module cache live under `C/`): measure a C, Python and Node build under it,
+with the private TMPDIR in place, before adding it.
 

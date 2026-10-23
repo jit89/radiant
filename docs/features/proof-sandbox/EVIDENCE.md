@@ -317,3 +317,40 @@ ASan and UBSan builds. 7/7 goals were done, with no `proof-sandbox-*`, `proof-ha
 `secrets-in-checkout` stops. The local `git clone` hard-linked the object
 store, and the pre-check passed it as designed. `logs.sh warnings` and
 `errors` are empty for the walk. Details are in `docs/features/parallel-walker/EVIDENCE.md`, step 12b.
+
+## The implementer's private TMPDIR (2026-10-23, FUTURE-WORK item 12)
+
+Claude Code 2.1.307 sets a sandboxed command's `TMPDIR` to `/tmp/claude-<uid>`,
+the per-user folder every Claude Code session shares, background-task output
+included. Sandboxed `claude -p` Haiku passes (about $0.02 in all), each
+reading a planted canary in another session's folder:
+
+| Settings | Child `TMPDIR` | Other session's canary | Own temp |
+|---|---|---|---|
+| today's (no temp rule) | `/tmp/claude-501` | **read** | works |
+| `denyRead` `/tmp/claude-<uid>` | `/tmp/claude-501` | refused | **write-only**: reads refused |
+| same, `CLAUDE_CODE_TMPDIR` ~90 characters long | `/tmp/claude-501` (Claude Code falls back: too long for a socket path) | refused | write-only |
+| same, `CLAUDE_CODE_TMPDIR=/tmp/cwi.XXXXXX` | `/tmp/cwi.XXXXXX/claude-501` | refused | works |
+| `denyRead` the shared folder and `/private/tmp/cw-<uid>`, `allowRead` one run's folder in it | `/private/tmp/cw-501/run1/claude-501` | refused; another run's folder refused | works |
+
+So `claude-implement.sh` gives each run a folder under `/private/tmp/cw-<uid>`
+(0700, owned by the user and not a symlink, or it stops; 8 random characters,
+so the path stays short), passes it as `CLAUDE_CODE_TMPDIR`, denies reads of
+both roots in both spellings and re-opens only that folder (`allowRead`), and
+removes it when it exits, unlocking what the implementer left read-only first.
+The root is 19 characters for uid 501 and the run's folder 28 (at most 35 with
+a 10-digit uid); only the 3-digit case was measured. A path Claude Code finds
+too long makes it fall back to the shared folder, which is denied, so the
+implementer's temp turns write-only rather than shared. One real pass
+through the launcher, with a wrapper swapping in a probe script ($0.0011), printed
+`TMPDIR=/private/tmp/cw-501/55cHmfc3/claude-501`, "Operation not permitted" for
+the other session's canary, another run's folder and a listing of
+`/tmp/claude-501`, and a working write and read in its own folder; the folder
+was gone after the run.
+
+The same probes showed the implementer can read the user's macOS temp folder
+(`$(getconf DARWIN_USER_TEMP_DIR)`, `/var/folders/…/T/`, about 190 entries of
+other programs' temp files). Not changed here: what denying it breaks is
+unmeasured (FUTURE-WORK item 27). A model that can see the deny list may
+decline to probe it: two Haiku passes refused to `cat` paths they saw denied,
+so the launcher probe ran a script.

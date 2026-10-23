@@ -225,7 +225,9 @@ removed when the goal lands and kept on a wake. The implementer's folder
 (handoffs, return documents, the frozen plan) is
 `~/.cache/claude-coding-workflow/handoffs/run-goal-<id>-*`, outside the run
 folders: the implementer's sandbox denies it every run folder, Grok's
-verdicts, the logs and every other goal's handoff folder. Every host proof,
+verdicts, the logs and every other goal's handoff folder, and its `TMPDIR` is
+a private folder under `/private/tmp/cw-<uid>` (not Claude Code's shared
+`/tmp/claude-<uid>`, which it cannot read). Every host proof,
 `worktree_setup` and merged proof runs under the proof sandbox
 (`scripts/lib/proof-sandbox.py`, docs/features/proof-sandbox): writes only to
 the checkout and its own `TMPDIR`, no network unless the GOALS.md preamble
