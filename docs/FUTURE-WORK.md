@@ -586,6 +586,12 @@ Follow-ups from the build's Opus review (2026-10-17), not closed by item 12:
   and temp-area rules, each with a control outside the sandbox; a ctypes
   `bootstrap_look_up` of securityd (1100 inside, 0 outside); the walker's
   `PROOF_SANDBOX_REASON` branches in `integrate` and `run_setup`.
+  Done 2026-10-25: the three model-pass probes, in one real launcher pass
+  (EVIDENCE.md, "Implementer probes left from item 12"): the firmlink spellings
+  of `/tmp/claude-<uid>`, `/private/tmp/cw-<uid>` and `/var/folders` refused (a
+  control read through the firmlink worked); `ln` of another session's file
+  into the implementer's TMPDIR, and of a `--deny-read` file into the repo,
+  refused.
 - Test time: item 12 took the full suite from ~22 to ~49 min, mostly the
   parallel-walk files (~37 walks each). The sandbox self-test runs once per
   walk and once per goal (~1 s), and a red proof waits ~3 s for its denial

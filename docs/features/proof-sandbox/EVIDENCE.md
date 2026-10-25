@@ -401,3 +401,28 @@ to sit outside `~/.claude`, which the secret list denies. After the review moved
 the deny to the whole of `/var/folders`, a third pass ($0.0012) gave the same
 results, with `/private/var/folders` itself refused and `xcrun_db` still
 readable.
+
+## Implementer probes left from item 12 (2026-10-25)
+
+Three probes FUTURE-WORK item 12 listed as needing a model pass, run in one
+real Haiku pass through `claude-implement.sh` (the probe-script wrapper above,
+$0.0011, with `--deny-read` naming a canary folder as a stand-in secret).
+Canaries were planted from outside the sandbox, each first read on the host
+through its `/System/Volumes/Data` spelling, and removed afterwards.
+
+| From inside the implementer's shell | Result |
+|---|---|
+| read another session's file in `/tmp/claude-<uid>` through `/System/Volumes/Data/private/tmp/…` | refused |
+| read another run's folder under `/private/tmp/cw-<uid>` through the firmlink | refused |
+| read a file in the user's `/var/folders/…/T` through the firmlink | refused |
+| read its own TMPDIR file through the firmlink (control) | allowed |
+| `ln` another session's file in `/tmp/claude-<uid>` into its own TMPDIR | refused |
+| `ln` a file of a `--deny-read` folder into the repo | refused |
+
+The control shows the firmlink spelling resolves inside the sandbox, so the
+refusals are the deny rules, not a missing path. A hard link into the
+implementer's re-allowed TMPDIR, or a hard-linked secret in the repo, cannot be
+made from inside; one left by a process outside any sandbox is the proof
+sandbox's hard-link pre-check's to catch (above). These stay evidence, not
+suite tests: each needs a model pass.
+
