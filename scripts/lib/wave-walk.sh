@@ -547,25 +547,50 @@ run_setup() {
   return 0
 }
 
-# done_this_walk JOURNAL_COPY — goals done in this walk (their `integrated`
-# record after this walk's walk-start), for the merged proofs, read from a
-# copy of the walk tip's journal. Whole walker headings only, split on "\n"
-# only, as walk_record: a merged goal record may carry a body line that reads
-# like either record (journal-merge.py refuses walker-only headings, so a
-# heading is the walker's own).
+# done_this_walk JOURNAL_COPY — goals done in this walk, for the merged proofs:
+# those with an `integrated` record after this walk's walk-start in a copy of
+# the walk tip's journal, and those a serial (--jobs 1) run of the same walk
+# finished (FUTURE-WORK item 30): a goal GOALS.md marks done whose host ledger
+# in this checkout (orch_host_ledger, which no sandboxed goal can write) holds
+# an `ORCHESTRATOR done <goal>` record stamped at or after that walk-start (a
+# serial goal handed back since is left out; an integrated one counts whatever
+# its status now). Whole headings only, split on "\n" only, as walk_record: a
+# merged goal record may carry a body line that reads like either record
+# (journal-merge.py refuses walker-only headings, so a journal heading is the
+# walker's own). With no walk-start found every record counts: more proofs,
+# never fewer.
 done_this_walk() {
-  python3 - "$1" "${WALK_ID:-}" <<'PY'
-import re, sys
-path, wid = sys.argv[1], sys.argv[2]
+  local g l ids ledgers=()
+  ids="$("$GOALS_PY" GOALS.md todos | python3 -c 'import json,sys; print("\n".join(t["id"] for t in json.load(sys.stdin) if t.get("goal_status") == "done"))')" || return 1
+  for g in $ids; do
+    l="$(orch_host_ledger "$g")" || return 1
+    ledgers+=("$g=$l")
+  done
+  python3 - "$1" "${WALK_ID:-}" "${ledgers[@]+"${ledgers[@]}"}" <<'PY'
+import os, re, sys
+path, wid, *ledgers = sys.argv[1:]
 lines = open(path, "rb").read().decode("utf-8", "replace").split("\n")
-start = 0
+start, since = 0, ""
 for i, l in enumerate(lines):
-    if re.match(r"^## \S+ \u2014 ORCHESTRATOR walk-start walk_id=" + re.escape(wid) + r"(\s|$)", l):
-        start = i
+    m = re.match(r"^## (\S+) \u2014 ORCHESTRATOR walk-start walk_id=" + re.escape(wid) + r"(\s|$)", l)
+    if m:
+        start, since = i, m.group(1)
+done = []
 for l in lines[start:]:
     m = re.match(r"^## \S+ \u2014 ORCHESTRATOR integrated (g\d+-[a-z0-9-]+) ", l)
-    if m:
-        print(m.group(1))
+    if m and m.group(1) not in done:
+        done.append(m.group(1))
+for pair in ledgers:
+    g, ledger = pair.split("=", 1)
+    if g in done or not os.path.isfile(ledger):
+        continue
+    text = open(ledger, "rb").read().decode("utf-8", "replace")
+    for l in text.split("\n"):
+        m = re.match(r"^## (\S+) \u2014 ORCHESTRATOR done " + re.escape(g) + r" r\d+$", l)
+        if m and m.group(1) >= since:
+            done.append(g)
+            break
+print("\n".join(done))
 PY
 }
 
@@ -797,7 +822,7 @@ integrate() {
   # The walk tip's journal (copied for the journal check above); a list it
   # cannot read stops the goal rather than run fewer proofs.
   if ! done_list="$(done_this_walk "$WAVE_DIR/$g.jours")"; then
-    integration_stop "$g" merge-failed "cannot read the goals done in this walk from the walk tip's journal" "$s"
+    integration_stop "$g" merge-failed "cannot read the goals done in this walk (the walk tip's journal, GOALS.md, the host ledgers)" "$s"
     return 1
   fi
   PROOF_GUARDED_EXTRA="$(for p in $done_list "$g"; do goal_field "$p" oracle; done | sort -u | paste -sd ' ' -)"

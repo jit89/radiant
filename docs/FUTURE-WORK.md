@@ -1002,3 +1002,18 @@ never rerun its proof. `done` cannot simply be counted: it is not a
 walker-only record (`journal-merge.py`), so a member could plant one. Needs a
 walker-written record for serial goals, or reading the serial goals' host
 ledgers (`orch_host_ledger`, `lib/orch-files.sh`), which no goal can write.
+
+**Done (2026-10-25):** `done_this_walk` also counts a goal GOALS.md marks done
+whose host ledger in the main checkout holds an `ORCHESTRATOR done <goal> rN`
+record stamped at or after this walk's walk-start heading (both the house's
+own writing; with no walk-start found every record counts). A ledger, GOALS.md
+or the journal it cannot read stops the goal (`merge-failed`). Test in
+`parallel-walk-trust4-test.sh` (g1-a done serially, the walk stopped at g2-b,
+then `--jobs 3`: g3-c deleting g1-a's file stops `integration-red`); plant red:
+no serial goals. Not tested: the walk-start filter (without it, goals an
+earlier walk finished would also be proved: more proofs, never fewer).
+Seen while testing: a serial walk stopped by a wake leaves the goal's
+`in_progress` uncommitted in GOALS.md, and the parallel walker's start check
+refuses that (`orchestration-files-dirty`) until it is committed; a serial rerun
+does not mind.
+

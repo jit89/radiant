@@ -90,6 +90,28 @@ check "  ...after g1-a's integrated record (else the plant cannot bite)" yes \
 check "planted walk-start: g3-c's merge still runs g1-a's proof" integration-red "$(reason_in g3-c)"
 check "  ...and g1-a's file is still on the walk branch" yes "$([[ -f a.txt ]] && echo yes || echo no)"
 
+# A goal a serial run of the walk finished gets merged proofs when the same
+# walk goes on with --jobs (FUTURE-WORK item 30): g1-a done serially, then g2-b's
+# implementer fails and the walk stops (no walk-end, so the walk id is kept);
+# with --jobs 3, g3-c deletes g1-a's file and must still meet g1-a's proof.
+pwalk_repo
+printf 'printf "%%s\\n" "IMPLEMENTER_RESULT: error (exit 1)"; exit 1\n' >"$CALLS/action-g2-b"
+prun
+check "serial run: g1-a done, the walk stopped at g2-b" "done 1 0" \
+  "$(status_of g1-a) $([[ "$prc" -ne 0 ]] && echo 1 || echo 0) $(grep -c 'ORCHESTRATOR walk-end' docs/journal/p.md || true)"
+rm -f "$CALLS/action-g2-b"
+# The serial stop leaves g2-b's in_progress uncommitted in GOALS.md, which the
+# parallel walker's start check refuses: committed here, as after a wake.
+git add GOALS.md && git commit -qm "architect: the wake, read"
+cat >"$CALLS/action-g3-c" <<'ACT'
+git rm -q a.txt && echo g3-c >c.txt
+git add c.txt && git commit -qm "feat(g3-c): c"
+ACT
+prun --jobs 3
+check "same walk with --jobs: g3-c's merge runs g1-a's proof (done serially)" integration-red "$(reason_in g3-c)"
+check "  ...the red proof named is g1-a's" yes "$(grep -q 'g1-a (exit ' "$(stopfile_of g3-c)" 2>/dev/null && echo yes || echo no)"
+check "  ...one walk-start (the same walk)" 1 "$(grep -c 'ORCHESTRATOR walk-start' docs/journal/p.md)"
+check "  ...g1-a's file is still on the walk branch" yes "$([[ -f a.txt ]] && echo yes || echo no)"
 
 # A non-ASCII journal path: git quotes such names unless told not to.
 pwalk_repo
