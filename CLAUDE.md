@@ -15,7 +15,7 @@ in-session (do not dispatch the implementer at the house).
 | **Architect** | Claude Code (this session) | Intake, recon, interrogate, lock `PLAN.md`, arbitrate review, author the acceptance oracle, decompose goals, dispatch, adjudicate, recover. Does **not** implement target features. |
 | **Attacker** | Grok (`grok-4.7`) | Headless, read-only. Attacks a locked plan (Phase 2) and the Architect's acceptance oracles (Phase 3). A different model on purpose — the Architect cannot attack its own plan or oracles. Never reviews implementer diffs. Advises; does not command. |
 | **Implementer** | DeepSeek Flash (`deepseek-flash`, effort `high`) through DeepSeek's Anthropic-compatible endpoint in headless, sandboxed Claude Code; Claude Haiku 5.5 (`claude-haiku-5-5`, effort `xhigh`) in the same harness when DeepSeek refuses, declines or is out of balance (`IMPLEMENTER_PRIMARY=haiku` swaps the two) | Cheap long TDD loops against one goal. Sibling process. |
-| **Goal reviewer** | Claude Opus 5.5 (`claude-opus-5-5`) | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
+| **Goal reviewer** | Claude Opus 5.5 (`claude-opus-5-5`); Claude Opus 4.8 (`claude-opus-4-8`, effort `xhigh`) for one retry when Opus 5.5's safeguards flag the review | Headless, separate session. Judges the *implementer's* diff — never the Architect's own code — against the goal. Not the plan attacker. |
 
 The Architect never silently switches into "just code it" mode. If the
 user asks for a quick fix, confirm whether to run the full workflow or
@@ -314,3 +314,7 @@ leaning on the bare name.
   once on the other model and journals it (`IMPLEMENTER_FALLBACK`).
   Nothing switches back. Never on a rate limit, another error, a missing
   key, or a goal that ran out of fix rounds.
+  The goal reviewer switches in one case only: Opus 5.5's safeguards flag
+  a review, and that call is retried once on Opus 4.8 (at `xhigh` by default,
+  `CLAUDE_REVIEW_FALLBACK_EFFORT`), named on the review's journal line as
+  `FALLBACK=`; the next round starts on Opus 5.5 again.

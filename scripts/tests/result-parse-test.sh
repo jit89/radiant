@@ -220,7 +220,7 @@ printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 stub claude-goal-review.sh 'printf "%s\n" "CLAUDE_REVIEW_RESULT: flagged (claude-opus-4-8)" \
   "SESSION_ID: s1" "VERDICT: MISSING" "VERDICT_FILE: /dev/null" \
   "CLAUDE_REVIEW_MODEL: claude-opus-4-8" \
-  "CLAUDE_REVIEW_FALLBACK: claude-opus-5-5 -> claude-opus-4-8 (both flagged)"; exit 76'
+  "CLAUDE_REVIEW_FALLBACK: claude-opus-5-5 -> claude-opus-4-8 (both flagged, effort xhigh)"; exit 76'
 run_goal
 check "flagged reviewer: reviewer-flagged" "reviewer-flagged" "$reason"
 check "flagged reviewer: detail says nothing was judged" "yes" "$(has 'Nothing was judged' "$detail")"
@@ -231,12 +231,12 @@ stub claude-implement.sh 'if [[ " $* " == *" --resume "* ]]; then echo "IMPLEMEN
 printf "%s\n" "IMPLEMENTER_RESULT: ok" "THREAD_ID: t1"'
 stub claude-goal-review.sh "printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' \
   'VERDICT: FIX' 'VERDICT_FILE: $TMP/fix-verdict.md' 'CLAUDE_REVIEW_MODEL: claude-opus-4-8' \
-  'CLAUDE_REVIEW_FALLBACK: claude-opus-5-5 -> claude-opus-4-8 (safety flag)'"
+  'CLAUDE_REVIEW_FALLBACK: claude-opus-5-5 -> claude-opus-4-8 (safety flag, effort xhigh)'"
 run_goal
 journal="$(cat "$TMP/repo/docs/journal/example.md")"
 check "fallback: the judging model is journaled" "yes" "$(has 'MODEL=claude-opus-4-8' "$journal")"
 check "fallback: the switch is journaled" "yes" \
-  "$(has 'FALLBACK=(claude-opus-5-5 -> claude-opus-4-8 (safety flag))' "$journal")"
+  "$(has 'FALLBACK=(claude-opus-5-5 -> claude-opus-4-8 (safety flag, effort xhigh))' "$journal")"
 stub claude-goal-review.sh "printf '%s\n' 'CLAUDE_REVIEW_RESULT: ok' 'SESSION_ID: s1' \
   'VERDICT: FIX' 'VERDICT_FILE: $TMP/fix-verdict.md' 'CLAUDE_REVIEW_MODEL: claude-opus-5-5'"
 run_goal

@@ -187,6 +187,7 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `GROK_BIN` | auto | Grok binary path |
 | `CLAUDE_REVIEW_MODEL` | `claude-opus-5-5` | Goal reviewer |
 | `CLAUDE_REVIEW_FALLBACK_MODEL` | `claude-opus-4-8` | One retry when the reviewer's safeguards flag a review (`none` = off) |
+| `CLAUDE_REVIEW_FALLBACK_EFFORT` | `xhigh` | The effort of that retry (the first review runs at `CLAUDE_REVIEW_EFFORT`) |
 | `CLAUDE_REVIEW_EFFORT` | `high` | Claude `--effort` |
 | `CLAUDE_REVIEW_DRY_RUN=1` | off | Print Claude command only |
 | `IMPLEMENTER` | `claude` | `codex` selects the legacy `deepseek-code.sh` |
@@ -209,7 +210,7 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `MAX_ROUNDS` | `5` | Plan-attack rounds (skill) |
 | `MAX_FIX_ROUNDS` | `3` | Repair passes after the first implementation: `N` lets up to `N` FIX handoffs be implemented, review fixes and proof fix rounds alike (`0` wakes on the first FIX or red proof) |
 | `IMPLEMENTER_TIMEOUT` | `1200` | Seconds per implementer pass (`DEEPSEEK_TIMEOUT` still honoured) |
-| `CLAUDE_REVIEW_TIMEOUT` | `600` | Seconds per review |
+| `CLAUDE_REVIEW_TIMEOUT` | `600` | Seconds per review (a flagged review and its retry share it) |
 | `PROOF_TIMEOUT` | `600` | Seconds for the host proof |
 | `CW_PROOF_SANDBOX` | (on) | `off` runs proofs, `worktree_setup` and merged proofs unsandboxed; journaled on the dispatch record |
 | `CW_ALLOW_DOTENV` | (unset) | `1` walks a repo with a live `.env` in a checkout, knowingly; journaled on the dispatch record |

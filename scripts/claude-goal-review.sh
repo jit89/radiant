@@ -34,7 +34,8 @@
 #   PROOF_OUTPUT: <path>     # Architect-run proof, packed as ground truth
 #
 # Optional env: CLAUDE_REVIEW_MODEL / CLAUDE_REVIEW_EFFORT /
-# CLAUDE_REVIEW_FALLBACK_MODEL / CLAUDE_REVIEW_DRY_RUN / CLAUDE_REVIEW_OUT (the
+# CLAUDE_REVIEW_FALLBACK_MODEL / CLAUDE_REVIEW_FALLBACK_EFFORT /
+# CLAUDE_REVIEW_DRY_RUN / CLAUDE_REVIEW_OUT (the
 # verdict path). CW_OUT_DIR: write every file there and delete none (run-goal.sh
 # passes its run folder); unset, they go to a new folder under
 # ~/.cache/claude-coding-workflow/runs/ and the raw output and .err are removed
@@ -44,12 +45,14 @@
 #   VERDICT: DONE | FIX | BLOCKED | MISSING
 #   VERDICT_FILE: <path>
 #   CLAUDE_REVIEW_MODEL: <the model that produced this result>
-#   CLAUDE_REVIEW_FALLBACK: <from> -> <to> (...)   only when the fallback ran
+#   CLAUDE_REVIEW_FALLBACK: <from> -> <to> (...)   only when the fallback ran (it
+#                                                   names the retry's effort)
 #
 # SAFETY FLAGS. If the reviewer's safeguards flag the review (a classifier false
 # positive on the security content of a diff is the usual cause) the turn ends with
 # no verdict. The script then retries ONCE on CLAUDE_REVIEW_FALLBACK_MODEL (default
-# claude-opus-4-8; empty or "none" turns the retry off). It is the same reviewer role
+# claude-opus-4-8; empty or "none" turns the retry off) at CLAUDE_REVIEW_FALLBACK_EFFORT
+# (default xhigh: an older model, given more thinking). It is the same reviewer role
 # on a different model, so it is never silent: CLAUDE_REVIEW_MODEL and
 # CLAUDE_REVIEW_FALLBACK name it, and run-goal.sh journals both. If the retry is
 # flagged too, or the fallback is off, the result is `flagged`, the verdict MISSING
@@ -73,6 +76,15 @@ EFFORT="${CLAUDE_REVIEW_EFFORT:-high}"
 # `-` not `:-`: an explicitly empty value must disable the fallback, not restore it.
 FALLBACK_MODEL="${CLAUDE_REVIEW_FALLBACK_MODEL-claude-opus-4-8}"
 [[ "$FALLBACK_MODEL" == "none" ]] && FALLBACK_MODEL=""
+FALLBACK_EFFORT="${CLAUDE_REVIEW_FALLBACK_EFFORT:-xhigh}"
+# Checked at start: a typo in the fallback's effort would otherwise surface
+# only on a flagged review, as a generic error.
+for e in "CLAUDE_REVIEW_EFFORT=$EFFORT" "CLAUDE_REVIEW_FALLBACK_EFFORT=$FALLBACK_EFFORT"; do
+  case "${e#*=}" in
+    low | medium | high | xhigh | max) ;;
+    *) echo "CLAUDE_REVIEW_RESULT: error (${e%%=*} must be low, medium, high, xhigh or max, not '${e#*=}')"; exit 1 ;;
+  esac
+done
 SMOKE=0
 MUT_N=""
 RESUME_ID=""
@@ -120,6 +132,9 @@ CLAUDE_BIN="${CLAUDE_REAL_BIN:-}"
 [[ -z "$CLAUDE_BIN" ]] && CLAUDE_BIN="$(command -v claude || true)"
 : "${CLAUDE_BIN:?could not find the claude binary (set CLAUDE_REAL_BIN)}"
 unset ANTHROPIC_BASE_URL || true
+# --effort decides, as in claude-implement.sh: a level left in the shell must
+# not override either effort.
+unset CLAUDE_CODE_EFFORT_LEVEL || true
 
 load_key_from_files ANTHROPIC_API_KEY .env "$HOUSE/.env" || true
 
@@ -151,7 +166,7 @@ out_dir() {
 }
 
 run_claude() {
-  local prompt="$1" model="$MODEL" fell_back="" raw rc
+  local prompt="$1" model="$MODEL" effort="$EFFORT" fell_back="" raw rc
   # Every raw/.err pair, the flagged attempts' too: a retry must not orphan one.
   local raws=()
 
@@ -172,7 +187,7 @@ run_claude() {
     local cmd=(
       "$CLAUDE_BIN" -p "$prompt"
       --model "$model"
-      --effort "$EFFORT"
+      --effort "$effort"
       --output-format json
       --permission-mode plan
       --tools Read,Glob,Grep
@@ -205,9 +220,10 @@ run_claude() {
     # be reported as a generic error or as a rate limit.
     if flagged_refusal "$raw" "${raw}.err"; then
       if [[ -z "$fell_back" && -n "$FALLBACK_MODEL" && "$FALLBACK_MODEL" != "$model" ]]; then
-        echo "claude-goal-review: ${model} flagged this review; retrying once on ${FALLBACK_MODEL}" >&2
+        echo "claude-goal-review: ${model} flagged this review; retrying once on ${FALLBACK_MODEL} at ${FALLBACK_EFFORT}" >&2
         fell_back="$model"
         model="$FALLBACK_MODEL"
+        effort="$FALLBACK_EFFORT"
         # Model names are [a-z0-9.-], so they are safe inside a sed pattern.
         prompt="$(printf '%s' "$prompt" | sed "s/(model: ${fell_back})/(model: ${model})/")"
         [[ -n "$RESUME_ID" ]] || SESSION_ID="$(new_session_id)"
@@ -219,7 +235,7 @@ run_claude() {
       echo "VERDICT_FILE: ${raw}"
       echo "CLAUDE_REVIEW_MODEL: ${model}"
       if [[ -n "$fell_back" ]]; then
-        echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (both flagged)"
+        echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (both flagged, effort ${effort})"
       fi
       exit 76
     fi
@@ -266,7 +282,7 @@ run_claude() {
     echo "SESSION_ID: ${SESSION_ID}"
     echo "MUTATIONS_FILE: ${mfile}"
     echo "CLAUDE_REVIEW_MODEL: ${model}"
-    [[ -z "$fell_back" ]] || echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag)"
+    [[ -z "$fell_back" ]] || echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag, effort ${effort})"
     return 0
   fi
   cw_private "$OUT"
@@ -284,12 +300,13 @@ run_claude() {
   echo "VERDICT_FILE: ${OUT}"
   echo "CLAUDE_REVIEW_MODEL: ${model}"
   if [[ -n "$fell_back" ]]; then
-    echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag)"
+    echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag, effort ${effort})"
   fi
 }
 
 if [[ "$SMOKE" -eq 1 ]]; then
   EFFORT="low"
+  FALLBACK_EFFORT="low"
   SESSION_ID="$(new_session_id)"
   OUT="${CLAUDE_REVIEW_OUT:-}"
   OUT_NAME="claude-goal-smoke-$$.md"
