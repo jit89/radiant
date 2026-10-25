@@ -61,6 +61,13 @@ MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
 IMPL_SECS="${IMPLEMENTER_TIMEOUT:-${DEEPSEEK_TIMEOUT:-1200}}"
 REVIEW_SECS="${CLAUDE_REVIEW_TIMEOUT:-600}"
 PROOF_SECS="${PROOF_TIMEOUT:-600}"
+# Mutation checks after a DONE review (docs/features/mutation-checks): how many
+# the reviewer is asked for, 0 off. Checked here, before any pass.
+MUTATIONS="${CW_MUTATIONS:-3}"
+if ! [[ "$MUTATIONS" =~ ^[0-5]$ ]]; then
+  echo "CW_MUTATIONS must be 0 to 5, not '$MUTATIONS'" >&2
+  exit 2
+fi
 
 GOAL_ID=""
 # Worktree mode: the main checkout of the parallel walk (empty otherwise), the
@@ -148,6 +155,7 @@ on_exit() {
   local ec=$?
   trap - EXIT INT TERM
   stop_child
+  [[ -z "$MUT_DIR" ]] || rm -rf "$MUT_DIR"
   if [[ "$ec" -ne 0 && "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
     stop_unplanned "trap" "exit $ec during ${PHASE}"
     STOP_WRITTEN=1
@@ -585,6 +593,219 @@ journal_implemented() {
   events_append --event implemented --severity "$sev" --goal "$GOAL_ID" --round "$ROUND" \
     --base-sha "$BASE_SHA" \
     --summary "implemented ${GOAL_ID} r${ROUND} STATUS=${status:--} MODEL=${IMPL_MODEL:--}${IMPL_FALLBACK:+ FALLBACK=(${IMPL_FALLBACK})}" \
+    --payload "$payload"
+}
+
+# --- mutation checks (docs/features/mutation-checks) ---------------------
+# mut_git CLONE ARGS... — git on a mutation clone only: its private git dir,
+# no GIT_* from this run (host git is pinned to the goal's checkout), no user
+# or system config (a filter or signer defined there must not run on the
+# implementer's files), the house wrapper's safeguards without its pinning.
+mut_git() {
+  local d="$1" v unsets=()
+  shift
+  for v in $(compgen -e | grep '^GIT_' || true); do unsets+=(-u "$v"); done
+  env "${unsets[@]+"${unsets[@]}"}" GIT_DIR="$d/.git" GIT_WORK_TREE="$d" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    git -C "$d" -c core.hooksPath=/dev/null -c commit.gpgSign=false -c core.fsmonitor=false \
+    -c user.name=mutation -c user.email=mutation@localhost "$@"
+}
+
+# mut_clone DEST — a copy-on-write clone of the checkout (its ignored
+# dependency folders come along) whose .git, a gitfile in worktree mode or the
+# repository itself, is removed without following it and replaced by a
+# private one holding one baseline commit. Sets MUT_WHY and returns 1 when it
+# cannot: in particular a .git below the top (a nested repository the
+# implementer may have planted): `git add -A` would make it a submodule, and
+# `git status` would then run a child git there, unsandboxed, that reads its
+# config (a clean filter, say). The name is matched in any case (.GIT opens
+# as .git on a case-insensitive disk), and the index is checked for a
+# submodule entry after all, failing closed.
+mut_clone() {
+  local d="$1" nested idx
+  MUT_WHY=""
+  mkdir -p "$d" && { cp -cR "$ROOT/." "$d/" 2>/dev/null || cp -R "$ROOT/." "$d/"; } ||
+    { MUT_WHY="cannot copy the checkout"; return 1; }
+  rm -rf "$d/.git" || { MUT_WHY="cannot remove the copied .git"; return 1; }
+  nested="$(find "$d" -mindepth 2 -iname .git -print -quit 2>/dev/null)"
+  if [[ -n "$nested" ]]; then
+    MUT_WHY="a nested .git in the checkout (${nested#"$d"/}): not run"
+    return 1
+  fi
+  mut_git "$d" init -q && mut_git "$d" add -A && mut_git "$d" commit -q --allow-empty -m baseline ||
+    { MUT_WHY="cannot make the clone's git dir"; return 1; }
+  # Captured, not piped to grep -q: under pipefail a SIGPIPE on ls-files
+  # would read as "no submodule".
+  idx="$(mut_git "$d" ls-files -s)" || { MUT_WHY="cannot list the clone's index"; return 1; }
+  if [[ $'\n'"$idx" == *$'\n160000 '* ]]; then
+    MUT_WHY="a submodule entry in the clone: not run"
+    return 1
+  fi
+}
+
+# mut_run CLONE OUT TMP — the goal's proof in CLONE, judged by the host's own
+# rule on CLONE's tree. Sets MUT_OUTCOME: green, red, timeout, notests,
+# moved or sandbox (with MUT_WHY).
+MUT_OUTCOME=""
+MUT_WHY=""
+mut_run() {
+  local clone="$1" out="$2" tmp="$3" rc moved
+  ( git() { mut_git "$clone" "$@"; }; cd "$clone" && tree_snapshot ) >"$out.before" 2>/dev/null || true
+  set +e
+  PROOF_ROOT="$clone" PROOF_WALK="$clone/.git" PROOF_NETWORK="$PROOF_NET" PROOF_DEPS="$PROOF_DEPS_DIR" \
+    proof_exec "$PROOF_SECS" "$out" "$tmp" "cd $(printf '%q' "$clone") && $PROOF"
+  rc=$?
+  set -e
+  MUT_WHY=""
+  if [[ -n "$PROOF_SANDBOX_REASON" ]]; then
+    MUT_OUTCOME=sandbox MUT_WHY="$PROOF_SANDBOX_REASON"
+    return 0
+  fi
+  if [[ "$rc" -eq 124 ]]; then MUT_OUTCOME=timeout; return 0; fi
+  if [[ "$rc" -ne 0 ]]; then MUT_OUTCOME=red; return 0; fi
+  if grep -q 'Ran 0 tests' "$out"; then MUT_OUTCOME=notests; return 0; fi
+  ( git() { mut_git "$clone" "$@"; }; cd "$clone" && tree_snapshot ) >"$out.after" 2>/dev/null || true
+  moved="$( git() { mut_git "$clone" "$@"; }; cd "$clone" && proof_moved "$out.before" "$out.after" | paste -sd ';' - )"
+  if [[ -n "$moved" ]]; then MUT_OUTCOME=moved MUT_WHY="$moved"; return 0; fi
+  MUT_OUTCOME=green
+}
+
+# run_mutations — after a DONE review, before the goal is marked done: the
+# reviewer's mutations (a resumed turn of their own), each applied to a fresh
+# clone and proved there. Best-effort: a failure of this machinery is a skip,
+# never a stop. Writes the `mutations` record and event, and keeps each
+# mutation's diff and rule in ART_DIR.
+MUT_DIR=""
+run_mutations() {
+  local n="$MUTATIONS" dir out mfile size k status why rule d clone base_ok=0 base_why="" p skip accepted note=""
+  local caught=0 survived=0 timeout=0 skipped=0 rows=() phase_before="$PHASE"
+  [[ "$n" -gt 0 && "${PROOF_NONE:-0}" -eq 0 ]] || return 0
+  PHASE="mutations r${ROUND}"
+  event_phase mutations
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/cw-mut-XXXXXX")" || { mut_record 0 0 0 "$n" "no temp folder" ""; PHASE="$phase_before"; return 0; }
+  dir="$(cd "$dir" && pwd -P)"
+  # Removed by on_exit too: a signal must not leave a copy of the checkout.
+  MUT_DIR="$dir"
+  case "$dir/" in
+    "$(cd "$ROOT" && pwd -P)"/*)
+      rm -rf "$dir"; MUT_DIR=""
+      mut_record 0 0 0 "$n" "the temp folder is inside the checkout" ""
+      PHASE="$phase_before"; return 0 ;;
+  esac
+  out="$RUN_DIR/mutations-r${ROUND}.out"
+  set +e
+  run_step "$REVIEW_SECS" "$out" "$out.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --mutations "$n" \
+    --resume "$SESSION_ID" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
+  set -e
+  mfile="$(kv "$out" MUTATIONS_FILE)"
+  size="$( [[ -n "$mfile" && -f "$mfile" ]] && wc -c <"$mfile" | tr -d ' ' || echo 0)"
+  if [[ "$(kv "$out" CLAUDE_REVIEW_RESULT)" != ok || "$size" -eq 0 || "$size" -gt 65536 ]]; then
+    rm -rf "$dir"; MUT_DIR=""
+    mut_record 0 0 0 "$n" "the mutations turn returned nothing usable ($(kv "$out" CLAUDE_REVIEW_RESULT), ${size} bytes)" ""
+    PHASE="$phase_before"; return 0
+  fi
+  git -c core.quotePath=false diff --name-only "$BASE_SHA" HEAD >"$dir/allowed" 2>/dev/null || : >"$dir/allowed"
+  {
+    printf '%s\n' tests/acceptance/ .claude/ .mcp.json GOALS.md
+    [[ -z "$JOURNAL" ]] || printf '%s\n' "$JOURNAL"
+    [[ -z "$PLAN_PATH" ]] || printf '%s\n' "$PLAN_PATH"
+    "$GOALS_PY" "$RUN_DIR/goals-base.md" graph 2>/dev/null | awk '{print $1}' | while read -r p; do
+      "$GOALS_PY" "$RUN_DIR/goals-base.md" show "$p" 2>/dev/null |
+        python3 -c 'import json,sys; o=json.load(sys.stdin).get("oracle") or ""; print(o) if o and o != "inline" else None' || true
+    done
+  } >"$dir/contract"
+  if ! python3 "$HERE/lib/mutations.py" "$mfile" "$n" "$dir/allowed" "$dir/contract" "$dir/blocks" >"$dir/parsed" 2>"$dir/parse.err"; then
+    note="the reply could not be parsed: $(tail -n1 "$dir/parse.err" | tr '|' '/')"
+    : >"$dir/parsed"
+  fi
+  [[ -s "$dir/parsed" || -n "$note" ]] || note="the reply held no MUTATION: block"
+  accepted="$(awk -F'\t' '$2 == "accepted"' "$dir/parsed" | wc -l | tr -d ' ')"
+  # The baseline: a clone that cannot pass unmutated draws no verdict. Run only
+  # when a block was accepted.
+  if [[ "$accepted" -gt 0 ]]; then
+    if mut_clone "$dir/base"; then
+      cp -cR "$PROOF_TMP" "$dir/tmp-base" 2>/dev/null || mkdir -p "$dir/tmp-base"
+      mut_run "$dir/base" "$dir/base.out" "$dir/tmp-base"
+      if [[ "$MUT_OUTCOME" == green ]]; then base_ok=1; else base_why="the baseline in a copy: $MUT_OUTCOME${MUT_WHY:+ ($MUT_WHY)}"; fi
+    else
+      base_why="$MUT_WHY"
+    fi
+  fi
+  while IFS=$'\t' read -r k status why rule; do
+    [[ -n "$k" ]] || continue
+    why="${why//|//}"
+    if [[ "$status" != accepted ]]; then
+      skipped=$((skipped + 1)); rows+=("$k|skipped|$why|$rule"); continue
+    fi
+    if [[ "$base_ok" -ne 1 ]]; then
+      skipped=$((skipped + 1)); rows+=("$k|skipped|${base_why//|//}|$rule"); continue
+    fi
+    d="$dir/blocks/$k.diff"
+    clone="$dir/m$k"
+    skip=""
+    mut_clone "$clone" || skip="$MUT_WHY"
+    if [[ -z "$skip" ]]; then
+      # Every destination a regular file, not a link, before any apply.
+      while IFS= read -r p; do
+        [[ -f "$clone/$p" && ! -L "$clone/$p" ]] || skip="not a regular file in the clone: $p"
+      done < <(sed -n 's|^--- a/||p' "$d")
+    fi
+    # --recount: a model's hunk headers are often off by a line; --unidiff-zero:
+    # a one-line mutation may carry no context.
+    [[ -n "$skip" ]] || mut_git "$clone" apply --check --recount --unidiff-zero "$d" >/dev/null 2>&1 ||
+      skip="the diff does not apply"
+    [[ -n "$skip" ]] || mut_git "$clone" apply --recount --unidiff-zero "$d" >/dev/null 2>&1 ||
+      skip="the diff does not apply"
+    if [[ -n "$skip" ]]; then
+      skipped=$((skipped + 1)); rows+=("$k|skipped|$skip|$rule"); rm -rf "$clone"; continue
+    fi
+    cp -cR "$PROOF_TMP" "$dir/tmp-$k" 2>/dev/null || mkdir -p "$dir/tmp-$k"
+    mut_run "$clone" "$dir/m$k.out" "$dir/tmp-$k"
+    case "$MUT_OUTCOME" in
+      red | notests) caught=$((caught + 1)); rows+=("$k|caught|-|$rule") ;;
+      timeout) timeout=$((timeout + 1)); rows+=("$k|timeout|-|$rule") ;;
+      green) survived=$((survived + 1)); rows+=("$k|survived|-|$rule") ;;
+      moved) skipped=$((skipped + 1)); rows+=("$k|skipped|changed its tree: ${MUT_WHY//|//}|$rule") ;;
+      *) skipped=$((skipped + 1)); rows+=("$k|skipped|sandbox: ${MUT_WHY//|//}|$rule") ;;
+    esac
+    # Kept for the Architect: the diff and the rule it attacked.
+    mkdir -p "$ART_DIR" && cp -f "$d" "$ART_DIR/mutation-r${ROUND}-$k.diff" 2>/dev/null || true
+    printf '%s\n' "$rule" >"$ART_DIR/mutation-r${ROUND}-$k.rule" 2>/dev/null || true
+    rm -rf "$clone" "$dir/tmp-$k"
+  done <"$dir/parsed"
+  rm -rf "$dir"; MUT_DIR=""
+  mut_record "$caught" "$survived" "$timeout" "$skipped" "$note" "$(printf '%s\n' ${rows[@]+"${rows[@]}"})" \
+    "$(kv "$out" CLAUDE_REVIEW_MODEL)$( f="$(kv "$out" CLAUDE_REVIEW_FALLBACK)"; [[ -z "$f" ]] || printf ' (fallback: %s)' "$f")"
+  PHASE="$phase_before"
+}
+
+# mut_record CAUGHT SURVIVED TIMEOUT SKIPPED NOTE ROWS — the host record (in
+# the ledger, committed with the done commit) and the event, its payload built
+# by a JSON encoder.
+mut_record() {
+  local payload sev=info
+  [[ "$2" -eq 0 ]] || sev=warning
+  journal_line "## $(utc) — ORCHESTRATOR mutations ${GOAL_ID} r${ROUND} caught=$1 survived=$2 timeout=$3 skipped=$4"
+  payload="$(python3 -c '
+import json, sys
+c, s, t, k, note, rows, model = (sys.argv[1:8] + [""])[:7]
+out = {"caught": int(c), "survived": int(s), "timeout": int(t), "skipped": int(k)}
+if model:
+    out["model"] = model
+if note:
+    out["note"] = note
+out["mutations"] = []
+for line in rows.split("\n"):
+    if not line:
+        continue
+    n, outcome, why, rule = (line.split("|", 3) + ["", "", ""])[:4]
+    m = {"n": n, "outcome": outcome, "rule": rule}
+    if why and why != "-":
+        m["why"] = why
+    out["mutations"].append(m)
+print(json.dumps(out))' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}")"
+  events_append --event mutations --severity "$sev" --goal "$GOAL_ID" --round "$ROUND" \
+    --base-sha "$BASE_SHA" --summary "mutations ${GOAL_ID} r${ROUND} caught=$1 survived=$2 timeout=$3 skipped=$4" \
     --payload "$payload"
 }
 
@@ -1360,6 +1581,8 @@ EOF
       if [[ "${PROOF_NONE:-0}" -eq 1 ]]; then
         wake "done-refused" "PROOF: none cannot auto-done. Review: $VERDICT_FILE"
       fi
+      # Before the goal is marked done; best-effort, never a stop.
+      run_mutations || true
       if [[ -n "$WT_MAIN" ]]; then
         # The walker sets done after it integrates this branch. Only the tip the
         # reviewer judged may be reported: a commit that landed during the

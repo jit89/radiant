@@ -6,6 +6,8 @@
 # The trust checks are split in four files (parallel-walk-trust*-test.sh), so
 # run-all runs them side by side; each scenario starts from a fresh repo.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 PW_NAME=pwtrust
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "$0")" && pwd)/parallel-walk-lib.sh"

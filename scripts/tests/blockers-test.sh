@@ -2,6 +2,8 @@
 # Self-test: run-goal.sh refuses a goal whose blockers are not all done,
 # whatever its own status says (F-12). Launchers are stubs.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 GOALS_PY="$HERE/goals.py"

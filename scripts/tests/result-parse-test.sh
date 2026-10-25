@@ -3,6 +3,8 @@
 # classified by run-goal.sh, not lost to set -e as reason=trap (F-07).
 # Launchers are stubs; nothing calls a model.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-result-XXXXXX")"

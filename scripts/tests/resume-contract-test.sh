@@ -4,6 +4,8 @@
 # Run 1 is a stub implementer that tampers and then dies before assess, which
 # is how such a change survives to a resume. Launchers are stubs.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 GOALS_PY="$HERE/goals.py"

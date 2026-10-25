@@ -3,6 +3,8 @@
 # Launchers are stubs; no model is called. Sections 1-5; the trust checks are in
 # parallel-walk-trust*-test.sh.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 PW_NAME=parallel
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "$0")" && pwd)/parallel-walk-lib.sh"

@@ -5,6 +5,8 @@
 # Covers the fresh-start gate and the dirty-tree check after a pass, in serial
 # mode. Launchers are stubs; nothing calls a model.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-porcelain-XXXXXX")"

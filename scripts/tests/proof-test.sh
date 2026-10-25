@@ -4,6 +4,8 @@
 # afterwards for changes to HEAD, tracked files, or the contract (F-02).
 # Proof bodies here only sleep or write files; launchers are stubs.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-proof-XXXXXX")"

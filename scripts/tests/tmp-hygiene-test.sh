@@ -7,6 +7,8 @@
 # keeps it on a wake; cw_prune ages out runs/ and grok/ and touches nothing
 # else. Nothing calls a model.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/cw-tmp-hygiene-XXXXXX")" && pwd)"

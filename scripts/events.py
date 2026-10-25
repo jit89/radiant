@@ -58,6 +58,8 @@ EVENTS = (
     # A goal recut after a merge conflict: it runs fresh in a later wave
     # (docs/features/merge-conflict-recut). Not a stop.
     "recut",
+    # The mutation checks after a DONE review (docs/features/mutation-checks).
+    "mutations",
 )
 SEVERITIES = ("info", "warning", "error")
 SUMMARY_MAX = 200

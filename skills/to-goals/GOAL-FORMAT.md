@@ -146,6 +146,8 @@ The Architect authors the oracle. The implementer makes it pass and does not edi
 
 Each case is an example: concrete input → concrete output, plus the edges the plan named. Assertions are exact values, not "does not throw".
 
+After a goal's DONE review, the reviewer mutates the implementer's code and the goal's proof must go red on each mutation (`docs/features/mutation-checks`). A mutation the proof survives is an oracle gap, recorded in the journal with its diff kept: strengthen the oracle in a later goal or an acceptance edit. Some survivors are equivalent mutants no test can catch; judge them, do not chase them.
+
 ### Prove the oracle is satisfiable before committing it — the tiers
 
 Red is not enough: a case can be red because the feature is missing, or because the case is

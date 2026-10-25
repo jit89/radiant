@@ -250,6 +250,57 @@ EOF
   exit 1
 }
 
+# --- mutation checks (docs/features/mutation-checks) ---------------------
+# The committed journal's length when this invocation started: strict mode
+# counts only the survivors recorded after it, so a rerun carries on.
+MUT_SINCE="$(git show "HEAD:$JOURNAL" 2>/dev/null | wc -c | tr -d ' ')"
+MUT_SINCE="${MUT_SINCE:-0}"
+
+# mutation_survivors MODE — the `mutations` records with survivors in the
+# committed journal, "<goal> survived=<n>" a line: MODE "since" those after
+# MUT_SINCE, MODE "walk" those after this walk's walk-start. (A heredoc: the
+# em dash must not depend on the locale.)
+mutation_survivors() {
+  local f
+  f="$(mktemp "${TMPDIR:-/tmp}/cw-mut-journal-XXXXXX")"
+  git show "HEAD:$JOURNAL" >"$f" 2>/dev/null || : >"$f"
+  python3 - "$1" "$MUT_SINCE" "${WALK_ID:-}" "$f" <<'PY' || true
+import re, sys
+mode, since, wid, path = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+data = open(path, "rb").read()
+if mode == "since":
+    data = data[since:]
+text = data.decode("utf-8", "replace")
+out = []
+for line in text.split("\n"):
+    if mode == "walk" and re.match(r"^## \S+ \u2014 ORCHESTRATOR walk-start walk_id=" + re.escape(wid) + r"(\s|$)", line):
+        out = []
+    m = re.match(r"^## \S+ \u2014 ORCHESTRATOR mutations (\S+) r\d+ .*\bsurvived=([1-9]\d*)\b", line)
+    if m:
+        out.append(f"{m.group(1)} survived={m.group(2)}")
+print("\n".join(out))
+PY
+  rm -f "$f"
+}
+
+# mutation_walk_summary — one line per goal of this walk with survivors.
+mutation_walk_summary() {
+  local l
+  while IFS= read -r l; do
+    [[ -z "$l" ]] || echo "mutations survived the oracle: $l (the diffs: ~/.cache/claude-coding-workflow/run-goal-${l%% *}/mutation-*.diff)"
+  done < <(mutation_survivors walk)
+}
+
+# mutation_gaps_stop — CW_MUTATION_GAPS=stop: survivors recorded in this
+# invocation stop the walk after their goals landed (oracle-gap).
+mutation_gaps_stop() {
+  local gaps
+  [[ "${CW_MUTATION_GAPS:-}" == stop ]] || return 0
+  gaps="$(mutation_survivors since | paste -sd ',' -)"
+  [[ -n "$gaps" ]] || return 0
+  walk_stop oracle-gap "mutations survived the oracle (CW_MUTATION_GAPS=stop): $gaps. Those goals are done; each kept diff is in ~/.cache/claude-coding-workflow/run-goal-<goal>/mutation-*.diff. Strengthen the oracle, then rerun."
+}
+
 print_status() {
   echo "=== graph ==="
   "$GOALS_PY" GOALS.md graph
@@ -270,6 +321,7 @@ while :; do
     remaining="$("$GOALS_PY" GOALS.md remaining)"
     [[ -z "$remaining" ]] || walk_stuck "$remaining"
     echo "=== walk-end ==="
+    mutation_walk_summary
     journal_line "## $(utc) — ORCHESTRATOR walk-end"
     events_append --event walk_end --severity info --summary "walk-end"
     commit_journal "chore: orchestrator walk-end"
@@ -298,4 +350,5 @@ while :; do
   rm -f "$STOP_PTR"
   meta_stop "during goal $id"
   orch_baseline "$id"
+  mutation_gaps_stop
 done

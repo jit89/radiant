@@ -3,6 +3,8 @@
 # that empties with goals still bounced or blocked is a walk-stuck stop (D-01).
 # run-goal.sh is a stub that marks its goal done; nothing calls a model.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 GOALS_PY="$HERE/goals.py"

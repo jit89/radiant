@@ -3,6 +3,8 @@
 # once per goal per walk (docs/features/merge-conflict-recut/PLAN.md,
 # parallel-walker Amendment 6). Launchers are stubs; no model is called.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 PW_NAME=pwrecut
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "$0")" && pwd)/parallel-walk-lib.sh"

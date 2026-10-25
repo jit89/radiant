@@ -3,6 +3,8 @@
 # "VERDICT: <TOKEN>" form (F-03, F-04); the review brief does not contradict
 # the reviewer prompt's FIX: format (F-05). Launchers are stubs.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-verdict-XXXXXX")"

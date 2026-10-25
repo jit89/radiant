@@ -2,6 +2,8 @@
 # Self-test: GOALS.md is frozen except the current goal's status — markdown
 # bodies included (F-15). Launchers are stubs; nothing calls a model.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 GOALS_PY="$HERE/goals.py"

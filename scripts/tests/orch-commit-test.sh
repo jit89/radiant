@@ -3,6 +3,8 @@
 # the walk must never ride along in a GOALS.md / journal commit (F-11), and
 # neither may an edit someone else left in GOALS.md or the journal (F2-04).
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-orch-commit-XXXXXX")"

@@ -4,6 +4,8 @@
 # owed — never a generic restart of the round (F-14). Launchers are stubs
 # driven by a per-call script; nothing calls a model.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-state-XXXXXX")"

@@ -7,6 +7,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GOALS_PY="$HERE/goals.py"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-${PW_NAME:-parallel}-XXXXXX")"
 export TMPDIR="$TMP"
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 trap '[[ -n "${KEEP_TMP:-}" ]] || rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" EVENTS_CACHE="$TMP/cache"
 # These scenarios test the walker's logic, and their proofs and setups record

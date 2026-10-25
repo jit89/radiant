@@ -3,6 +3,8 @@
 # stop record, and take the running step's whole process tree down with them
 # (F-06). Launchers and proof are stubs that sleep; nothing calls a model.
 set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cw-signal-XXXXXX")"

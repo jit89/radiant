@@ -1001,6 +1001,8 @@ done
 flush_conflict_recuts
 IN_WAVE=0
 ((${#STOPS[@]} == 0)) || wave_stop 1
+# Goals integrated at a rerun's start landed too: a strict walk stops here.
+mutation_gaps_stop
 
 while :; do
   walk_check
@@ -1021,6 +1023,7 @@ while :; do
     scratch_left="$(ls -d "$INT_DIR"/* 2>/dev/null | paste -sd ',' - || true)"
     [[ -z "$scratch_left" ]] || leftover="${leftover:+$leftover,}$scratch_left"
     [[ -z "$leftover" ]] || echo "leftover worktrees (not deleted): $leftover"
+    mutation_walk_summary
     # Every goal recut for a merge conflict in this walk, one line each: no
     # stop said so. (A heredoc, as walk_record: the em dash and the locale.)
     git show "HEAD:$JOURNAL" >"$WAVE_DIR/end-journal" 2>/dev/null || : >"$WAVE_DIR/end-journal"
@@ -1197,4 +1200,6 @@ PY
   flush_conflict_recuts
   IN_WAVE=0
   ((${#STOPS[@]} == 0)) || wave_stop 1
+  # The wave's goals landed: a strict walk stops on their survivors.
+  mutation_gaps_stop
 done

@@ -413,6 +413,15 @@ were each caught, but that needed a scratch implementation to plant them in;
 on the real code it needs none. Open: who writes the mutations (host script
 vs reviewer), how many, and whether a survivor wakes or only journals.
 
+DONE (2026-10-24): `docs/features/mutation-checks/` (PLAN, Grok 8 rounds with a
+redesign the user chose, journal). After a DONE review, run-goal.sh resumes the
+reviewer for a turn of its own that writes up to `CW_MUTATIONS` (3) mutations;
+each runs on a copy-on-write clone of the checkout with a private git dir,
+after a green baseline, scored by the host's own rule. Survivors are recorded
+(journal, warning event, walk-end line, the diff kept), not a stop;
+`CW_MUTATION_GAPS=stop` stops the walk after the goal lands. Tests:
+`mutation-test.sh`.
+
 ## 9. TypeScript rules for Tier 1 and Tier 2 (2026-10-12)
 
 **Why (user):** planting bugs and running the cheap oracle checks is not meant

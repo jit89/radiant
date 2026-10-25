@@ -9,7 +9,15 @@
 #
 # Usage:
 #   claude-goal-review.sh [--resume SESSION_ID] [--add-dir DIR]... <brief.md>
+#   claude-goal-review.sh --mutations N --resume SESSION_ID [--add-dir DIR]... <brief.md>
 #   claude-goal-review.sh --smoke
+#
+# --mutations N (docs/features/mutation-checks): after a DONE verdict, resume the
+# reviewer's session for a turn that asks only for up to N mutations of the
+# implementer's code. It reads no verdict; it writes the reply exactly as
+# returned (tabs and every line kept) to a file of its own and prints
+#   MUTATIONS_FILE: <path>
+# with CLAUDE_REVIEW_RESULT, SESSION_ID and CLAUDE_REVIEW_MODEL.
 #
 # --add-dir grants Read access outside the repo. The Orchestrator keeps the
 # brief, DIFF_FILE and PROOF_OUTPUT in a private run dir under ~/.cache/claude-coding-workflow/runs/; without
@@ -66,12 +74,14 @@ EFFORT="${CLAUDE_REVIEW_EFFORT:-high}"
 FALLBACK_MODEL="${CLAUDE_REVIEW_FALLBACK_MODEL-claude-opus-4-8}"
 [[ "$FALLBACK_MODEL" == "none" ]] && FALLBACK_MODEL=""
 SMOKE=0
+MUT_N=""
 RESUME_ID=""
 BRIEF=""
 ADD_DIRS=()
 
 usage() {
   echo "usage: claude-goal-review.sh [--resume SESSION_ID] [--add-dir DIR]... <brief.md>" >&2
+  echo "       claude-goal-review.sh --mutations N --resume SESSION_ID [--add-dir DIR]... <brief.md>" >&2
   echo "       claude-goal-review.sh --smoke" >&2
   exit 2
 }
@@ -79,6 +89,11 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --smoke) SMOKE=1; shift ;;
+    --mutations)
+      [[ $# -ge 2 && "$2" =~ ^[1-5]$ ]] || usage
+      MUT_N="$2"
+      shift 2
+      ;;
     --resume)
       [[ $# -ge 2 ]] || usage
       RESUME_ID="$2"
@@ -240,6 +255,20 @@ run_claude() {
   parsed_text="${parsed#*$'\t'}"
   [[ -n "$parsed_sid" ]] && SESSION_ID="$parsed_sid"
 
+  if [[ -n "$MUT_N" ]]; then
+    # The reply as returned: agent-result.py turns tabs into spaces, and a
+    # result line holds one line, so it goes to a file of its own.
+    local mfile="$OUT_DIR/mutations-${SESSION_ID}-$(date -u +%Y%m%dT%H%M%SZ).txt"
+    cw_private "$mfile"
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.stdout.write(d.get("result") or "")' "$raw" >"$mfile" ||
+      : >"$mfile"
+    echo "CLAUDE_REVIEW_RESULT: ok"
+    echo "SESSION_ID: ${SESSION_ID}"
+    echo "MUTATIONS_FILE: ${mfile}"
+    echo "CLAUDE_REVIEW_MODEL: ${model}"
+    [[ -z "$fell_back" ]] || echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag)"
+    return 0
+  fi
   cw_private "$OUT"
   printf '%s\n' "$parsed_text" >"$OUT"
   # Standalone, an ok review's verdict holds everything worth keeping; under
@@ -285,7 +314,21 @@ fi
 OUT="${CLAUDE_REVIEW_OUT:-}"
 OUT_NAME="claude-goal-${SESSION_ID}-$(date -u +%Y%m%dT%H%M%SZ).md"
 
-if [[ -n "$RESUME_ID" ]]; then
+if [[ -n "$MUT_N" ]]; then
+  [[ -n "$RESUME_ID" ]] || usage
+  read -r -d '' PROMPT <<EOF || true
+You judged this goal DONE. Now try to break its oracle: write up to ${MUT_N} small mutations of the implementer's code, each a plausible bug aimed at one of the plan's or the goal's riskiest rules, that the goal's proof should catch. The brief at ${BRIEF_ABS} names the DIFF_FILE (what the implementer changed). Mutate only files that diff changes, never the oracle, tests/acceptance/, the plan, GOALS.md or the journal. You do not edit files: write each mutation as text.
+
+Reply with nothing but up to ${MUT_N} blocks, each exactly:
+
+MUTATION: <the plan or goal rule it attacks, one line>
+\`\`\`diff
+<a unified diff against the current files: --- a/<path> and +++ b/<path> naming the same path, then hunks with exact context>
+\`\`\`
+
+No renames, no new or deleted files, no mode changes. No other text, and no verdict line.
+EOF
+elif [[ -n "$RESUME_ID" ]]; then
   read -r -d '' PROMPT <<EOF || true
 I applied your last FIX list (or the Architect bounced a blocker). Re-review the same goal. Read the brief at ${BRIEF_ABS} first (GOAL / PLAN / GOALS / ORACLE / DIFF_FILE / PROOF_OUTPUT), then the DIFF_FILE. Same rules and the same output format: every defect on its own line starting "FIX: <path>:<line> — <defect> — <what to change>", never opening with the oracle path. You do not edit files. End with EXACTLY one line: VERDICT: DONE or VERDICT: FIX or VERDICT: BLOCKED.
 EOF

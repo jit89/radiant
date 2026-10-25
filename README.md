@@ -217,6 +217,8 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `KEEP_RUN_DIR=1` | off | Keep the run dir after a goal lands |
 | `CW_OUT_DIR` | unset | Launchers write raw output, `.err` and verdict/report here and delete none; `run-goal.sh` sets it to its run dir |
 | `CW_KEEP_RAW=1` | off | A standalone launcher keeps its raw output and `.err` after an `ok` result |
+| `CW_MUTATIONS` | `3` | How many mutations the goal reviewer writes after a DONE review, each run against the goal's proof on a clone (`0` = off, at most 5; docs/features/mutation-checks) |
+| `CW_MUTATION_GAPS` | unset | `stop`: a mutation the proof survives stops the walk after its goal lands (`oracle-gap`); unset, survivors are only recorded |
 | `CW_PRUNE_DAYS` | `14` | Age past which `~/.cache/claude-coding-workflow/runs/`, `grok/` and `lessons/logs/` entries are deleted at the next run (`0` = never) |
 
 Where files live: a goal's run dir (stop file, diff, proof output, the
