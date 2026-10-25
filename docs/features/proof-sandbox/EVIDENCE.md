@@ -354,3 +354,50 @@ other programs' temp files). Not changed here: what denying it breaks is
 unmeasured (FUTURE-WORK item 27). A model that can see the deny list may
 decline to probe it: two Haiku passes refused to `cat` paths they saw denied,
 so the launcher probe ran a script.
+
+## The user's macOS temp tree (2026-10-25, FUTURE-WORK item 27)
+
+The implementer could read the per-user tree `/var/folders/<xx>/<id>/` (`T/`,
+`C/`, `X/`, `0/`): other programs' temp files and caches. Writes there were
+already refused. Measured on the host first, with `sandbox-exec` profiles
+that allow default, refuse writes outside the work folder and a private
+`TMPDIR`, and (second profile) also deny reads of the tree:
+
+| Workload | Reads allowed | Tree denied | Tree denied, `T/xcrun_db` re-opened |
+|---|---|---|---|
+| list `T/` | 202 entries | refused | refused |
+| `xcrun --show-sdk-path`, `cc`, `make`, `git` (Apple's `/usr/bin` shims) | rc 0 | rc 0, but each prints `xcrun: error: couldn't create cache file …/T/xcrun_db-…` | rc 0, stderr empty |
+| clang `-fmodules` with its default cache (`C/clang/ModuleCache`) | fails (write refused) | fails | fails |
+| `unittest` (tempfile, `multiprocessing.Pool`, a subprocess), system and uv Python | OK | OK | OK |
+| `uv venv` with its cache in `TMPDIR` | OK | OK | OK |
+| `node --test` (`os.tmpdir`, a child process) | OK | OK | OK |
+
+xcrun keeps a lookup cache at `T/xcrun_db` (about 2 KB of tool paths); denied
+it, the shim tries to write a new one, which is refused, and says so on every
+call. No setting moves or silences it (`xcrun_nocache`, `XCRUN_NOCACHE`,
+`DEVELOPER_DIR`, `SDKROOT`, `xcrun -n` tried). So `claude-implement.sh` denies
+reads of all of `/var/folders` in both spellings (`/var` is a link to
+`/private/var`), as the proof sandbox does: other users' trees were already
+unreadable, and the deny does not depend on what `getconf` prints (empty, or a
+`T/<suffix>` path, would otherwise have left the tree open). It re-opens one
+file (`allowRead`): `T/xcrun_db`, only when `getconf DARWIN_USER_TEMP_DIR`
+names `/var/folders/<xx>/<id>/T` and the file there is a regular file of the
+user's, not a symlink, with one link (`allowRead` overrides `denyRead`, so a
+planted link would carry the allow to its target; only a process outside any
+sandbox could plant one). Otherwise the shims print that error: the cost is
+the message, not an open tree. The clang module cache was
+already unusable. The Python and Node rows were measured with these host
+profiles only; the real passes below ran `cc`, `make`, `git` and Python's
+`tempfile`. A checkout, handoff or `--add-dir` under `$TMPDIR` (inside
+`/var/folders`) is now unreadable to the implementer; the house's own are
+under `~/.cache`.
+
+One real Haiku pass through the launcher with a probe script (CLAUDE_REAL_BIN
+a wrapper swapping the prompt, $0.0011): `T/`, `C/` and the `/var` spelling of
+`T/` refused, `xcrun_db` readable, `cc` rc 0 with empty stderr, `make`, `git`
+and Python's `tempfile` (the private `TMPDIR`) working. The same probe through
+the committed launcher ($0.0011): all three paths readable. The probe repo had
+to sit outside `~/.claude`, which the secret list denies. After the review moved
+the deny to the whole of `/var/folders`, a third pass ($0.0012) gave the same
+results, with `/private/var/folders` itself refused and `xcrun_db` still
+readable.

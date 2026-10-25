@@ -922,6 +922,17 @@ folders), and presumably the rest of the per-user `/var/folders/…` tree (`C/`,
 module cache live under `C/`): measure a C, Python and Node build under it,
 with the private TMPDIR in place, before adding it.
 
+**Done (2026-10-25):** measured (EVIDENCE.md, "The user's macOS temp tree"):
+denying the tree breaks only xcrun's lookup cache, so every `/usr/bin` `cc`,
+`make` or `git` printed an error (clang's default module cache was already
+unusable). `claude-implement.sh` denies reads of all of `/var/folders` in both
+spellings, as the proof sandbox does, and re-opens `T/xcrun_db` only when
+`getconf` names the usual `T/` folder and the file is a plain file of the
+user's. Python and Node workloads passed under host `sandbox-exec` profiles;
+real launcher passes confirmed the deny, `cc`, `make`, `git` and `tempfile`.
+Tests in `implement-test.sh` (including `getconf` printing nothing, garbage or
+a suffixed path).
+
 
 ## 28. Two other places hand a child the house's environment (2026-10-23)
 

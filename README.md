@@ -229,7 +229,8 @@ removed when the goal lands and kept on a wake. The implementer's folder
 folders: the implementer's sandbox denies it every run folder, Grok's
 verdicts, the logs and every other goal's handoff folder, and its `TMPDIR` is
 a private folder under `/private/tmp/cw-<uid>` (not Claude Code's shared
-`/tmp/claude-<uid>`, which it cannot read). Every host proof,
+`/tmp/claude-<uid>`, which it cannot read). Nor can it read `/var/folders`
+(the user's macOS temp tree), except xcrun's cache file. Every host proof,
 `worktree_setup` and merged proof runs under the proof sandbox
 (`scripts/lib/proof-sandbox.py`, docs/features/proof-sandbox): writes only to
 the checkout and its own `TMPDIR`, no network unless the GOALS.md preamble

@@ -119,6 +119,25 @@ KEYS_DIR="$HOME/.cache/claude-coding-workflow/keys"
 # Code falls back to the shared folder when the path is too long for a socket.
 TMP_ROOT="${CW_IMPL_TMP_ROOT:-/private/tmp/cw-$(id -u)}"
 PASS_TMP=""
+# /var/folders, the user's macOS temp tree (<xx>/<id>/: T, C, X, 0) with
+# other programs' temp files and caches: reads denied whole, as the proof
+# sandbox does, whatever getconf says. Only xcrun's lookup cache is re-opened,
+# without which every /usr/bin cc, make or git prints an error (it cannot
+# write a new one either), and only when getconf names the usual T/ folder and
+# the cache there is a plain file of the user's (no symlink or hard link, which
+# allowRead would carry through the deny). Otherwise the cost is that error,
+# not an open tree. Measured: FUTURE-WORK item 27,
+# docs/features/proof-sandbox/EVIDENCE.md.
+XCRUN_DB=""
+xcrun_t="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
+xcrun_t="${xcrun_t%/}"
+[[ "$xcrun_t" != /var/folders/* ]] || xcrun_t="/private$xcrun_t"
+if [[ "$xcrun_t" =~ ^/private/var/folders/[^/]+/[^/]+/T$ ]]; then
+  xcrun_f="$xcrun_t/xcrun_db"
+  if [[ -f "$xcrun_f" && ! -L "$xcrun_f" && -O "$xcrun_f" && "$(stat -f %l "$xcrun_f" 2>/dev/null)" == 1 ]]; then
+    XCRUN_DB="$xcrun_f"
+  fi
+fi
 
 SMOKE=0
 RESUME_ID=""
@@ -263,10 +282,10 @@ new_session_id() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 settings_json() {
   python3 - "$1" "${IMPLEMENTER_ALLOWED_DOMAINS:-}" \
     "$(printf '%s\n' "${DENY_WRITES[@]+"${DENY_WRITES[@]}"}")" \
-    "$HOUSE" "$HERE/lib/secret-paths.txt" "$KEYS_DIR" "$TMP_ROOT" "$PASS_TMP" "$(id -u)" \
+    "$HOUSE" "$HERE/lib/secret-paths.txt" "$KEYS_DIR" "$TMP_ROOT" "$PASS_TMP" "$XCRUN_DB" "$(id -u)" \
     "${DENY_READS[@]+"${DENY_READS[@]}"}" <<'PY'
 import json, os, shlex, sys
-key_file, domains, deny_writes, house, listing, keys_dir, tmp_root, pass_tmp, uid, *extra = sys.argv[1:]
+key_file, domains, deny_writes, house, listing, keys_dir, tmp_root, pass_tmp, xcrun_db, uid, *extra = sys.argv[1:]
 # lib/secret-paths.txt, shared with the proof sandbox: ~/ is the home, @HOUSE/
 # the house checkout. The keys folder this launcher writes, and the run's
 # --deny-read paths, are added to it.
@@ -303,10 +322,17 @@ settings = {
 # allowRead re-opens this run's own folder inside them.
 tmp_roots = [f"/private/tmp/claude-{uid}", f"/tmp/claude-{uid}", tmp_root]
 allow = [pass_tmp]
-for a, b in (("/private/tmp/", "/tmp/"), ("/tmp/", "/private/tmp/")):
+# /var/folders too, both spellings (/var is a link to /private/var), but xcrun's
+# cache file. A root under either (a test's) gets both spellings as well.
+tmp_roots += ["/private/var/folders", "/var/folders"]
+pairs = (("/private/tmp/", "/tmp/"), ("/tmp/", "/private/tmp/"),
+         ("/private/var/", "/var/"), ("/var/", "/private/var/"))
+for a, b in pairs:
     if tmp_root.startswith(a):
         tmp_roots.append(b + tmp_root[len(a):])
         allow.append(b + pass_tmp[len(a):])
+if xcrun_db:
+    allow += [xcrun_db, xcrun_db[len("/private"):]]
 settings["sandbox"]["filesystem"]["denyRead"] += [p for p in tmp_roots if p not in secrets]
 settings["sandbox"]["filesystem"]["allowRead"] = allow
 writes = [p for p in deny_writes.splitlines() if p]

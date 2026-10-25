@@ -262,6 +262,9 @@ check "deny-read: a relative path is refused" 2 "$RC"
 echo "== 2d. a private TMPDIR per run (FUTURE-WORK item 12) =="
 # Claude Code's own /tmp/claude-<uid> is shared by every session of the user.
 uid="$(id -u)"
+# The launcher re-allows xcrun's cache only when it exists, and macOS may have
+# cleared it: recreate it before the first run below.
+xcrun --find cc >/dev/null 2>&1 || true
 reset "$REFUSAL" "$DONE"
 run -- "$HANDOFF"
 check "private tmp: exit 0" 0 "$RC"
@@ -274,7 +277,36 @@ check "private tmp: the root setting is not passed on" "" "$(call_field 1 tmproo
 for p in "/private/tmp/claude-$uid" "/tmp/claude-$uid" "$TMP/tr"; do
   check "private tmp: reads denied under $p" yes "$(has "\"$p\"" "$(setting 1 sandbox.filesystem.denyRead)")"
 done
-check "private tmp: only its own folder re-allowed" "[\"$t1\"]" "$(setting 1 sandbox.filesystem.allowRead)"
+# /var/folders whole too (FUTURE-WORK item 27), xcrun's cache re-allowed. The
+# test's root is under /var/folders, so its own folder comes in both spellings.
+vf="$(cd "$(getconf DARWIN_USER_TEMP_DIR)/.." && pwd -P)"
+case "$t1" in
+  /private/var/* | /private/tmp/*) t1b="${t1#/private}" ;;
+  /var/* | /tmp/*) t1b="/private$t1" ;;
+  *) t1b="?" ;;
+esac
+for p in /private/var/folders /var/folders; do
+  check "temp tree: reads denied under $p" yes "$(has "\"$p\"" "$(setting 1 sandbox.filesystem.denyRead)")"
+done
+check "private tmp: only its own folder re-allowed (both spellings), and xcrun's cache" \
+  "[\"$t1\", \"$t1b\", \"$vf/T/xcrun_db\", \"${vf#/private}/T/xcrun_db\"]" "$(setting 1 sandbox.filesystem.allowRead)"
+# getconf as the launcher may meet it: the tree stays denied whatever it says;
+# xcrun's cache only for the usual .../T shape.
+# A suffixed T/ path that does hold an xcrun_db, so only the shape check keeps it out.
+sfx="$vf/T/cw-implement-sfx-$$"
+trap 'rm -rf "$TMP" "$sfx"' EXIT
+mkdir -p "$sfx" && : >"$sfx/xcrun_db"
+mkdir -p "$TMP/gc" && printf '#!/bin/sh\nprintf "%%s" "$FAKE_GETCONF"\n' >"$TMP/gc/getconf" && chmod +x "$TMP/gc/getconf"
+for shape in "" "$sfx/" "garbage" "$vf/T/" "${vf#/private}/T"; do
+  reset "$DONE"
+  run PATH="$TMP/gc:$PATH" FAKE_GETCONF="$shape" -- "$HANDOFF"
+  d="$(setting 1 sandbox.filesystem.denyRead)"
+  want=no
+  [[ "$shape" == "$vf/T/" || "$shape" == "${vf#/private}/T" ]] && want=yes
+  check "getconf '$shape': /var/folders denied in both spellings" "yes yes" "$(has '"/private/var/folders"' "$d") $(has '"/var/folders"' "$d")"
+  check "getconf '$shape': xcrun's cache re-allowed: $want" "$want" "$(has xcrun_db "$(setting 1 sandbox.filesystem.allowRead)" | cut -c1-3 | sed 's/no:/no/')"
+done
+rm -rf "$sfx"
 reset "$DONE"
 run -u CW_IMPL_TMP_ROOT IMPLEMENTER_DRY_RUN=1 -- "$HANDOFF"
 check "private tmp: by default under /private/tmp/cw-<uid>, a short path" yes \
@@ -308,7 +340,7 @@ run CW_IMPL_TMP_ROOT="$short" -- "$HANDOFF"
 for p in "$short" "/tmp/cw-test-$$"; do
   check "private tmp: reads denied under $p" yes "$(has "\"$p\"" "$(setting 1 sandbox.filesystem.denyRead)")"
 done
-check "private tmp: its own folder re-allowed in both spellings" 2 \
+check "private tmp: its own folder re-allowed in both spellings (and xcrun's cache)" 4 \
   "$(setting 1 sandbox.filesystem.allowRead | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 rm -rf "$short"
 
