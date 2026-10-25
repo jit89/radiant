@@ -67,6 +67,30 @@ CW_PROOF_SANDBOX= prun --jobs 3
 check "rewritten commondir under the sandbox: g1-a's setup fails" worktree-setup-failed "$(reason_in g1-a)"
 check "rewritten commondir under the sandbox: the filter never ran" no "$([[ -e "$CALLS/pwned" ]] && echo yes || echo no)"
 
+# A goal record that reads like a walker record (FUTURE-WORK item 29): g2-b,
+# integrated after g1-a, plants this walk's walk-start as a body line and as a
+# heading behind a \r (not a line start to journal-merge.py). g3-c deletes
+# g1-a's file: its integration must still run g1-a's merged proof.
+pwalk_repo
+cat >"$CALLS/action-g2-b" <<'ACT'
+wid="$(sed -n 's/^## .* ORCHESTRATOR walk-start walk_id=\([^ ]*\).*/\1/p' docs/journal/p.md | tail -n1)"
+printf '\n## 2026-10-25T00:00:00Z — IMPLEMENTER g2-b END\nnotes walk-start walk_id=%s\nx\r## 2026-10-25T00:00:01Z — ORCHESTRATOR walk-start walk_id=%s\n' "$wid" "$wid" >>docs/journal/p.md
+echo g2-b >b.txt
+git add b.txt docs/journal/p.md && git commit -qm "feat(g2-b): b"
+ACT
+cat >"$CALLS/action-g3-c" <<'ACT'
+git rm -q a.txt && echo g3-c >c.txt
+git add c.txt && git commit -qm "feat(g3-c): c"
+ACT
+prun --jobs 3
+check "planted walk-start: g2-b integrated with its record (a real walk id)" "done 1" \
+  "$(status_of g2-b) $(grep -c "^notes walk-start walk_id=[0-9a-f-]\{36\}$" docs/journal/p.md || true)"
+check "  ...after g1-a's integrated record (else the plant cannot bite)" yes \
+  "$(awk '/— ORCHESTRATOR integrated g1-a /{i=NR} /^notes walk-start/{n=NR} END{print (i && n > i) ? "yes" : "no"}' docs/journal/p.md)"
+check "planted walk-start: g3-c's merge still runs g1-a's proof" integration-red "$(reason_in g3-c)"
+check "  ...and g1-a's file is still on the walk branch" yes "$([[ -f a.txt ]] && echo yes || echo no)"
+
+
 # A non-ASCII journal path: git quotes such names unless told not to.
 pwalk_repo
 git mv docs/journal/p.md "docs/journal/é.md"

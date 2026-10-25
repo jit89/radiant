@@ -614,6 +614,10 @@ slot frees. It needs polling for whichever child exited (bash 3.2 has no
 `wait -n`), integrations interleaved with running goals, and a drain policy
 for a stop mid-flight, all of which waves avoid today.
 
+**Deferred (2026-10-25, user):** three `--jobs` walks of the rbtree DAG had one
+wave wider than a goal; its waits were 0-83 s of a ~55 min walk. Revisit when
+`join_wait` rows show minutes, on a wide DAG with uneven goals.
+
 ## 14. Parallel walker: an integration-red as a fix round (2026-10-15)
 
 A goal green on its own but red once merged (`integration-red`) stops the walk
@@ -621,6 +625,8 @@ in item 6: the walker resets its merge, the goal stays `in_progress` with its
 branch and worktree, and the Architect decides. Turning it into a fix round
 would mean moving the goal's base onto the new walk tip, which puts other
 goals' changes into the review diff. Revisit with real cases; none exist yet.
+
+**Deferred (2026-10-25, user):** still no real `integration-red`.
 
 ## 15. A "simpler?" question in the goal review (2026-10-15)
 
@@ -961,3 +967,21 @@ would then skip the merged proofs of goals integrated before it. A planted
 `integrated` line only adds proofs. Fix: anchor both on
 `^## \S+ — ORCHESTRATOR `, as `walk_record` already is.
 
+**Done (2026-10-25):** `done_this_walk` matches whole walker headings only
+(`walk-start walk_id=<id>` and `integrated <g>`) and splits on `\n` only, as
+`walk_record` and `journal-merge.py` do, so a heading behind a `\r` in a goal
+record is not one. Test in `parallel-walk-trust4-test.sh` (a member plants this
+walk's walk-start as a body line and behind a `\r`; a later goal deleting an
+earlier goal's file still stops `integration-red`); three plants red. It reads
+the walk tip's journal (the copy the journal check already made), not the
+working file, and a list it cannot read stops the goal (`merge-failed`).
+
+## 30. A walk's --jobs 1 goals get no merged proofs in a later --jobs N run (2026-10-25)
+
+Found by Opus reviewing item 29. A goal finished by a `--jobs 1` run writes
+`ORCHESTRATOR done` (`run-goal.sh`), not `integrated`, so if the same walk is
+resumed with `--jobs N`, `done_this_walk` leaves it out and later integrations
+never rerun its proof. `done` cannot simply be counted: it is not a
+walker-only record (`journal-merge.py`), so a member could plant one. Needs a
+walker-written record for serial goals, or reading the serial goals' host
+ledgers (`orch_host_ledger`, `lib/orch-files.sh`), which no goal can write.

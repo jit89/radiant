@@ -547,19 +547,23 @@ run_setup() {
   return 0
 }
 
-# Goals done in this walk (their `integrated` record after this walk's
-# walk-start), for the merged proofs.
+# done_this_walk JOURNAL_COPY — goals done in this walk (their `integrated`
+# record after this walk's walk-start), for the merged proofs, read from a
+# copy of the walk tip's journal. Whole walker headings only, split on "\n"
+# only, as walk_record: a merged goal record may carry a body line that reads
+# like either record (journal-merge.py refuses walker-only headings, so a
+# heading is the walker's own).
 done_this_walk() {
-  python3 - "$JOURNAL" "${WALK_ID:-}" <<'PY'
+  python3 - "$1" "${WALK_ID:-}" <<'PY'
 import re, sys
 path, wid = sys.argv[1], sys.argv[2]
-lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+lines = open(path, "rb").read().decode("utf-8", "replace").split("\n")
 start = 0
 for i, l in enumerate(lines):
-    if f"walk-start walk_id={wid}" in l:
+    if re.match(r"^## \S+ \u2014 ORCHESTRATOR walk-start walk_id=" + re.escape(wid) + r"(\s|$)", l):
         start = i
 for l in lines[start:]:
-    m = re.search(r"— ORCHESTRATOR integrated (g\d+-[a-z0-9-]+) ", l)
+    m = re.match(r"^## \S+ \u2014 ORCHESTRATOR integrated (g\d+-[a-z0-9-]+) ", l)
     if m:
         print(m.group(1))
 PY
@@ -713,7 +717,7 @@ check_scratch_at() {
 # main checkout is not clean). 4: a plain merge conflict, queued for its
 # automatic recut (CONFLICT_RECUTS): not integrated, not a stop.
 integrate() {
-  local g="$1" sha="$2" s base m mrc conflicted p proof out rc moved=() red=() expect M F
+  local g="$1" sha="$2" s base m mrc conflicted p proof out rc moved=() red=() expect M F done_list
   walk_check
   # The main checkout clean from the start: merge-tree reads its attributes.
   if [[ -n "$(git status --porcelain)" ]]; then
@@ -790,8 +794,14 @@ integrate() {
   # Merged proofs, in the scratch tree: this goal and every goal done earlier
   # in this walk.
   PLAN_PATH="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("plan") or "")')"
-  PROOF_GUARDED_EXTRA="$(for p in $(done_this_walk) "$g"; do goal_field "$p" oracle; done | sort -u | paste -sd ' ' -)"
-  for p in $(done_this_walk | grep -vx "$g" || true) "$g"; do
+  # The walk tip's journal (copied for the journal check above); a list it
+  # cannot read stops the goal rather than run fewer proofs.
+  if ! done_list="$(done_this_walk "$WAVE_DIR/$g.jours")"; then
+    integration_stop "$g" merge-failed "cannot read the goals done in this walk from the walk tip's journal" "$s"
+    return 1
+  fi
+  PROOF_GUARDED_EXTRA="$(for p in $done_list "$g"; do goal_field "$p" oracle; done | sort -u | paste -sd ' ' -)"
+  for p in $(printf '%s\n' $done_list | grep -vx "$g" || true) "$g"; do
     proof="$(goal_field "$p" proof)"
     case "$proof" in "" | true | inline | "(case table)") continue ;; esac
     ORACLE="$(goal_field "$p" oracle)"
