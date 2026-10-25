@@ -225,6 +225,10 @@ approval_policy = "never"
 [sandbox_workspace_write]
 writable_roots = ${roots}
 
+# Codex keeps DEEPSEEK_API_KEY (env_key); its shell tool must not see it.
+[shell_environment_policy]
+exclude = ["DEEPSEEK_API_KEY"]
+
 [model_providers.deepseek]
 name = "deepseek"
 base_url = "${BASE_URL}"
@@ -234,6 +238,23 @@ EOF
 }
 
 write_codex_config
+
+# `env -u` arguments for Codex itself, so its shell tool (which inherits Codex's
+# environment) never sees them: every CW_* setting (the house's and the
+# walker's), ANTHROPIC_BASE_URL and every variable named like a credential, as
+# claude-implement.sh strips them (FUTURE-WORK item 28). DEEPSEEK_API_KEY stays:
+# Codex reads it to reach DeepSeek (env_key above).
+codex_env_unsets() {
+  local name
+  printf '%s\n' -u ANTHROPIC_BASE_URL
+  for name in $(compgen -e); do
+    if [[ "$name" == CW_* ]]; then printf '%s\n' -u "$name"; continue; fi
+    [[ "$name" != DEEPSEEK_API_KEY && "$name" != GIT_CONFIG_* ]] || continue
+    if grep -qiE '(^|_)(API)?KEY(_|$)|(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)' <<<"$name"; then
+      printf '%s\n' -u "$name"
+    fi
+  done
+}
 
 parse_thread_id() {
   python3 -c '
@@ -312,20 +333,22 @@ codex_once() {
   if ((${#extra[@]})); then
     cmd+=("${extra[@]}")
   fi
+  local unsets=() u
+  while IFS= read -r u; do unsets+=("$u"); done < <(codex_env_unsets)
 
   if [[ "${DEEPSEEK_DRY_RUN:-0}" == "1" ]]; then
     echo "DEEPSEEK_RESULT: dry_run"
     echo "THREAD_ID: ${THREAD_ID}"
     echo "RETURN_HANDOFF: ${RETURN_DOC}"
     printf 'CMD:'
-    printf ' %q' "${cmd[@]}" -
+    printf ' %q' env "${unsets[@]}" "${cmd[@]}" -
     printf '\n'
     echo "PROMPT_FILE: $prompt_file"
     exit 0
   fi
 
   set +e
-  "${cmd[@]}" - <"$prompt_file" >"$jsonl" 2>"${jsonl}.err"
+  env "${unsets[@]}" "${cmd[@]}" - <"$prompt_file" >"$jsonl" 2>"${jsonl}.err"
   LAST_RC=$?
   set -e
   rm -f "$prompt_file"

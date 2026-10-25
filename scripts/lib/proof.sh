@@ -46,13 +46,16 @@ run_step() {
 
 # `env -u` arguments for every exported variable named like a credential — a
 # whole _-separated part KEY, APIKEY, TOKEN, SECRET, PASSWORD, PASSWD or
-# CREDENTIAL(S) — except names in PROOF_ENV_KEEP and git's own GIT_CONFIG_*.
-# The proof runs implementer-written code on the host; it gets PATH and the
-# rest, not the keys.
+# CREDENTIAL(S) — and every CW_* setting (the house's and the walker's, as
+# claude-implement.sh strips them, so a proof sees the same environment run by
+# the host as by the implementer: FUTURE-WORK item 28), except names in
+# PROOF_ENV_KEEP and git's own GIT_CONFIG_*. The proof runs
+# implementer-written code on the host; it gets PATH and the rest, not the keys.
 proof_env_unsets() {
   local name keep=" ${PROOF_ENV_KEEP:-} "
   for name in $(compgen -e); do
     [[ "$keep" != *" $name "* && "$name" != GIT_CONFIG_* ]] || continue
+    if [[ "$name" == CW_* ]]; then printf '%s\n' -u "$name"; continue; fi
     if grep -qiE '(^|_)(API)?KEY(_|$)|(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)' <<<"$name"; then
       printf '%s\n' -u "$name"
     fi

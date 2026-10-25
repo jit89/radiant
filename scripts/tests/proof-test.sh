@@ -104,10 +104,10 @@ check "a child left after exit 0 is gone" "0" "$(pgrep -f "sleep $NAP" | wc -l |
 
 # 2. Credentials in the host environment are not handed to proof code.
 export SSH_AUTH_SOCK=/nonexistent/agent ANTHROPIC_API_KEY=stub-anthropic MY_SERVICE_TOKEN=stub-token \
-  DB_PASSWORD=stub-pw PLAIN_SETTING=visible KEYBOARD_LAYOUT=us
+  DB_PASSWORD=stub-pw PLAIN_SETTING=visible KEYBOARD_LAYOUT=us CW_SOME_WALK_SETTING=1
 # The proof sandbox lets a proof write only its checkout and TMPDIR, so the
 # environment goes to an ignored file in the repo.
-IGNORE=$'env.out\n' PROOF_ENV_KEEP="MY_SERVICE_TOKEN" proof 'env >env.out'
+IGNORE=$'env.out\n' PROOF_ENV_KEEP="MY_SERVICE_TOKEN CW_KEPT_SETTING" CW_KEPT_SETTING=1 proof 'env >env.out'
 check "env: green proof reaches review" "yes" "$reviewed"
 seen() { grep -q "^$1=" "$TMP/repo/env.out" && echo present || echo absent; }
 check "env: DEEPSEEK_API_KEY hidden" "absent" "$(seen DEEPSEEK_API_KEY)"
@@ -118,6 +118,10 @@ check "env: ordinary variables kept" "present" "$(seen PLAIN_SETTING)"
 check "env: PATH kept" "present" "$(seen PATH)"
 check "env: KEY inside a word is not a credential" "present" "$(seen KEYBOARD_LAYOUT)"
 check "env: git's GIT_CONFIG_KEY_n kept" "present" "$(seen GIT_CONFIG_KEY_0)"
+# The one CW_ line left is CW_KEPT_SETTING, named in PROOF_ENV_KEEP.
+check "env: CW_* settings hidden, as from the implementer" "absent 1" \
+  "$(seen CW_SOME_WALK_SETTING) $(grep -c '^CW_' "$TMP/repo/env.out")"
+check "env: PROOF_ENV_KEEP passes a named CW_* one" present "$(seen CW_KEPT_SETTING)"
 check "env: bytecode writes off (D-09)" "yes" \
   "$(grep -qx 'PYTHONDONTWRITEBYTECODE=1' "$TMP/repo/env.out" && echo yes || echo no)"
 check "env: no ssh agent socket (proof sandbox)" "absent" "$(seen SSH_AUTH_SOCK)"

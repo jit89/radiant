@@ -956,6 +956,23 @@ launcher now strips every `CW_*`):
   any credential the caller exported. Give it `claude-implement.sh`'s
   `env_unsets`, or retire it now that DeepSeek runs through Claude Code.
 
+**Done (2026-10-25):** host proofs, `worktree_setup`, merged proofs and
+mutation runs strip every `CW_*` setting too (`proof_env_unsets`,
+`lib/proof.sh`; `PROOF_ENV_KEEP` still keeps a named one), so a proof sees the
+same environment from the host as from the implementer. `deepseek-code.sh`
+starts Codex without any `CW_*`, `ANTHROPIC_BASE_URL` or credential-named
+variable but `DEEPSEEK_API_KEY`, which Codex reads (`env_key`), and its config
+keeps that key from Codex's shell tool (`[shell_environment_policy] exclude`).
+Measured with Codex 0.163 and one real DeepSeek call each (a wrapper swapping
+the prompt for `env | grep -c`): the shell saw `deepseek=0 cw=0`; with the
+exclude line removed it saw `deepseek=1`, so Codex's own defaults do not drop
+the key and before this change the legacy launcher's shell could read it.
+Codex runs without `OPENAI_API_KEY`. Still open (not item 28): Codex itself
+holds the key, and its `workspace-write` shell can read the `.env` it came
+from (item 12's known limits: the launcher reads outside its handoff folder).
+The launcher is kept, not retired. Tests: `proof-test.sh`,
+`codex-env-test.sh`; five plants red.
+
 ## 29. The walker's done_this_walk reads unanchored journal text (2026-10-23)
 
 Found by Opus reviewing item 25. `wave-walk.sh`'s `done_this_walk` reads the

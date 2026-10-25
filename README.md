@@ -214,7 +214,7 @@ exit 75 / `rate_limited` → stop, no hammer, no model swap.
 | `PROOF_TIMEOUT` | `600` | Seconds for the host proof |
 | `CW_PROOF_SANDBOX` | (on) | `off` runs proofs, `worktree_setup` and merged proofs unsandboxed; journaled on the dispatch record |
 | `CW_ALLOW_DOTENV` | (unset) | `1` walks a repo with a live `.env` in a checkout, knowingly; journaled on the dispatch record |
-| `PROOF_ENV_KEEP` | empty | Space-separated credential-like variables the proof may still see (others named `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*` are removed) |
+| `PROOF_ENV_KEEP` | empty | Space-separated variables the proof may still see that would be removed: those with a whole `_`-separated part `KEY`, `APIKEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL(S)` in any case (not git's `GIT_CONFIG_*`), and every `CW_*` setting |
 | `KEEP_RUN_DIR=1` | off | Keep the run dir after a goal lands |
 | `CW_OUT_DIR` | unset | Launchers write raw output, `.err` and verdict/report here and delete none; `run-goal.sh` sets it to its run dir |
 | `CW_KEEP_RAW=1` | off | A standalone launcher keeps its raw output and `.err` after an `ok` result |
