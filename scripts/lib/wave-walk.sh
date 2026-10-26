@@ -346,6 +346,7 @@ recut() {
   # The reason first: a reader takes the goal id as the first word.
   journal_line "## $(utc) — ORCHESTRATOR recut $g${reason:+ reason=$reason}${note}"
   wave_commit "chore($g): orchestrator recut" "" "$soft" || return 1
+  walker_mark "$g" recut
   # The record is in: the old result must never be integrated or kept again,
   # nor kept back by wave_stop's member scan from the wave's own copy.
   rm -f "$RESULTS_DIR/$g" "${WAVE_DIR:+$WAVE_DIR/$g.result}"
@@ -934,6 +935,72 @@ bounce() {
   return 0
 }
 
+# walker_mark GOAL EVENT — a line in GOAL's host ledger in this checkout
+# (orch_host_ledger, which no sandboxed goal can write) saying the walker took
+# the goal: EVENT is wave or recut. serial_goal_why reads it; resume-state.py
+# and done_this_walk read only run-goal.sh's own records. A mark that cannot
+# be written makes the serial check stricter, never looser.
+walker_mark() {
+  local l
+  l="$(orch_host_ledger "$1")" || return 0
+  (umask 077 && mkdir -p "$(dirname "$l")" && printf '## %s — ORCHESTRATOR walker %s %s\n' "$(utc)" "$2" "$1" >>"$l") 2>/dev/null || true
+}
+
+# serial_goal_why GOAL [uncommitted] — for an in_progress goal: when a serial
+# run (run-goals.sh without --jobs) worked on it after the walker last took it,
+# print why the walk cannot take it and return 0. That is: its in_progress is
+# uncommitted ("uncommitted": the walker commits every status itself, so only a
+# serial run leaves one), or its host ledger in this checkout holds a
+# run-goal.sh record for it (any kind) after the last walker mark, or that
+# ledger cannot be keyed or read. A parallel walk would recut the goal from the
+# walk tip, and a serial goal's implementer commits straight onto the walk
+# branch: whatever the stopped pass left would sit unreviewed in the new base
+# (FUTURE-WORK item 31). Decides from GOALS.md and the ledger alone, never the
+# journal (a serial implementer could forge a walker record there), and never
+# from a branch or worktree (a goal a parallel walk bounced keeps both, then
+# may run serially); the journal and the results folder shape only the advice. No ledger file (a goal paused before ledgers existed, 2026-10-23,
+# a repo since moved, another HOME) is not serial unless uncommitted.
+serial_goal_why() {
+  local g="$1" ledger last="" kept=""
+  [[ "${2:-}" != uncommitted ]] || last=uncommitted
+  if [[ -z "$last" ]]; then
+    if ledger="$(orch_host_ledger "$g")"; then
+      [[ -f "$ledger" ]] || return 1
+      last="$(python3 - "$ledger" "$g" <<'PY'
+import re, sys
+path, g = sys.argv[1], sys.argv[2]
+last = "none"
+for line in open(path, "rb").read().decode("utf-8", "replace").split("\n"):
+    if re.match(r"^## \S+ \u2014 ORCHESTRATOR walker (wave|recut) " + re.escape(g) + r"$", line):
+        last = "walker"
+    elif re.match(r"^## \S+ \u2014 ORCHESTRATOR (?!walker )\S+ " + re.escape(g) + r"(\s|$)", line):
+        last = "serial"
+print(last)
+PY
+      )" || last=unreadable
+    else
+      last=unreadable
+    fi
+  fi
+  [[ "$last" != none && "$last" != walker ]] || return 1
+  if [[ "$last" == unreadable ]]; then
+    printf '%s\n' "$g is in progress, and its host ledger in this checkout (${ledger:-not keyed}) cannot be read, so whether a serial run (run-goals.sh without --jobs) is mid-way through it is unknown. Make the ledger readable (ls -l it), or find out by hand, then rerun. Do not delete its cw/$g branch or worktree on this account: the walker may hold a reviewed result there."
+    return 0
+  fi
+  if branch_exists "$g" || [[ -e "$(wt_path "$g")" ]]; then
+    rec="$(walk_record "$g")"
+    if [[ -f "$RESULTS_DIR/$g" || ( "$rec" != none && "$rec" != member ) ]]; then
+      kept=" Its cw/$g branch may hold a result the walker recorded as reviewed (or its record cannot be read): inspect it (git log cw/$g) before anything else, and do not delete it unseen. Both ways forward drop that result: finishing serially needs the branch and worktree out of the way, and $GOALS_PY GOALS.md set $g ready (commit) sends the goal to a wave, where it is recut; revert what the serial pass left on the walk branch first."
+    else
+      kept=" First remove what an earlier parallel attempt kept, after looking at it (the serial walker will not run a goal with a cw/ branch): git worktree remove -f -f $(wt_path "$g") || rm -rf $(wt_path "$g"); git branch -D cw/$g."
+    fi
+  fi
+  local from="from a serial run (run-goals.sh without --jobs)"
+  [[ "$last" != uncommitted ]] || from="with its in_progress uncommitted in GOALS.md, as a serial run (run-goals.sh without --jobs) stopped by a wake leaves it (or a hand edit, or a walker commit that failed)"
+  printf '%s\n' "$g is in progress $from. A parallel walk would recut it from the walk tip, where whatever that run's stopped pass left (commits on the walk branch, GOALS.md or journal edits, uncommitted files) would never be reviewed.$kept Finish it serially: $HERE/run-goals.sh without --jobs resumes it from its own base. Then rerun with --jobs."
+  return 0
+}
+
 # --- start --------------------------------------------------------------------
 WAVE_DIR="$(mktemp -d "$CW_CACHE/runs/run-goals-wave-XXXXXX")"
 chmod 700 "$WAVE_DIR"
@@ -945,6 +1012,20 @@ WALK_BRANCH="$(git symbolic-ref -q --short HEAD || true)"
 WALK_TIP="$(git rev-parse HEAD)"
 WORKTREE_SETUP="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("worktree_setup") or "")')"
 
+# A goal a serial run is mid-way through is not the walker's to take
+# (FUTURE-WORK item 31): checked first, so its uncommitted in_progress (a serial
+# run leaves it so when a wake stops it) gets this answer, not the dirty-file
+# refusal below, whose "restore" would make the goal start over with that
+# pass's commits in its base.
+git show HEAD:GOALS.md >"$WAVE_DIR/goals-at-head.md" 2>/dev/null || : >"$WAVE_DIR/goals-at-head.md"
+while IFS= read -r g; do
+  [[ -n "$g" ]] || continue
+  committed=""
+  [[ "$("$GOALS_PY" "$WAVE_DIR/goals-at-head.md" graph 2>/dev/null | awk -v g="$g" '$1 == g { print $2 }')" == in_progress ]] || committed=uncommitted
+  if why="$(serial_goal_why "$g" $committed)"; then
+    walk_stop serial-goal-in-progress "$why"
+  fi
+done < <("$GOALS_PY" GOALS.md graph | awk '$2 == "in_progress" { print $1 }')
 # The walker commits every status itself: at start both files equal HEAD.
 orch_preflight "" --none || walk_stop orchestration-files-dirty "$(orch_refusal)"
 expect_from_tree
@@ -1126,6 +1207,7 @@ PY
   done
   journal_line "## $(utc) — ORCHESTRATOR wave $WAVE_N $(IFS=,; echo "${WAVE_MEMBERS[*]}")"
   wave_commit "chore: orchestrator wave $WAVE_N" "$allow"
+  for g in "${WAVE_MEMBERS[@]}"; do walker_mark "$g" wave; done
   WAVE_BASE="$WALK_TIP"
   # A fresh attempt: no earlier result of a member may be recorded for it.
   for g in "${WAVE_MEMBERS[@]}"; do rm -f "$RESULTS_DIR/$g"; done

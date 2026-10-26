@@ -100,9 +100,12 @@ prun
 check "serial run: g1-a done, the walk stopped at g2-b" "done 1 0" \
   "$(status_of g1-a) $([[ "$prc" -ne 0 ]] && echo 1 || echo 0) $(grep -c 'ORCHESTRATOR walk-end' docs/journal/p.md || true)"
 rm -f "$CALLS/action-g2-b"
-# The serial stop leaves g2-b's in_progress uncommitted in GOALS.md, which the
-# parallel walker's start check refuses: committed here, as after a wake.
-git add GOALS.md && git commit -qm "architect: the wake, read"
+# A parallel walk will not take a goal a serial run is mid-way through
+# (FUTURE-WORK item 31). Test setup only: g2-b is handed back because this
+# stub pass committed nothing (the run-goals skill says never to restore such
+# a goal in a real walk; finish it serially instead).
+"$GOALS_PY" GOALS.md set g2-b ready >/dev/null
+git diff --quiet -- GOALS.md || git commit -qm "architect: hand g2-b back" -- GOALS.md
 cat >"$CALLS/action-g3-c" <<'ACT'
 git rm -q a.txt && echo g3-c >c.txt
 git add c.txt && git commit -qm "feat(g3-c): c"
@@ -112,6 +115,28 @@ check "same walk with --jobs: g3-c's merge runs g1-a's proof (done serially)" in
 check "  ...the red proof named is g1-a's" yes "$(grep -q 'g1-a (exit ' "$(stopfile_of g3-c)" 2>/dev/null && echo yes || echo no)"
 check "  ...one walk-start (the same walk)" 1 "$(grep -c 'ORCHESTRATOR walk-start' docs/journal/p.md)"
 check "  ...g1-a's file is still on the walk branch" yes "$([[ -f a.txt ]] && echo yes || echo no)"
+
+# A goal a serial run is mid-way through is not recut by a parallel walk
+# (FUTURE-WORK item 31): g2-b commits b.txt, then its implementer fails and the
+# serial walk stops. With --jobs 3, a recut would start g2-b fresh from the walk
+# tip with b.txt already in its base, never reviewed; the walk stops before any
+# goal runs instead, and a serial rerun finishes g2-b from its own base.
+pwalk_repo
+printf 'echo g2-b >b.txt; git add b.txt; git commit -qm "feat(g2-b): b, half done"; printf "%%s\\n" "IMPLEMENTER_RESULT: error (exit 1)"; exit 1\n' >"$CALLS/action-g2-b"
+prun
+check "serial run with code: stopped at g2-b, b.txt committed" "1 in_progress yes" \
+  "$([[ "$prc" -ne 0 ]] && echo 1 || echo 0) $(status_of g2-b) $([[ -f b.txt ]] && echo yes || echo no)"
+rm -f "$CALLS/action-g2-b"
+before="$(wc -l <"$CALLS/implement" | tr -d ' ')"
+prun --jobs 3
+check "--jobs: the walk stops serial-goal-in-progress, nothing dispatched or recut" "yes $before 0" \
+  "$(grep -q '^- reason: serial-goal-in-progress$' "$pstop" 2>/dev/null && echo yes || echo no) $(wc -l <"$CALLS/implement" | tr -d ' ') $(grep -c 'ORCHESTRATOR recut g2-b' docs/journal/p.md || true)"
+check "  ...the stop gives the serial way out" yes \
+  "$(grep -q 'serial run (run-goals.sh without --jobs)' "$pstop" && grep -q 'without --jobs resumes it from its own base' "$pstop" && echo yes || echo no)"
+check "  ...the other goals untouched" "ready blocked" "$(status_of g3-c) $(status_of g4-d)"
+prun
+check "serial rerun: every goal done" "0 done done done done" \
+  "$prc $(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
 
 # A non-ASCII journal path: git quotes such names unless told not to.
 pwalk_repo

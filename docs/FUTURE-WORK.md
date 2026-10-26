@@ -1021,5 +1021,52 @@ earlier walk finished would also be proved: more proofs, never fewer).
 Seen while testing: a serial walk stopped by a wake leaves the goal's
 `in_progress` uncommitted in GOALS.md, and the parallel walker's start check
 refuses that (`orchestration-files-dirty`) until it is committed; a serial rerun
-does not mind.
+does not mind. Fixed as item 31.
+
+## 31. A serial walk's stopped goal under a later --jobs run (2026-10-26)
+
+Found while testing item 30. A serial run (`run-goals.sh` without `--jobs`)
+sets its goal `in_progress` without committing it, and a wake leaves it so; the
+serial walker accepts that on its rerun, but the parallel walker's start check
+refused it (`orchestration-files-dirty`) with the generic advice "commit them
+yourself … or restore them". Restoring made the goal `ready`, so its next run
+took HEAD as its base. Worse, even once committed, the parallel walker recut
+the goal from the walk tip, and a serial goal's implementer commits straight
+onto the walk branch: any commits the stopped pass made sat in the new base and
+were never reviewed (the item 30 test passed only because its pass committed
+nothing).
+
+**Done (2026-10-26):** a parallel walk refuses to start while a goal a serial
+run is mid-way through is still `in_progress`, and says to finish it with
+`run-goals.sh` without `--jobs` (which resumes it from its own base), then
+rerun with `--jobs`. The walker marks each goal it puts in a wave or recuts in
+the goal's host ledger in the main checkout (`ORCHESTRATOR walker wave|recut
+<goal>`, a line no sandboxed goal can write); a goal is a serial run's when
+its `in_progress` is uncommitted in GOALS.md (the walker commits its own), or
+that ledger holds a `run-goal.sh` record of any kind for it after the last
+mark, or the ledger cannot be read. The check runs first at start, so the
+serial goal's uncommitted `in_progress` gets this answer, never the dirty-file
+refusal whose "restore" would start it over. It decides from GOALS.md and the
+ledger alone, never the journal (a serial implementer commits onto the walk
+branch and could forge a walker record) and never from a branch or worktree (a
+goal a parallel walk bounced keeps both, then may run serially; the stop then
+says to remove them first, since the serial walker will not run a goal that
+has them; never when the ledger cannot be read or the branch holds a result
+the walker recorded as reviewed or whose record cannot be read, where it says
+to inspect it instead). The whole walk stops, before any goal runs: a serial
+resume refuses a GOALS.md in which other goals moved since its base. Chosen
+(user) over a takeover that judged what the stopped pass left behind (code,
+GOALS.md, journal, dirty tree): two Opus rounds found holes in that analysis;
+the flat refusal costs one serial rerun even when the pass left nothing.
+Limits: a committed `in_progress` with no ledger file (a goal paused before
+ledgers existed, 2026-10-23, a repo since moved, another HOME) is not checked;
+a goal a parallel walk left in flight before this change, with older serial
+records and no mark, is refused (safe; a finished one included, its reviewed
+result lost whichever way out is taken); an uncommitted `in_progress` left by
+a failed walker commit is refused as a serial one (the message names it with a
+hand edit and a serial run). Tests: `parallel-walk-trust4-test.sh` (committed
+code; item 30's scenario hands the goal back), `parallel-walk-serial-test.sh`
+(nothing committed, the bounced path followed to `done`, a walker-marked goal
+recut, a serial r1 record after the mark, an unreadable ledger with no advice
+to delete the branch, no ledger at all with the `in_progress` uncommitted).
 
