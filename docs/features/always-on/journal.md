@@ -44,3 +44,12 @@ Grok round 11: APPROVED (session 05bffed8). One wording fix in step 5 taken. Cru
 
 ## 2026-10-26T08:30:28Z — ARCHITECT sign-off
 The user signed off PLAN.md (Grok APPROVED in round 11). Build next, in-session, starting with step 0's evidence.
+
+## 2026-10-26T09:18:29Z — ARCHITECT step 0 amendment
+Step 0d: an invalid key reaches the walker as reviewer-error (class C) with api_error_status 401 only in the envelope. PLAN.md step 7a amended: api_error_status 401/402/403 in an error envelope is A budget before the text markers; "invalid api key" added. Step 0f adds a pinned-version check (claude-version-changed, A) to the supervisor; step 0h sets the killed-turn stand-ins (reviewer $1.00, decider $0.50, implementer $0.50).
+
+## 2026-10-26T09:19:48Z — ARCHITECT step 0
+Step 0 done (EVIDENCE.md): a, b, c, f, g, h measured and working or set; d amended step 7a (api_error_status 401/402/403 first); e partly unproven (the push is suppressed while the terminal is active; phone delivery and the mod call go to the build and the dogfood run). No step failed; the build can start.
+
+## 2026-10-26T09:27:36Z — ARCHITECT decider and dogfood
+The user set the decider to Opus 5.5 at high effort (xhigh buys nothing for one binary judgment on structured data; DeepSeek rejected, the implementer deciding on reruns of its own failed work; Grok left for later) and dropped the Fable 5.1 route entirely. The dogfood run uses a new project the user chooses, not a past dogfood DAG. PLAN.md updated.

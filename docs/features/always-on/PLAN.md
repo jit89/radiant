@@ -10,7 +10,7 @@ this Mac. The user keeps Phases 0-3 (research, interview, the signed plan,
 `GOALS.md` and its oracles after Grok's oracle review) and signs a walk into a
 queue. A host **supervisor** then walks each signed entry, waits through usage
 limits, resolves operational stops through a fixed table, and asks an AI
-**decider** (Claude Opus 5.5 at xhigh effort, high if it is ever Fable 5.1)
+**decider** (Claude Opus 5.5 at high effort)
 only to choose among the few exits that table allows. Security-class and
 contract-class stops, budget ceilings, merges and any decider doubt stop the
 entry and message the user on iMessage; the user answers at the Mac. Every
@@ -36,8 +36,9 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
   subscription (their costs appear on the key in the Console; the subscription's
   `/usage` does not move). Under launchd, with no shell profile.
 - **c. A tool-less decider.** `claude -p` with no tools (the exact documented
-  form, measured) answers a JSON packet with JSON at `--model claude-opus-5-5
-  --effort xhigh`, `--permission-mode dontAsk --permission-prompts none`; its
+  form, measured) answers a JSON packet with JSON at `--model claude-opus-5-5`
+  (measured at `--effort xhigh`; the decider runs at `high`),
+  `--permission-mode dontAsk --permission-prompts none`; its
   cost per call and output shape.
 - **d. Billing and limit failures as the walker reports them.** For each
   launcher on the API key: a 429 with `retry-after`, an
@@ -193,6 +194,7 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
      `dirty-tree`, `head-moved-during-review`, `gate`, `worktree-exists`,
      `serial-goal-in-progress`, `journal-unreadable`, `walk-stuck`, `trap`,
      `bounced-not-recorded`, `contract-drift`, `budget`, `always-on-stop`,
+     `claude-version-changed` (step 0f),
      `interrupted`, and an empty reason.
    - **B — the user** (contract questions): `bounced`, `implementer-blocked`,
      `blocked`, `blocked-oracle-edit`, `oracle-gap`, `done-refused`,
@@ -222,7 +224,12 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
    any text: `credits_required`, `requires usage credits`, `spend limit`,
    `spend_limit`, `billing_error`, `insufficient balance`,
    `enforced_spend_limit_reached`, `HTTP 402`, `status 402`. No bare `402`
-   (hex shas contain it). Such a stop is never retried or waited on.
+   (hex shas contain it), and `invalid api key`. **Before the text markers**,
+   the structured field: an error envelope with `api_error_status` 401, 402 or
+   403 (a key revoked or invalid, a balance or spend exhausted, a permission
+   refused) is A `budget` whatever the stop reason (step 0d: an invalid key
+   reaches the walker as `reviewer-error`, class C, and only the envelope says
+   401). Such a stop is never retried or waited on.
    `write_stop` in `run-goal.sh` names only the implementer's raw output on
    `LOG:` / `stderr:` today; a reviewer wake (any `reviewer-*` reason, and a
    mutations turn's) now puts that call's raw envelope and its `.err` (the
@@ -309,7 +316,7 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
 ### The decider (`scripts/claude-decide.sh`)
 
 11. A launcher like the others, owning its prompt: `claude -p --model
-    claude-opus-5-5 --effort xhigh` (high for `claude-fable-5-1`), no tools,
+    claude-opus-5-5 --effort high`, no tools,
     `--permission-mode dontAsk --permission-prompts none`, the API key only.
     Input: one JSON packet the supervisor builds: the entry, the class and
     reason of each stopped goal, its action counts, the verdict labels, wave
@@ -422,7 +429,8 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
     `resume` after a count cap (one rerun) and on `serial-goal-in-progress`
     (refused); `sign` on the house (refused).
     Plants for each. Then a **dogfood run**: one real queue entry on a small
-    target (the rbtree DAG), to measure the spend per walk and per goal and tune
+    target, a new project the user chooses (not a past dogfood DAG), to measure
+    the spend per walk and per goal and tune
     the three ceilings.
 
 ## Key decisions & tradeoffs
@@ -439,9 +447,14 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
 - **API key, not Pro (Q1).** Clear under the terms for automation, no 5-hour
   windows starving the user's own sessions, a hard monthly cap. Cost: real
   per-token spend.
-- **Opus 5.5 at xhigh (user).** Fable 5.1 needs usage credits on Pro. The same
-  family as the reviewer; mitigated by routing only and leaving model names
-  out of the packet.
+- **Opus 5.5 at high effort, the only decider (user).** The decision is one
+  binary judgment on structured data after the table and counts have decided
+  everything else, so more effort buys nothing; what matters is strict JSON and
+  ignoring injected text, both shown in step 0c. DeepSeek was rejected (the
+  implementer would decide on reruns of its own failed work) and Grok left for
+  later (a fourth provider's undocumented headless errors); Fable 5.1 is not
+  used. The same family as the reviewer; mitigated by routing only and leaving
+  model names out of the packet.
 - **A signed queue only (Q3).** The loop never invents work, never plans, never
   touches the house, never merges; a contract change needs a new signature.
 - **Notify-only (Q4).** No reply channel to secure in v1; every human decision
@@ -504,8 +517,8 @@ The ledger confirmed by the user (crucible, 2026-10-26), with sources:
 15. Every decision journaled as `DECIDER`; digest and spot checks; approve rate
     tracked (research §4).
 16. House work, in-session; plan files here (house convention).
-17. Fable 5.1 needs usage credits on Pro (probe 2026-10-26); Opus 5.5 at high
-    and xhigh needs none.
+17. Opus 5.5 is reachable on the API key at the decider's settings (step 0c);
+    Fable 5.1, which needs usage credits on Pro (probe 2026-10-26), is not used.
 18. Unattended 24/7 use of Pro is a grey area under its terms; an API key is
     clearly allowed (research §2).
 
@@ -540,8 +553,9 @@ The ledger confirmed by the user (crucible, 2026-10-26), with sources:
 ## Out of scope
 
 - Remote approval from the phone (a later item on the same notifier).
-- Fable 5.1 as the decider until credits are set up; cloud routines; more than
-  one Mac.
+- Any decider but Opus 5.5 (Fable 5.1 dropped by the user; Grok a possible
+  later change, the decider being one launcher); cloud routines; more than one
+  Mac.
 - Any automation of Phases 0-3, of house work, or of merging a walk branch.
 - The decider judging code, oracles or plans.
 - Changes to the gates, the launchers' prompts or the walker's merge rules,
