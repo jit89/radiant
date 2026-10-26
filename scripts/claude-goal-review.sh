@@ -47,6 +47,10 @@
 #   CLAUDE_REVIEW_MODEL: <the model that produced this result>
 #   CLAUDE_REVIEW_FALLBACK: <from> -> <to> (...)   only when the fallback ran (it
 #                                                   names the retry's effort)
+#   CLAUDE_REVIEW_COST: <session> <total_cost_usd>  one per model call whose
+#                                                   envelope parsed (cumulative
+#                                                   for a resumed session)
+#   CLAUDE_REVIEW_RAW: <the last raw envelope>      the provider's own words
 #
 # SAFETY FLAGS. If the reviewer's safeguards flag the review (a classifier false
 # positive on the security content of a diff is the usual cause) the turn ends with
@@ -165,6 +169,44 @@ out_dir() {
   [[ -n "$OUT" ]] || OUT="$OUT_DIR/$OUT_NAME"
 }
 
+# review_costs RAW... — one `CLAUDE_REVIEW_COST: <session> <total_cost_usd>`
+# line per raw envelope that parses (each model call of this run, a safety-flag
+# retry included; the always-on spend ledger records them as observations,
+# docs/features/always-on step 9), and `CLAUDE_REVIEW_RAW: <the last envelope>`
+# so a stop can name the provider's own words (step 7a).
+review_costs() {
+  local f last=""
+  for f in "$@"; do
+    [[ "$f" == *.err ]] && continue
+    last="$f"
+    python3 - "$f" <<'PY' 2>/dev/null || true
+import json, sys
+text = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+d = None
+try:
+    d = json.loads(text)
+except Exception:
+    # As agent-result.py: the last line that parses as a JSON object.
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not (line.startswith("{") and line.endswith("}")):
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(d, dict):
+            break
+if not isinstance(d, dict):
+    sys.exit(0)
+c, s = d.get("total_cost_usd"), d.get("session_id")
+if isinstance(c, (int, float)) and not isinstance(c, bool) and s:
+    print(f"CLAUDE_REVIEW_COST: {s} {c}")
+PY
+  done
+  [[ -z "$last" ]] || echo "CLAUDE_REVIEW_RAW: $last"
+}
+
 run_claude() {
   local prompt="$1" model="$MODEL" effort="$EFFORT" fell_back="" raw rc
   # Every raw/.err pair, the flagged attempts' too: a retry must not orphan one.
@@ -237,6 +279,7 @@ run_claude() {
       if [[ -n "$fell_back" ]]; then
         echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (both flagged, effort ${effort})"
       fi
+      review_costs "${raws[@]}"
       exit 76
     fi
     break
@@ -247,6 +290,7 @@ run_claude() {
     echo "SESSION_ID: ${SESSION_ID}"
     echo "VERDICT: MISSING"
     echo "VERDICT_FILE: ${raw}"
+    review_costs "${raws[@]}"
     exit 75
   fi
 
@@ -255,6 +299,7 @@ run_claude() {
     echo "SESSION_ID: ${SESSION_ID}"
     echo "VERDICT: MISSING"
     echo "VERDICT_FILE: ${raw}"
+    review_costs "${raws[@]}"
     cat "${raw}.err" >&2 || true
     exit "$rc"
   fi
@@ -265,6 +310,7 @@ run_claude() {
     echo "SESSION_ID: ${SESSION_ID}"
     echo "VERDICT: MISSING"
     echo "VERDICT_FILE: ${raw}"
+    review_costs "${raws[@]}"
     exit 1
   }
   parsed_sid="${parsed%%$'\t'*}"
@@ -283,10 +329,14 @@ run_claude() {
     echo "MUTATIONS_FILE: ${mfile}"
     echo "CLAUDE_REVIEW_MODEL: ${model}"
     [[ -z "$fell_back" ]] || echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag, effort ${effort})"
+    review_costs "${raws[@]}"
     return 0
   fi
   cw_private "$OUT"
   printf '%s\n' "$parsed_text" >"$OUT"
+  # Read before the raw files can be removed below; printed last with the rest.
+  local costs
+  costs="$(review_costs "${raws[@]}")"
   # Standalone, an ok review's verdict holds everything worth keeping; under
   # CW_OUT_DIR the caller decides (an ok review can still end in a wake).
   if [[ -z "${CW_OUT_DIR:-}" && "${CW_KEEP_RAW:-0}" != "1" ]]; then
@@ -302,6 +352,7 @@ run_claude() {
   if [[ -n "$fell_back" ]]; then
     echo "CLAUDE_REVIEW_FALLBACK: ${fell_back} -> ${model} (safety flag, effort ${effort})"
   fi
+  [[ -z "$costs" ]] || printf '%s\n' "$costs"
 }
 
 if [[ "$SMOKE" -eq 1 ]]; then

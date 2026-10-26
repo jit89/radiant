@@ -21,11 +21,13 @@ import os
 import re
 import sys
 
-# Records only the walker writes (PLAN Amendment 3). A goal's journal may hold
-# what run-goal.sh and its implementer write, never these: a planted
-# `finished` line copied onto the walk journal would read as the walker's.
+# Records only the walker writes (PLAN Amendment 3), and the always-on
+# supervisor's and the user's always-on records (docs/features/always-on, step
+# 12). A goal's journal may hold what run-goal.sh and its implementer write,
+# never these: a planted `finished` line copied onto the walk journal would
+# read as the walker's.
 WALKER_ONLY = re.compile(
-    r"^## \S+ — ORCHESTRATOR (finished|recut|integrated|wave|wave-stop|walk|walk-start|walk-end|walk-stuck|overrides walk)(\s|$)",
+    r"^## \S+ — (ORCHESTRATOR (finished|recut|integrated|wave|wave-stop|walk|walk-start|walk-end|walk-stuck|overrides walk)|DECIDER|ARCHITECT always-on)(\s|$)",
     re.M,
 )
 
@@ -56,7 +58,9 @@ def join(base, ours, theirs, goal_id):
         return ours, None
     m = WALKER_ONLY.search(goal_add.decode("utf-8", "replace"))
     if m:
-        return None, f"{goal_id} journal: holds a walker-only record ({m.group(1)})"
+        # The walker's own kind (finished, overrides walk, ...), else DECIDER
+        # or ARCHITECT always-on.
+        return None, f"{goal_id} journal: holds a walker-only record ({m.group(2) or m.group(1)})"
     problem = _check_records()(goal_add.decode("utf-8", "replace"), goal_id)
     if problem:
         return None, f"{goal_id} journal: {problem}"

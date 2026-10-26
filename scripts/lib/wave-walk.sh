@@ -1166,6 +1166,12 @@ PY
     exit 0
   fi
 
+  # Spend and the kill file (always-on, step 9): once per wave, before it is
+  # built, so a stop leaves the repo as it was (no recut committed); the
+  # members spawn together, so a check per member would see the same ledger.
+  # The previous wave is joined, so nothing is running.
+  ao_gate
+
   # Build the wave (PLAN step 3.3, Amendment 3 C).
   WAVE_MEMBERS=()
   for g in "${FRONTIER[@]}"; do

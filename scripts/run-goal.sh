@@ -55,6 +55,12 @@ case "$IMPLEMENTER" in
     exit 2
     ;;
 esac
+# The legacy launcher prints no cost: under the always-on supervisor its passes
+# would never reach the spend ledger (docs/features/always-on, step 9).
+if [[ "$IMPLEMENTER" == codex && -n "${CW_ALWAYS_ON_LEDGER:-}" ]]; then
+  echo "run-goal: IMPLEMENTER=codex prints no cost, so it cannot run under the always-on supervisor (CW_ALWAYS_ON_LEDGER)." >&2
+  exit 2
+fi
 REVIEWER="$HERE/claude-goal-review.sh"
 
 MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
@@ -109,6 +115,10 @@ PROOF_EXIT=""
 RETURN_HANDOFF=""
 IMPL_LOG=""
 IMPL_ERR=""
+# A stop's LOG: / stderr: when they are not the implementer's: a reviewer wake
+# names the reviewer's raw envelope (docs/features/always-on step 7a).
+STOP_LOG=""
+STOP_ERR=""
 CLAUDE_META_SAVED=""
 FIX_HASH=""
 FIX_COUNT_N=0
@@ -176,6 +186,7 @@ on_signal() {
   local sig="$1" code="$2"
   trap - INT TERM
   stop_child
+  ao_signal_standin || true
   if [[ "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
     stop_unplanned "interrupted" "SIG${sig} during ${PHASE}"
   fi
@@ -218,6 +229,9 @@ stop_child() {
 write_stop() {
   local reason="$1"
   local detail="${2:-}"
+  # A spend-ledger refusal another stop overtook is still worth knowing: the
+  # next spend check cannot see a failed append (always-on, step 9).
+  [[ -z "${AO_REFUSED:-}" || "$reason" == budget ]] || detail="${detail}; also: ${AO_REFUSED}"
   STOP_FILE="${RUN_DIR:-${TMPDIR:-/tmp}}/stop.md"
   mkdir -p "$(dirname "$STOP_FILE")"
   cat >"$STOP_FILE" <<EOF
@@ -240,8 +254,8 @@ write_stop() {
 - proof: ${PROOF_FILE:-}
 - proof_exit: ${PROOF_EXIT:-}
 - RETURN_HANDOFF: ${RETURN_HANDOFF:-}
-- LOG: ${IMPL_LOG:-}
-- stderr: ${IMPL_ERR:-}
+- LOG: ${STOP_LOG:-${IMPL_LOG:-}}
+- stderr: ${STOP_ERR:-${IMPL_ERR:-}}
 - artifacts: ${ART_DIR:-}
 - unstick status: $HOUSE/scripts/goals.py GOALS.md set ${GOAL_ID:-id} ready
   or: $HOUSE/scripts/goals.py GOALS.md set ${GOAL_ID:-id} bounced
@@ -596,6 +610,82 @@ journal_implemented() {
     --payload "$payload"
 }
 
+# --- the always-on spend ledger (docs/features/always-on, step 9) -----------
+# Only when the supervisor names a ledger (CW_ALWAYS_ON_LEDGER) and the entry
+# (CW_ALWAYS_ON_ENTRY): each model call's cost as an OBSERVATION of its thread
+# or session's cumulative total; lib/always-on-spend.py derives the amounts. A
+# call killed before it reported records a stand-in (step 0h, EVIDENCE.md). An
+# observation the ledger refuses stops the goal (budget): an unrecorded cost
+# could let a ceiling pass.
+AO_SPEND="$HERE/lib/always-on-spend.py"
+AO_STANDIN_IMPLEMENTER=0.50
+AO_STANDIN_REVIEWER=1.00
+ao_is_cost() { [[ "$1" =~ ^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$ ]]; }
+# A refusal is noted, not acted on at once: the costs are read before the .git
+# and .claude checks (a tamper stop must not lose them), and a wake there would
+# commit over an unverified .git. ao_refused_stop acts on it after the checks.
+AO_REFUSED=""
+ao_observe() {
+  [[ -n "${CW_ALWAYS_ON_LEDGER:-}" ]] || return 0
+  python3 "$AO_SPEND" observe "$CW_ALWAYS_ON_LEDGER" "${CW_ALWAYS_ON_ENTRY:-}" "$1" "$2" "$3" >/dev/null 2>&1 ||
+    AO_REFUSED="the always-on spend ledger refused an observation ($1 $2 $3)"
+}
+ao_bump() {
+  [[ -n "${CW_ALWAYS_ON_LEDGER:-}" ]] || return 0
+  python3 "$AO_SPEND" bump "$CW_ALWAYS_ON_LEDGER" "${CW_ALWAYS_ON_ENTRY:-}" "$1" "$2" "$3" >/dev/null 2>&1 ||
+    AO_REFUSED="the always-on spend ledger refused a stand-in ($1 $2 $3)"
+}
+ao_refused_stop() {
+  [[ -z "$AO_REFUSED" ]] || wake "budget" "$AO_REFUSED"
+}
+# A signal during a model call (a kill on STOP): a stand-in for the call it
+# cut off (step 9). Best effort and no wake: this runs on the way out.
+ao_signal_standin() {
+  [[ -n "${CW_ALWAYS_ON_LEDGER:-}" ]] || return 0
+  case "${PHASE:-}" in
+    "implementer r"*) ao_bump stand-in "${THREAD_ID:-killed:${GOAL_ID:-?}:r${ROUND}:implementer:$$}" "$AO_STANDIN_IMPLEMENTER" ;;
+    "review r"*) ao_bump stand-in "${SESSION_ID:-killed:${GOAL_ID:-?}:r${ROUND}:reviewer:$$}" "$AO_STANDIN_REVIEWER" ;;
+    "mutations-call r"*) ao_bump stand-in "${SESSION_ID:-killed:${GOAL_ID:-?}:r${ROUND}:mutations:$$}" "$AO_STANDIN_REVIEWER" ;;
+  esac
+}
+# ao_impl_costs OUT RC — the implementer pass's thread (IMPLEMENTER_COST_USD is
+# thread-cumulative) and, on a fallback, the primary's thread; a stand-in when
+# the pass was killed or failed without a cost (not a rate limit: no model ran).
+ao_impl_costs() {
+  [[ -n "${CW_ALWAYS_ON_LEDGER:-}" ]] || return 0
+  local out="$1" rc="$2" cost from_raw from_t from_c
+  cost="$(kv "$out" IMPLEMENTER_COST_USD)"
+  from_raw="$(kv "$out" IMPLEMENTER_FALLBACK_FROM)"
+  if [[ -n "$from_raw" ]]; then
+    from_t="${from_raw%% *}"
+    from_c="$(sed -n 's/.* COST_USD=\([^ ]*\).*/\1/p' <<<"$from_raw")"
+    if ao_is_cost "$from_c"; then ao_observe implementer "$from_t" "$from_c"; fi
+  fi
+  if ao_is_cost "$cost" && [[ -n "$THREAD_ID" ]]; then
+    ao_observe implementer "$THREAD_ID" "$cost"
+  elif [[ "$rc" -ne 0 && "$rc" -ne 75 && "$LAST_IMPL" != rate_limited* ]]; then
+    ao_bump stand-in "${THREAD_ID:-killed:${GOAL_ID}:r${ROUND}:implementer:$$}" "$AO_STANDIN_IMPLEMENTER"
+  fi
+}
+# ao_review_costs OUT RC KIND — every CLAUDE_REVIEW_COST line of a reviewer or
+# mutations turn (session-cumulative); a stand-in when the call was killed or
+# failed without one (not a rate limit).
+ao_review_costs() {
+  [[ -n "${CW_ALWAYS_ON_LEDGER:-}" ]] || return 0
+  local out="$1" rc="$2" kind="$3" line sid c n=0
+  while IFS= read -r line; do
+    sid="${line%% *}"
+    c="${line#* }"
+    if [[ -n "$sid" ]] && ao_is_cost "$c"; then
+      ao_observe "$kind" "$sid" "$c"
+      n=$((n + 1))
+    fi
+  done < <(sed -n 's/^CLAUDE_REVIEW_COST: //p' "$out" 2>/dev/null)
+  if [[ "$n" -eq 0 && "$rc" -ne 0 && "$rc" -ne 75 && "$(kv "$out" CLAUDE_REVIEW_RESULT)" != rate_limited* ]]; then
+    ao_bump stand-in "${SESSION_ID:-killed:${GOAL_ID}:r${ROUND}:${kind}:$$}" "$AO_STANDIN_REVIEWER"
+  fi
+}
+
 # --- mutation checks (docs/features/mutation-checks) ---------------------
 # mut_git CLONE ARGS... — git on a mutation clone only: its private git dir,
 # no GIT_* from this run (host git is pinned to the goal's checkout), no user
@@ -673,8 +763,9 @@ mut_run() {
 # run_mutations — after a DONE review, before the goal is marked done: the
 # reviewer's mutations (a resumed turn of their own), each applied to a fresh
 # clone and proved there. Best-effort: a failure of this machinery is a skip,
-# never a stop. Writes the `mutations` record and event, and keeps each
-# mutation's diff and rule in ART_DIR.
+# never a stop, with one exception: the always-on spend ledger refusing the
+# turn's cost stops the goal budget (ao_refused_stop). Writes the `mutations`
+# record and event, and keeps each mutation's diff and rule in ART_DIR.
 MUT_DIR=""
 run_mutations() {
   local n="$MUTATIONS" dir out mfile size k status why rule d clone base_ok=0 base_why="" p skip accepted note=""
@@ -694,9 +785,16 @@ run_mutations() {
   esac
   out="$RUN_DIR/mutations-r${ROUND}.out"
   set +e
+  PHASE="mutations-call r${ROUND}"
   run_step "$REVIEW_SECS" "$out" "$out.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --mutations "$n" \
     --resume "$SESSION_ID" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
+  local mut_rc=$?
+  PHASE="mutations r${ROUND}"
   set -e
+  ao_review_costs "$out" "$mut_rc" mutations
+  # As after the implementer and the review: a tamper wins over a refusal.
+  verify_git_meta "during mutations r${ROUND}"
+  ao_refused_stop
   mfile="$(kv "$out" MUTATIONS_FILE)"
   size="$( [[ -n "$mfile" && -f "$mfile" ]] && wc -c <"$mfile" | tr -d ' ' || echo 0)"
   if [[ "$(kv "$out" CLAUDE_REVIEW_RESULT)" != ok || "$size" -eq 0 || "$size" -gt 65536 ]]; then
@@ -1272,9 +1370,11 @@ while :; do
     ds_rc=$?
     set -e
     PHASE="assess r${ROUND}"
-    verify_git_meta "during implementer r${ROUND}"
     LAST_IMPL="$(kv "$DS_OUT" "$IMPL_KEY")"
     kv_keep THREAD_ID "$DS_OUT" THREAD_ID
+    # Before the checks below: a tamper stop must not lose this pass's cost.
+    ao_impl_costs "$DS_OUT" "$ds_rc"
+    verify_git_meta "during implementer r${ROUND}"
     IMPL_FALLBACK="$(kv "$DS_OUT" IMPLEMENTER_FALLBACK)"
     journal_ids "$IMPL_FALLBACK"
     RETURN_HANDOFF="$(kv "$DS_OUT" RETURN_HANDOFF)"
@@ -1284,6 +1384,7 @@ while :; do
     IMPL_STATUS="$(kv "$DS_OUT" IMPLEMENTER_STATUS)"
     [[ -s "$DS_OUT.wrap" ]] && cat "$DS_OUT.wrap" >&2 || true
     verify_claude_meta "during implementer r${ROUND}"
+    ao_refused_stop
 
     # Only the result line is required; the other lines are diagnostics.
     if [[ "$ds_rc" -eq 124 ]]; then
@@ -1529,10 +1630,21 @@ EOF
   LAST_CLAUDE="$(kv "$RV_OUT" CLAUDE_REVIEW_RESULT)"
   kv_keep SESSION_ID "$RV_OUT" SESSION_ID
   VERDICT_FILE="$(kv "$RV_OUT" VERDICT_FILE)"
+  # Before the checks below: a tamper stop must not lose this review's cost.
+  ao_review_costs "$RV_OUT" "$rv_rc" reviewer
+  # A reviewer stop names the reviewer's raw envelope and its .err (the
+  # launcher copies .err into .wrap only on its error path, not on a limit or a
+  # flag), not the implementer's: always-on step 7a reads the provider's words
+  # there. A killed review has neither, so its own captured output.
+  rv_raw="$(kv "$RV_OUT" CLAUDE_REVIEW_RAW)"
+  STOP_LOG="${rv_raw:-${VERDICT_FILE:-$RV_OUT}}"
+  STOP_ERR="${rv_raw:+$rv_raw.err}"
+  STOP_ERR="${STOP_ERR:-$RV_OUT.wrap}"
   # Before any route: a DONE route commits GOALS.md, and a git call inside
   # $(...) would taint only its subshell (FUTURE-WORK item 26).
   verify_git_meta "during review r${ROUND}"
   verify_claude_meta "during review r${ROUND}"
+  ao_refused_stop
   journal_ids
   if [[ -n "$VERDICT_FILE" ]]; then
     cp -f "$VERDICT_FILE" "$ART_DIR/verdict-r${ROUND}.md" 2>/dev/null || true
@@ -1557,6 +1669,8 @@ EOF
     LAST_VERDICT="MISSING"
     wake "reviewer-error" "CLAUDE_REVIEW_RESULT=$LAST_CLAUDE rc=$rv_rc"
   fi
+  STOP_LOG=""
+  STOP_ERR=""
   LAST_VERDICT="$(kv "$RV_OUT" VERDICT)"
   # Which model judged. The workflow names Opus 5.5 as the reviewer, so a fallback
   # to another model must be visible in the journal and in `logs.sh warnings`.
@@ -1581,7 +1695,8 @@ EOF
       if [[ "${PROOF_NONE:-0}" -eq 1 ]]; then
         wake "done-refused" "PROOF: none cannot auto-done. Review: $VERDICT_FILE"
       fi
-      # Before the goal is marked done; best-effort, never a stop.
+      # Before the goal is marked done; best-effort, never a stop (but for a
+      # spend-ledger refusal under the always-on supervisor: budget).
       run_mutations || true
       if [[ -n "$WT_MAIN" ]]; then
         # The walker sets done after it integrates this branch. Only the tip the

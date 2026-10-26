@@ -183,6 +183,16 @@ idle (the dogfood run, with the user away), and whether a mod's `$.tool.call`
 reaches a deferred tool (a mod probe and test in the build). Neither blocks:
 iMessage is the primary channel (a), the push a convenience.
 
+## A resumed session's `total_cost_usd` is cumulative (slice 1)
+
+Measured on the key: `claude -p` (Opus 5.5, `--effort low`, `--tools ""`)
+answered `ONE` for $0.0120; `claude -p --resume <that session>` answered `TWO`
+on the same session and reported `total_cost_usd` **0.01457**. Its own usage
+was 2 input, 2,660 cache-read, 385 cache-write and 5 output tokens, about
+$0.0026 at Opus 5.5 prices; 0.0120 + 0.0026 = 0.0146. A resumed session
+reports its running total, so step 9's observations (rises per session) count
+each call once.
+
 ## Summary
 
 | Check | Result |

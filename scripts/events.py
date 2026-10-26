@@ -60,6 +60,8 @@ EVENTS = (
     "recut",
     # The mutation checks after a DONE review (docs/features/mutation-checks).
     "mutations",
+    # The always-on decider's choice (docs/features/always-on, step 12).
+    "decision",
 )
 SEVERITIES = ("info", "warning", "error")
 SUMMARY_MAX = 200

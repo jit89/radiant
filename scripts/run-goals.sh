@@ -69,6 +69,34 @@ walk_stop() {
   exit 1
 }
 
+# ao_config_check — under the always-on supervisor, before the walk records
+# anything: the legacy implementer prints no cost (run-goal.sh refuses it too,
+# as a backstop), so the walk stops with its own reason, no record, no wave.
+ao_config_check() {
+  [[ -n "${CW_ALWAYS_ON_LEDGER:-}" ]] || return 0
+  [[ "${IMPLEMENTER:-claude}" != codex ]] ||
+    walk_stop always-on-config "IMPLEMENTER=codex prints no cost, so it cannot run under the always-on supervisor; unset IMPLEMENTER"
+}
+
+# ao_gate — under the always-on supervisor (CW_ALWAYS_ON_LEDGER set), before a
+# goal or a wave is dispatched: the kill file stops the walk always-on-stop,
+# a spend ceiling (or a ledger it cannot read) stops it budget; both are class
+# A to the supervisor (docs/features/always-on, step 9). No effect otherwise.
+ao_gate() {
+  [[ -n "${CW_ALWAYS_ON_LEDGER:-}" ]] || return 0
+  local out rc=0 ceil=()
+  [[ -z "${CW_ALWAYS_ON_DAY:-}" ]] || ceil+=(--day "$CW_ALWAYS_ON_DAY")
+  [[ -z "${CW_ALWAYS_ON_WALK:-}" ]] || ceil+=(--walk "$CW_ALWAYS_ON_WALK")
+  [[ -z "${CW_ALWAYS_ON_WEEK:-}" ]] || ceil+=(--week "$CW_ALWAYS_ON_WEEK")
+  out="$(python3 "$HERE/lib/always-on-spend.py" check "$CW_ALWAYS_ON_LEDGER" "${CW_ALWAYS_ON_ENTRY:-}" \
+    --stop "${CW_ALWAYS_ON_STOP:-$HOME/.config/cw-always-on/STOP}" "${ceil[@]+"${ceil[@]}"}" 2>&1)" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    4) walk_stop always-on-stop "$out" ;;
+    *) walk_stop budget "${out:-the spend check failed (rc=$rc)}" ;;
+  esac
+}
+
 # A .git change is a nonzero stop of its own, before any git command: with the
 # check failed, the git() wrapper refuses to run, so nothing here is committed.
 meta_stop() {
@@ -156,6 +184,7 @@ commit_journal() {
 }
 
 meta_stop "since the last run in this repo"
+ao_config_check
 JOURNAL_EXPECT="$(mktemp "${TMPDIR:-/tmp}/run-goals-journal-XXXXXX")"
 trap 'rm -f "$JOURNAL_EXPECT"' EXIT
 
@@ -330,6 +359,7 @@ while :; do
     exit 0
   fi
 
+  ao_gate
   journal_line "## $(utc) — ORCHESTRATOR walk ${id}"
   events_append --event walk --severity info --goal "$id" --summary "walk ${id}" \
     --payload "{$(events_pid_json)}"
