@@ -1,0 +1,70 @@
+# The always-on supervisor's stop classes (docs/features/always-on/PLAN.md
+# step 7; the user's classification, Q5). One walker reason per line, a tab,
+# its class:
+#   A     held for the user (security, integrity, contracts, the loop's safety)
+#   B     held for the user (contract questions)
+#   C     retry or resume, within the per-goal count, the decider asked
+#   D     recut once, within the per-goal count, the decider asked
+#   wait  a rate limit: step 10's wait, then a rerun; no decider, no count
+#   F     finished-not-integrated: not a stop; the rerun integrates it
+# A pattern may hold *. Any reason not here, and an empty one, is A; a
+# billing marker (step 7a) makes any stop A budget before this table is read.
+*-tamper	A
+contract-tamper-*	A
+secrets-in-checkout	A
+proof-sandbox-unavailable	A
+proof-sandbox-path	A
+proof-hardlink	A
+walk-branch-moved	A
+git-lock-stray	A
+git-replace-ref	A
+orchestration-files-dirty	A
+orchestration-files-changed	A
+integration-goals-edited	A
+integration-unverified	A
+integration-dirty	A
+dirty-tree	A
+head-moved-during-review	A
+gate	A
+worktree-exists	A
+serial-goal-in-progress	A
+journal-unreadable	A
+walk-stuck	A
+trap	A
+bounced-not-recorded	A
+contract-drift	A
+budget	A
+always-on-stop	A
+always-on-config	A
+claude-version-changed	A
+interrupted	A
+bounced	B
+implementer-blocked	B
+blocked	B
+blocked-oracle-edit	B
+oracle-gap	B
+done-refused	B
+implementer-declined	B
+reviewer-flagged	B
+implementer-error	C
+implementer-timeout	C
+reviewer-error	C
+reviewer-timeout	C
+proof-timeout	C
+proof-excerpt-error	C
+commit-failed	C
+result-write-failed	C
+merge-failed	C
+worktree-add-failed	C
+worktree-setup-failed	C
+rate_limited	wait
+reviewer-rate-limited	wait
+max-fix-rounds	D
+proof-red	D
+integration-red	D
+merge-conflict	D
+worktree-setup-dirty	D
+empty-diff	D
+missing-verdict	D
+fix-unparseable	D
+finished-not-integrated	F

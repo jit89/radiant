@@ -235,7 +235,6 @@ run_goal CW_ALWAYS_ON_LEDGER="$TMP/notafile" CW_ALWAYS_ON_ENTRY=e1
 check "a refused observation and a .git tamper: the tamper's reason, no wake commit, the refusal named" \
   "git-metadata-tamper no yes" \
   "$reason $(git -C "$TMP/repo" log -1 --format=%s | grep -q 'orchestrator wake' && echo yes || echo no) $(has 'also: the always-on spend ledger refused' "$(cat "$stop")")"
-stub claude-implement.sh "$IMPL_OK"
 # A TERM during the implementer's call: a stand-in.
 stub claude-implement.sh 'touch "'"$TMP"'/impl-started"; sleep 30'
 rm -f "$TMP/impl-started"
