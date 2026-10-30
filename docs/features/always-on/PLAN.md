@@ -142,8 +142,10 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
      directory, not on the command line, so it is not required). A wrapper killed by `SIGKILL`
      cannot clean up, but its walker is still found; a recycled id held by an
      unrelated process is neither running nor signalled by `STOP`. The supervisor adopts it: it polls each minute, and on `STOP` it signals
-     the process group recorded in the lock file (`TERM`; the walker's own
-     handling records the stop), whether it or an earlier supervisor started
+     the recorded walker's pid once (`TERM`; the walker's own
+     handling records the stop and stops its goals; amended in slice 3a: a
+     signal to the whole group reached each walker process twice and cut its
+     cleanup short), or the wrapper's before the walker starts, whether it or an earlier supervisor started
      it;
    - **finished**: the walker is not alive and `result.json` exists for
      attempt `n`. It is acted on **once**: only when `acted_attempt` differs from
