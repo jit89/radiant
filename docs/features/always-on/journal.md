@@ -125,3 +125,6 @@ Opus (fresh, narrowest): DONE. Two harmless notes left unedited so the DONE cove
 
 ## 2026-10-30T08:02:52Z — ARCHITECT slice 4 suite
 Full suite: 43 scripts, 0 failures; the walk mod's tests 69 pass. Slice 4 awaits the user's OK to commit; then the dogfood run on a new project the user chooses.
+
+## 2026-10-31T04:52:29Z — ARCHITECT slice 4 committed
+The user committed slice 4 (fde3659); the walk mod bumped to 0.5.0 (ec42369) so install copies the push. install.sh: tests 43/0, the walk mod installed and matching. The always-on build is complete (slices 1-4); next the user's setup (install.sh --always-on, SETUP.md) and the dogfood run on a new project the user chooses.
