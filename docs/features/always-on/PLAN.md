@@ -365,9 +365,10 @@ Each is measured on this Mac; a failure stops the build and goes to the user.
     still reported, with its entry). Silence on a day therefore
     means the Mac itself is off or asleep. **At the Mac**, `cw-decide.sh`:
     `status` (the queue, holds, each entry's last stop), `resume <entry>` (clears
-    a hold and dispatches one rerun; on a hold at a goal's count cap it sets
-    that goal's count to one below the cap, so the pre-dispatch increment lands
-    on the cap and the user's rerun is the only extra one; refused when
+    a hold and dispatches one rerun; it changes no count (amended in slice 4a:
+    a resume adds no count of its own, so a goal at its cap stays there, the
+    user's rerun is the only extra one, and a further stop of that kind holds
+    again); refused while an attempt still runs; refused when
     the signed paths of step 3 changed since the signature, as after any class B
     fix, telling the user to `sign` the new `HEAD`; refused on
     `serial-goal-in-progress`, printing the serial `run-goals.sh` command that

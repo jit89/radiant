@@ -116,7 +116,7 @@ def log(msg):
         os.makedirs(CACHE, exist_ok=True)
         with open(LOG, "a", encoding="utf-8") as f:
             f.write(f"{utc()} {msg}\n")
-    except OSError:
+    except (OSError, ValueError):
         pass
 
 
@@ -124,6 +124,8 @@ def run(cmd, **kw):
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
     kw.setdefault("timeout", 120)
+    if "input" not in kw:
+        kw.setdefault("stdin", subprocess.DEVNULL)  # never the caller's stdin
     try:
         return subprocess.run(cmd, **kw)
     except (OSError, subprocess.SubprocessError) as e:
@@ -203,6 +205,9 @@ def attempt_dir(st, n=None):
 
 def notify(kind, st, cls="", reason="", extra=""):
     """A message of fixed fields only (step 13): never stop text or findings."""
+    # Only a reason code reaches a message: a stop's reason line is free text.
+    if not re.fullmatch(r"[a-z0-9_-]{1,40}", reason or ""):
+        reason = "unlisted-reason" if reason else ""
     fields = [kind, os.path.basename(st["repo"]), st["id"][:12], cls, reason, extra]
     if not os.access(NOTIFY, os.X_OK):
         log(f"notify (no notifier): {' | '.join(fields)}")
@@ -213,6 +218,12 @@ def notify(kind, st, cls="", reason="", extra=""):
 
 
 def hold(st, cls, reason, why=""):
+    """Hold the entry. The reason kept is a code: a stop's reason line is free
+    text, so anything else is stored as unlisted-reason (its first 80
+    characters, cleaned, go to why, which no message carries)."""
+    if reason and not re.fullmatch(r"[a-z0-9_-]{1,40}", reason):
+        why = (re.sub(r"[^A-Za-z0-9 ._:/,=-]", "", reason)[:80] + "; " + why).strip("; ")
+        reason = "unlisted-reason"
     st["status"] = "held"
     st["hold"] = {"class": cls, "reason": reason, "why": why[:300], "utc": utc()}
 
@@ -550,6 +561,34 @@ class Deferred(Exception):
     after STOP acts on the attempt again from the start."""
 
 
+def digest(st):
+    """The walk-end digest (step 13), fixed fields only: goals done, the
+    entry's decisions with one in five marked for a spot check, its spend."""
+    graph = run(["python3", GOALS_PY, os.path.join(st["repo"], "GOALS.md"), "graph"])
+    statuses = [l.split()[1] for l in graph.stdout.splitlines() if len(l.split()) >= 2]
+    times = []
+    try:
+        with open(DECISIONS, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("entry") == st["id"]:
+                    times.append(str(d.get("utc", "")))
+    except OSError:
+        pass
+    k = len(times)
+    spot = sorted(random.sample(range(1, k + 1), (k + 4) // 5)) if k else []
+    s = run(["python3", SPEND, "sum", LEDGER, st["id"]])
+    try:
+        spent = f"${json.loads(s.stdout)['entry_usd']:.2f}"
+    except (ValueError, KeyError, TypeError):
+        spent = "unknown"
+    return (f"spend {spent}, goals {statuses.count('done')}/{len(statuses)}, decisions {k}"
+            + (f" (spot check #{', #'.join(map(str, spot))} in decisions.jsonl)" if spot else ""))
+
+
 def act(st, n, rs, notes):
     """Act once on attempt n (finished or interrupted): the outcome in st, and
     acted_attempt = n; the caller saves both in one rename. A decided action is
@@ -564,7 +603,7 @@ def act(st, n, rs, notes):
         elif res.get("exit") == 0 and not res.get("stop_file"):
             st["status"] = "done"
             st["hold"] = None
-            notes.append(("done", "", "walk-end"))
+            notes.append(("done", "", "walk-end", digest(st)))
         elif not res.get("stop_file"):
             hold(st, "A", "no-stop-file", f"exit {res.get('exit')} with no STOP_FILE line")
         elif not res.get("stop"):
@@ -594,7 +633,9 @@ def act(st, n, rs, notes):
                     hold(st, "needs-human", "count-cap", "past its count: " + ",".join(over))
                 else:
                     action, spent = decide(st, cls, n)
-                    if os.path.exists(STOP):  # step 11: STOP is read again when it returns
+                    # Step 11: STOP is read again when it returns; a TERM to the
+                    # supervisor meanwhile (a restart) defers the same way.
+                    if os.path.exists(STOP) or STOPPING:
                         raise Deferred()
                     st["pending_journal"] = {"action": action, "cost_usd": spent}
                     if action != "rerun":
@@ -647,6 +688,7 @@ def latest_attempts():
 
 
 UNSAVED = set()  # entries whose supervisor-error hold could not be saved
+STOPPING = []  # a TERM arrived (main's handler): treated as STOP after a decider call
 
 
 def entry_error(st, e, notes):
@@ -669,15 +711,44 @@ def entry_error(st, e, notes):
         save_state(st)
     except Exception as e2:  # noqa: BLE001
         # The hold cannot stick on disk: this process leaves the entry alone
-        # for its life (no paid decider call, no message, every minute).
+        # for its life (no paid decider call, no message, every minute); the
+        # message says so, as a supervisor restart acts on it again.
         UNSAVED.add(st["id"])
+        notes[:] = [("held", "A", "supervisor-error-unsaved")]
         log(f"entry {st['id'][:12]}: its state could not be saved: {e2!r}")
     log(f"entry {st['id'][:12]} failed: {e!r}")
 
 
 # ---- the turn -------------------------------------------------------------------
 
+def turn_lock(timeout=None):
+    """An exclusive flock on <home>/turn.lock: held by the supervisor for each
+    turn and by cw-decide.sh's sign, resume and skip, so neither changes the
+    queue or a state file under the other. timeout None waits; a number gives
+    up after that many seconds (returns None)."""
+    os.makedirs(HOME, exist_ok=True)
+    fd = os.open(os.path.join(HOME, "turn.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    end = None if timeout is None else time.time() + timeout
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if end is None else fcntl.LOCK_NB))
+            return fd
+        except BlockingIOError:
+            if time.time() >= end:
+                os.close(fd)
+                return None
+            time.sleep(0.5)
+
+
 def turn(version):
+    fd = turn_lock()
+    try:
+        _turn(version)
+    finally:
+        os.close(fd)
+
+
+def _turn(version):
     if os.path.exists(STOP):
         for d in latest_attempts():
             if attempt.state(d) == "running":
@@ -738,8 +809,8 @@ def turn(version):
         except Exception as ex:  # noqa: BLE001
             entry_error(st, ex, notes)
         finally:
-            for kind, cls, reason in notes:
-                notify(kind, st, cls, reason, f"attempt {st['attempt']}")
+            for note in notes:
+                notify(note[0], st, note[1], note[2], note[3] if len(note) > 3 else f"attempt {st['attempt']}")
         states.append(st)
     now = time.time()
     for st in states:
@@ -778,13 +849,25 @@ def main(argv):
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        print("always-on-supervisor: another supervisor holds the lock", file=sys.stderr)
-        return 75
+        # Under KeepAlive an exit is a relaunch 10 s later: in loop mode wait a
+        # turn for the other supervisor (one finishing after a restart) first.
+        got = False
+        for _ in range(0 if once else INTERVAL):
+            time.sleep(1)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                got = True
+                break
+            except BlockingIOError:
+                continue
+        if not got:
+            print("always-on-supervisor: another supervisor holds the lock", file=sys.stderr)
+            return 75
     os.ftruncate(lock, 0)
     os.write(lock, f"{os.getpid()}\n".encode())
     version = claude_version()
     log(f"supervisor {os.getpid()} up; claude {version}")
-    stopping = []
+    stopping = STOPPING
     signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
     while True:
         try:

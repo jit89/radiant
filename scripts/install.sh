@@ -543,15 +543,18 @@ do_check() {
 
 case "${1:-}" in
   --check) do_check ;;
+  # The always-on house (docs/features/always-on): the LaunchAgent plists and
+  # ~/.config/cw-always-on/, loaded by neither this nor --check (cw-decide.sh start).
+  --always-on) python3 "$ROOT/scripts/lib/always-on-install.py" ;;
   -h|--help)
-    echo "usage: install.sh [--check]"
+    echo "usage: install.sh [--check | --always-on]"
     ;;
   "")
     do_install
     do_check || true
     ;;
   *)
-    echo "usage: install.sh [--check]" >&2
+    echo "usage: install.sh [--check | --always-on]" >&2
     exit 2
     ;;
 esac

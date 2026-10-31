@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { WalkGraph, WalkView, WalkWalk } from '../types'
+import { makePushPoller } from './push'
+import type { AoRow } from './push'
 import { chooseWalk } from './reconcile'
 import { EMPTY_TASKS, makeTaskPoller } from './tasks'
 import { paneLines } from './view'
@@ -21,6 +23,7 @@ const tasks = atom({ plugin: 'walk', key: 'tasks' } as const, EMPTY_TASKS)
 
 const PANE = 'walk'
 const POLL_MS = 3000
+const PUSH_MS = 60000 // the always-on supervisor itself takes a turn a minute
 
 // `plugin install` copies the mod into the plugin cache, away from the house's
 // scripts, so events.py is found in the house: beside the mod when it is read
@@ -32,6 +35,17 @@ const EVENTS = [
   'for d in "$0" "${CLAUDE_CODING_WORKFLOW:-$HOME/claude-coding-workflow}"; do ' +
     '[ -f "$d/scripts/events.py" ] && exec python3 "$d/scripts/events.py" "$@"; done; ' +
     'echo "events.py not found: set CLAUDE_CODING_WORKFLOW to the house checkout" >&2; exit 127',
+]
+
+// The always-on state, found as events.py is (push.ts).
+const AO_STATUS = [
+  'sh',
+  '-c',
+  // No queue, no always-on: no python every minute.
+  '[ -f "${CW_AO_HOME:-$HOME/.config/cw-always-on}/queue.jsonl" ] || { echo "[]"; exit 0; }; ' +
+    'for d in "$0" "${CLAUDE_CODING_WORKFLOW:-$HOME/claude-coding-workflow}"; do ' +
+    '[ -f "$d/scripts/cw-decide.sh" ] && exec "$d/scripts/cw-decide.sh" status --json; done; ' +
+    'echo "[]"',
 ]
 
 const TONES: Record<Tone, { color?: string; dimColor?: boolean; bold?: boolean }> = {
@@ -131,6 +145,36 @@ export const register: Register = on => {
       argumentHint: '[dir]',
     })
     $.clock.every(POLL_MS, () => void poll())
+
+    // The always-on push: a new hold becomes one PushNotification while a
+    // session is drawn (push.ts).
+    const pushPoll = makePushPoller({
+      status: async () => {
+        const run = await $.process.run([...AO_STATUS, house], { cwd: house, timeoutMs: 20000 })
+        if (run.exitCode !== 0) throw new Error(`cw-decide.sh exit ${run.exitCode}: ${run.stderr.slice(0, 200)}`)
+        return JSON.parse(run.stdout) as AoRow[]
+      },
+      toolNames: async () => (await $.tool.list()).map(t => t.name),
+      call: async input => {
+        const r = (await $.tool.call(input as never)) as { deny?: string; isError?: boolean; result?: unknown }
+        if (r.deny) throw new Error(`${String(input.tool)} refused: ${r.deny}`)
+        if (r.isError) throw new Error(`${String(input.tool)} failed`)
+        return r.result
+      },
+      log: line => $.ui.log(line, { to: 'debug' }),
+    })
+    let pushing = false
+    $.clock.every(PUSH_MS, () => {
+      if (pushing) return
+      pushing = true
+      void (async () => {
+        if ((await $.session.surfaces()).length > 0) await pushPoll()
+      })()
+        .catch(error => $.ui.log(`walk: push poll failed: ${String(error)}`, { to: 'debug' }))
+        .finally(() => {
+          pushing = false
+        })
+    })
     return started
   })
 

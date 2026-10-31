@@ -221,6 +221,17 @@ Nonzero exit. Last line is `STOP_FILE:`. Read that file and tell the
 user. Recovery is in `scripts/run-goal.sh` (fail closed, no model
 swap). Do not restate it here.
 
+## Always-on
+
+Phases 4-5 can also run unattended on this Mac: the user signs a walk into a
+queue (`scripts/cw-decide.sh sign <repo>`), and a LaunchAgent supervisor
+(`scripts/cw-supervisor.sh`) walks it in parallel mode, waits through limits,
+reruns operational stops within fixed counts after asking the decider
+(`scripts/claude-decide.sh`, Opus 5.5, `rerun` or `needs_human` only), and
+holds and messages the user on everything else. The contract is
+`docs/features/always-on/PLAN.md`; the Mac's setup is `SETUP.md` beside it. Do
+not restate either here. House work is never signed: it stays in-session.
+
 ## Journal
 
 Each feature keeps an append-only journal at `docs/journal/<slug>.md`,
