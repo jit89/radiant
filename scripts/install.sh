@@ -248,10 +248,14 @@ do_check() {
   else
     echo "grok: MISSING (plan attacker unavailable)"; rc=1
   fi
+  # Codex runs only the legacy implementer (IMPLEMENTER=codex): missing is a
+  # failure only when that is the implementer selected.
   if codex="$(find_codex)"; then
     echo "codex: $codex ($("$codex" --version 2>/dev/null | head -n1))"
+  elif [[ "${IMPLEMENTER:-claude}" == codex ]]; then
+    echo "codex: MISSING (IMPLEMENTER=codex needs it)"; rc=1
   else
-    echo "codex: MISSING"; rc=1
+    echo "codex: not installed (only IMPLEMENTER=codex needs it)"
   fi
   if test_ok findings-test.sh; then
     echo "findings parser: OK"
@@ -348,8 +352,8 @@ do_check() {
     # DeepSeek implements by default, so without its key every goal stops. A
     # warning, never the key itself.
     if [[ "${IMPLEMENTER_PRIMARY:-deepseek}" == deepseek && -z "${DEEPSEEK_API_KEY:-}" ]] &&
-      ! grep -qsE '^DEEPSEEK_API_KEY=.' "$ROOT/.env" "$HOME/.config/watch/.env"; then
-      echo "implementer key: WARN (no DEEPSEEK_API_KEY in $ROOT/.env, ~/.config/watch/.env or the environment: every goal will stop)"
+      ! grep -qsE '^DEEPSEEK_API_KEY=.' "$ROOT/.env"; then
+      echo "implementer key: WARN (no DEEPSEEK_API_KEY in $ROOT/.env or the environment: every goal will stop)"
     fi
   else
     echo "implementer: FAIL"; rc=1

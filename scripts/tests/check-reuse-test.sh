@@ -113,6 +113,17 @@ check "a skill: both tests ran" 2 "$(runs)"
 rm -rf "$H/skills" "$H/docs" "$H/README.md" "$H/PLAN.md"
 "$H/scripts/tests/run-all.sh" >/dev/null 2>&1
 
+echo "== Codex is optional unless it is the implementer"
+# The line --check prints with codex off the PATH. (Its exit status cannot be
+# compared here: this stub house's --check fails other steps either way.)
+NOCODEX_PATH="$(tr ':' '\n' <<<"$PATH" | while IFS= read -r d; do [[ -x "$d/codex" ]] || printf '%s\n' "$d"; done | paste -sd: -)"
+env -u CODEX_BIN -u IMPLEMENTER PATH="$NOCODEX_PATH" "$H/scripts/install.sh" --check >"$TMP/out-without" 2>&1 || true
+check "no codex: a note, not MISSING" "yes yes" \
+  "$(has 'codex: not installed (only IMPLEMENTER=codex needs it)' "$(cat "$TMP/out-without")") $(lacks 'codex: MISSING' "$(cat "$TMP/out-without")")"
+env -u CODEX_BIN PATH="$NOCODEX_PATH" IMPLEMENTER=codex "$H/scripts/install.sh" --check >"$TMP/out-codex" 2>&1 || true
+check "no codex with IMPLEMENTER=codex: MISSING" yes \
+  "$(has 'codex: MISSING (IMPLEMENTER=codex needs it)' "$(cat "$TMP/out-codex")")"
+
 echo "== no test reads a path the key leaves out"
 # Every house path a test script names through \$HERE/../ (the house's idiom
 # for the house top) must be in the key: a test that starts reading a doc file
