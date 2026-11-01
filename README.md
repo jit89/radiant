@@ -1,10 +1,10 @@
-<p align="center">
-  <img src="assets/radiant-tile-256.png" width="128" alt="Radiant">
-</p>
-
-<h1 align="center">Radiant</h1>
-
-<p align="center"><em>Plan it, attack it, build it goal by goal, and watch the plan light up.</em></p>
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="assets/radiant-logo-light.png">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/radiant-logo-dark.png">
+    <img alt="Radiant" src="assets/radiant-logo-light.png" height="100">
+  </picture>
+</div>
 
 A coding workflow for [Claude Code](https://docs.claude.com/en/docs/claude-code)
 in which **nobody grades their own work**. You and Claude Code plan a feature
