@@ -1,4 +1,10 @@
-# claude-coding-workflow
+<p align="center">
+  <img src="assets/radiant-tile-256.png" width="128" alt="Radiant">
+</p>
+
+<h1 align="center">Radiant</h1>
+
+<p align="center"><em>Plan it, attack it, build it goal by goal, and watch the plan light up.</em></p>
 
 A coding workflow for [Claude Code](https://docs.claude.com/en/docs/claude-code)
 in which **nobody grades their own work**. You and Claude Code plan a feature
@@ -66,8 +72,8 @@ Claude Code mods (`walk`, `lessons`), runs the test suite and checks your
 setup. Details and the expected output:
 [docs/guides/getting-started.md](docs/guides/getting-started.md).
 
-Clone it to exactly `~/claude-coding-workflow`: the skills call the scripts by
-that path.
+Clone it to exactly `~/claude-coding-workflow`, though the repository is named
+Radiant: the skills call the scripts by that path.
 
 ## Use it
 
@@ -102,12 +108,20 @@ build journals, evidence and research) lives on the `main` branch.
 
 ```
 CLAUDE.md          the Architect's instructions: copy into a target repo
+assets/            the icon
 skills/            crucible, to-goals, run-goal, run-goals
 scripts/           the host scripts (run-goal.sh, run-goals.sh, launchers, goals.py, ...) and tests/
 mods/              Claude Code mods: walk (task list, /walk-status, always-on push), lessons
 GOALS.example.md   a tiny goal DAG the install check and tests use
 docs/guides/       the guides above
 ```
+
+## The name
+
+In Isaac Asimov's *Foundation*, the Prime Radiant is the device that shows the
+Seldon Plan as glowing lines, where every step of the plan and every deviation
+from it can be seen. Radiant does that for a feature: a signed plan, cut into a
+graph of goals that light up as each one is built, proven and reviewed.
 
 ## Credits
 
