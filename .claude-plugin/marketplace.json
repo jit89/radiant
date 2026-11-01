@@ -1,7 +1,7 @@
 {
   "name": "claude-coding-workflow",
   "metadata": {
-    "description": "Mods for the house Claude coding workflow. `plugin install` copies a mod into the plugin cache; install.sh refreshes the copy when the repo changes."
+    "description": "Mods for the Claude coding workflow. `plugin install` copies a mod into the plugin cache; install.sh refreshes the copy when the repo changes."
   },
   "owner": {
     "name": "Soumyajit Chatterjee"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "walk",
-      "description": "The walk this session launched as one task per goal in the task list, and /walk: the goal DAG as a live git graph in a pane.",
+      "description": "The walk this session launched as one task per goal in the task list, /walk-status: the goal DAG as a live git graph in a pane, and a push for each new always-on hold.",
       "source": "./mods/walk",
       "category": "productivity"
     },

@@ -24,8 +24,11 @@ AGENTS = os.path.expanduser(os.environ.get("CW_AO_LAUNCH_AGENTS") or "~/Library/
 PATH = ":".join([os.path.expanduser("~/.local/bin"), "/opt/homebrew/bin", "/usr/local/bin",
                  "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
 ENV = {"PATH": PATH, "DISABLE_UPDATES": "1", "DISABLE_AUTOUPDATER": "1"}
+# The always-on guide: docs/guides/ on the release branch, the feature folder on main.
+GUIDE = next((g for g in ("docs/guides/always-on.md", "docs/features/always-on/SETUP.md")
+              if os.path.exists(os.path.join(HOUSE, g))), "docs/guides/always-on.md")
 NOTIFY_TEMPLATE = (
-    "# The always-on iMessage recipient (docs/features/always-on/SETUP.md):\n"
+    f"# The always-on iMessage recipient ({GUIDE}):\n"
     "# your phone number in international form, or your Apple ID's email.\n"
     "recipient=\n"
 )
@@ -81,7 +84,7 @@ def main(argv):
         path = os.path.join(AGENTS, f"{p['Label']}.plist")
         write_atomic(path, plistlib.dumps(p), 0o644)
         print(f"always-on: wrote {path} (not loaded)")
-    print("always-on: next, docs/features/always-on/SETUP.md; then cw-decide.sh start; then cw-decide.sh doctor")
+    print(f"always-on: next, {GUIDE}; then cw-decide.sh start; then cw-decide.sh doctor")
     return 0
 
 

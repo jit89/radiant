@@ -1,0 +1,8 @@
+# overlay file, the main file it was adapted from, that file's blob at the last sync.
+# make-release.sh warns (and will not commit) when a main file changed since.
+CLAUDE.md CLAUDE.md 737f0a98903069be44aaa20596bd49c42abf84c8
+README.md README.md ccaee975d1685a013a184e052a76e54d2a88cec0
+docs/guides/getting-started.md README.md ccaee975d1685a013a184e052a76e54d2a88cec0
+docs/guides/configuration.md README.md ccaee975d1685a013a184e052a76e54d2a88cec0
+docs/guides/troubleshooting.md README.md ccaee975d1685a013a184e052a76e54d2a88cec0
+docs/guides/always-on.md docs/features/always-on/SETUP.md e5c5e7916436004cc638b4b929b3354058e0aaa4

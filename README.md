@@ -142,7 +142,7 @@ IMPLEMENTER_DRY_RUN=1 ~/claude-coding-workflow/scripts/claude-implement.sh --smo
 ~/claude-coding-workflow/scripts/grok-review.sh --smoke
 ~/claude-coding-workflow/scripts/claude-goal-review.sh --smoke
 ~/claude-coding-workflow/scripts/claude-implement.sh --smoke
-IMPLEMENTER_SMOKE_PROVIDER=deepseek ~/claude-coding-workflow/scripts/claude-implement.sh --smoke
+IMPLEMENTER_SMOKE_PROVIDER=haiku ~/claude-coding-workflow/scripts/claude-implement.sh --smoke
 ```
 
 Expect `IMPLEMENTER_RESULT: ok` from both. The DeepSeek smoke needs

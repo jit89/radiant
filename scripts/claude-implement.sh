@@ -205,7 +205,7 @@ if load_key_from_files ANTHROPIC_API_KEY .env "$HOUSE/.env"; then
   ANTH_KEY="${ANTHROPIC_API_KEY:-}"
 fi
 DS_KEY=""
-if load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env" "$HOME/.config/watch/.env"; then
+if load_key_from_files DEEPSEEK_API_KEY .env "$HOUSE/.env"; then
   DS_KEY="${DEEPSEEK_API_KEY:-}"
 fi
 

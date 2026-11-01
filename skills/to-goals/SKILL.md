@@ -72,7 +72,7 @@ TypeScript with Vitest or node:test, Python with pytest and uv), first run one
 `scripts/lib/proof-sandbox.py` (`--setup` for the setup) and record in the
 feature's evidence that both pass and nothing new is denied. A failure here
 is a profile change, reviewed before the walk, not a red proof mid-walk
-(docs/features/proof-sandbox, Amendment 1 E).
+(docs/features/proof-sandbox, Amendment 1 E, on the house's main branch).
 
 **1. Write.** Draft `GOALS.md` (uncommitted) in the GOAL-FORMAT.md shape;
 statuses `ready` if `blocked_by` is empty, else `blocked`. For every

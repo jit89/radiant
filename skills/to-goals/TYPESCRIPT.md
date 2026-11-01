@@ -3,7 +3,7 @@
 The TypeScript rules for proving an oracle (SKILL.md §4, GOAL-FORMAT.md "the
 tiers"), for **Vitest** and **node:test**, measured on Node 24.21.0, Vitest
 5.0.4 and TypeScript 7.0.2 against planted oracle defects
-(`docs/features/ts-tier-rules/EVIDENCE.md` in the house). Each rule marked
+(`docs/features/ts-tier-rules/EVIDENCE.md` on the house's main branch). Each rule marked
 *kept* either turned a planted defect that passed Tier 1 into a Tier 1
 failure, or turned a red or tampering run of the correct implementation
 green and clean; the *preconditions* do not change a verdict — without them
@@ -133,7 +133,7 @@ Not covered by the check, not planted:
 ## After an upgrade
 
 Bump the versions in each fixture's `package.json` under
-`docs/features/ts-tier-rules/fixture/`, regenerate its lockfile, then run
+`docs/features/ts-tier-rules/fixture/` (on the house's main branch), regenerate its lockfile, then run
 `NODE=<abs node> docs/features/ts-tier-rules/fixture/run-plants.sh all` (one
 `npm ci` with network, cached by lockfile hash). Every case should match; a
 mismatch names the rule to recheck before these rules are trusted on the new

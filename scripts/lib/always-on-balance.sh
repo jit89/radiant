@@ -6,8 +6,8 @@
 # stdout: `BALANCE_USD: <amount>` (exit 0), or `BALANCE: error (<why>)` (exit 1)
 # for a missing key, a failed request, or no USD balance in the answer.
 # The key is the one claude-implement.sh loads (DEEPSEEK_API_KEY, else the
-# house .env, else ~/.config/watch/.env); it reaches curl on stdin as a header,
-# never on its command line. DEEPSEEK_BALANCE_URL overrides the endpoint (tests).
+# house .env); it reaches curl on stdin as a header, never on its command line.
+# DEEPSEEK_BALANCE_URL overrides the endpoint (tests).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -17,7 +17,7 @@ source "$HERE/dotenv.sh"
 URL="${DEEPSEEK_BALANCE_URL:-https://api.deepseek.com/user/balance}"
 
 fail() { echo "BALANCE: error ($1)"; exit 1; }
-load_key_from_files DEEPSEEK_API_KEY "$HOUSE/.env" "$HOME/.config/watch/.env" || true
+load_key_from_files DEEPSEEK_API_KEY "$HOUSE/.env" || true
 [[ -n "${DEEPSEEK_API_KEY:-}" ]] || fail "no DeepSeek key"
 body="$(printf 'Authorization: Bearer %s\n' "$DEEPSEEK_API_KEY" |
   curl -sS --max-time 30 -H @- -H 'Accept: application/json' "$URL" 2>/dev/null)" || fail "request failed"

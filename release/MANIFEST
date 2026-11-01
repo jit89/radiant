@@ -1,0 +1,12 @@
+# The paths the release branch ships, one per line, taken from main's
+# committed HEAD (git archive: tracked files only). Everything else stays on
+# main: design plans and journals (docs/), research, the house's own PLAN.md.
+# release/overlay/ is laid on top (README.md, CLAUDE.md, LICENSE, docs/guides).
+# scripts/make-release.sh builds the branch from this file.
+.claude-plugin
+.env.example
+.gitignore
+GOALS.example.md
+mods
+scripts
+skills

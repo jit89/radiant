@@ -123,7 +123,7 @@ list, a test list, a module, export or route table), choose one:
         stubs and deletes it with them.
     The rbtree plan was amended this way after the first parallel walk; on the
     re-run (2026-10-22) g4, g5 and g7 merged in one wave with no conflict
-    (`docs/features/parallel-walker/EVIDENCE.md` step 12b).
+    (`docs/features/parallel-walker/EVIDENCE.md` step 12b, on the house's main branch).
 - **The goals that edit it name each other in `conflicts_with`**, so they run
   in different waves. Correct, but those goals no longer run side by side.
 
@@ -146,7 +146,7 @@ The Architect authors the oracle. The implementer makes it pass and does not edi
 
 Each case is an example: concrete input → concrete output, plus the edges the plan named. Assertions are exact values, not "does not throw".
 
-After a goal's DONE review, the reviewer mutates the implementer's code and the goal's proof must go red on each mutation (`docs/features/mutation-checks`). A mutation the proof survives is an oracle gap, recorded in the journal with its diff kept: strengthen the oracle in a later goal or an acceptance edit. Some survivors are equivalent mutants no test can catch; judge them, do not chase them.
+After a goal's DONE review, the reviewer mutates the implementer's code and the goal's proof must go red on each mutation (`docs/features/mutation-checks` on the house's main branch). A mutation the proof survives is an oracle gap, recorded in the journal with its diff kept: strengthen the oracle in a later goal or an acceptance edit. Some survivors are equivalent mutants no test can catch; judge them, do not chase them.
 
 ### Prove the oracle is satisfiable before committing it — the tiers
 

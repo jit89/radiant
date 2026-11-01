@@ -438,7 +438,7 @@ def cmd_doctor(_args):
     line(m.returncode == 0 and m.stdout.strip() != "", "Messages has an iMessage account this user may script")
     gs = sup.run(["git", "config", "--get", "commit.gpgsign"], timeout=30, cwd=os.path.expanduser("~"))
     line(gs.stdout.strip().lower() != "true",
-         "git commits need no signing prompt (commit.gpgsign is not true; step 0g)")
+         "git commits need no signing prompt (commit.gpgsign is not true)")
     v = sup.claude_version()
     line(v is not None, f"claude --version answers ({v})")
     print("doctor: all OK" if not fails else f"doctor: {fails} FAIL")

@@ -26,7 +26,7 @@ it runs; the settings above are what bring it back.
   mode 0600. Write it from the clipboard, never by pasting into a chat:
   `mkdir -p ~/.config/cw-secrets && pbpaste > ~/.config/cw-secrets/anthropic-decider.key && chmod 600 ~/.config/cw-secrets/anthropic-decider.key`.
 - **The DeepSeek key**, as for any walk: `DEEPSEEK_API_KEY` in the house's
-  `.env` (or `~/.config/watch/.env`). The supervisor reads its balance before
+  `.env`. The supervisor reads its balance before
   each walk and holds below $2.
 - **The iMessage recipient**: `install.sh --always-on` writes
   `~/.config/cw-always-on/notify.conf`; set `recipient=` to your phone number

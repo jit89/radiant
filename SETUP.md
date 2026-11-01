@@ -168,7 +168,8 @@ Ask the user to:
 1. `grok login`
 2. `claude login` (Opus 5.5 goal reviewer)
 3. Optional, legacy `IMPLEMENTER=codex` only: confirm Codex can run
-4. Confirm `DEEPSEEK_API_KEY` is in house `.env` and/or `~/.config/watch/.env`
+4. Confirm `DEEPSEEK_API_KEY` is in the house `.env` (the house reads only that;
+   the watch harness also reads `~/.config/watch/.env`)
 
 Do not ask them to paste a key into chat.
 
