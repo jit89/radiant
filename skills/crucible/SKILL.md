@@ -1,0 +1,231 @@
+---
+name: crucible
+allowed-tools: Bash, Read, Glob, Grep, Write, Edit, AskUserQuestion, TodoWrite
+description: Harden a plan before any code. Recon the codebase or research, interrogate load-bearing decisions, lock PLAN.md, then send it to headless Grok for bounded adversarial review. Use when the user says /crucible, "put this through the crucible", "harden this plan", "stress-test this plan", or is about to build something high-stakes (auth, schema, concurrency, migrations, payments, greenfield architecture). Replaces grill-me and grill-with-docs in this workflow. Not for reviewing already-written code and not for trivial edits.
+---
+
+# Crucible — Recon, Interrogate, Harden
+
+Three phases. No production code in any of them.
+
+- **Phase 0 — RECON** kills interviewing blind.
+- **Phase 1 — INTERROGATE** kills building the wrong thing.
+- **Phase 2 — REVIEW** kills a plan that sounds right but breaks. Grok attacks; you arbitrate.
+
+You enter at three points only: confirming the assumptions ledger, answering the fire, signing off the converged plan. The attacker is read-only and never touches a file.
+
+The review prompt lives in `~/claude-coding-workflow/scripts/grok-review.sh`. Do not fork it.
+
+## PHASE 0 — RECON
+
+Before asking the user a single question, determine the terrain.
+
+### Detect the terrain
+
+- **Brownfield** — the working directory has real source (not just scaffolding). Recon the code.
+- **Greenfield** — empty dir, fresh scaffold, or a brand-new project. Research replaces recon.
+
+### Brownfield
+
+1. Explore architecture, relevant modules, patterns the plan must fit, current schema/auth/infra as applicable.
+2. Load living docs: `GLOSSARY.md` (or `GLOSSARY-MAP.md`; legacy `CONTEXT.md` / `CONTEXT-MAP.md`) and `docs/adr/`. If they exist, Phase 1 runs **docs-aware**.
+3. **Sweep the whole roadmap for inputs addressed to this slice, not just this slice's
+   own block.** A hazard is usually written down by the slice that *discovers* it or the
+   one that *fixes* it, which is rarely the slice that *breaks* without it — so grep every
+   later block for this slice's name before trusting that its own block is complete.
+   Carried inputs are cheap to write in one place and expensive to miss.
+4. If the task involves tech the repo can't answer, open the research gate.
+
+### Greenfield
+
+Open the research gate, then cover:
+
+1. **Prior art** — how existing tools solve this; the standard shape.
+2. **Stack** — a reasonable default plus one alternative worth considering.
+3. **Known pitfalls** — 3–5 things people building this class of thing get wrong.
+
+### Research gate (one question, when external research would help)
+
+Do not silently pick a depth. Offer tiers with a recommendation:
+
+- **`none`** — this session's knowledge + the codebase. Medium tasks on familiar ground.
+- **`web`** — a handful of targeted searches (docs, gotchas, prior art). Default for most greenfield.
+- **`deep`** — parallel research subagents (prior art, stack, pitfalls/postmortems, official docs), then one synthesis. Recommend only for high-stakes greenfield or unfamiliar tech.
+
+If invoked with `research=none|web|deep`, skip the question and use that tier.
+
+**If `deep`:** show the topic framing + the 3–5 questions the ledger needs answered. User edits or approves, **then** launch. Save the brief to `inbox/research/YYYY-MM-DD-<slug>-crucible-research.md` (with `## Key Takeaways`) and link it from the ledger entries it sourced and from `PLAN.md`.
+
+`prototype` is available during recon for logic/state questions. Disposable — never merged. Fold measurements into the ledger as facts.
+
+### Output: the Assumptions Ledger
+
+One batch. Not one-at-a-time.
+
+```markdown
+## Assumptions Ledger
+_Confirm or correct in one pass. Anything unmarked I treat as confirmed._
+1. <assumption> — source: <code path / doc / research finding / convention>
+2. ...
+```
+
+Each entry cites its source. Corrections that open real questions get promoted into the Phase 1 decision map.
+
+## PHASE 1 — INTERROGATE
+
+Every question must justify its own existence.
+
+### Open with the Decision Map
+
+```markdown
+## Decision Map
+### Load-bearing (asked one at a time)
+- [ ] <decision> — irreversible / expensive-if-wrong
+### Cosmetic (batched with defaults)
+- [ ] <decision> — cheap to change later
+```
+
+Load-bearing = wrong answer costs a migration, a rewrite, a security hole, or user trust. Cosmetic = renameable, refactorable, swappable. Update the map as questions resolve.
+
+### Load-bearing — one at a time
+
+> **Q<n>: <the question>**
+> **Why it matters:** <the dependency that makes this load-bearing>
+> **Recommendation:** <your answer, committed — not a menu>
+> **If we guess wrong:** <the concrete failure — migration, rewrite, breach, churn>
+
+Wait for the answer before the next question. If "if we guess wrong" comes out weak, the question is cosmetic — demote it. If mid-interview a question is answerable from the code or the research, answer it yourself and log it to the ledger.
+
+### Cosmetic — one batch
+
+Recommendations with a one-line rationale each. Veto by exception; silence = accepted.
+
+### Escape hatch
+
+The user can say **"accept all remaining recommendations"**. Lock every open decision at its recommended answer, log them as such, proceed. Offer it explicitly if the load-bearing tier exceeds ~8 questions.
+
+### Docs-aware (auto-on when Phase 0 found GLOSSARY.md/ADRs; offer once on greenfield)
+
+- Enforce the glossary — wording collision → stop, quote both meanings, make them pick.
+- Pin down loose words with a proposed canonical replacement before continuing.
+- Probe blurred concepts with a concrete edge case.
+- Check claims against the code; a mismatch is a question.
+- Maintain `GLOSSARY.md` as terms settle (format: [GLOSSARY-FORMAT.md](./GLOSSARY-FORMAT.md)). Glossary only. A legacy `CONTEXT.md` is `git mv`'d to `GLOSSARY.md` the first time you edit it.
+- Offer an ADR only past the three-part test (format: [ADR-FORMAT.md](./ADR-FORMAT.md)).
+
+### Lock the plan
+
+When the decision map is fully checked, write `PLAN.md` at the **target repo root**:
+
+```markdown
+# Plan: <task>
+_Locked via crucible — by Claude + <user>_
+
+## Goal
+<one paragraph — what the interrogation actually settled>
+
+## Approach
+<numbered, concrete steps>
+
+## Key decisions & tradeoffs
+<contestable choices — name them so the attacker has something to bite; link any ADRs; mark escape-hatch locks>
+
+## Assumptions
+<the confirmed ledger — with sources>
+
+## Risks / open questions
+<anything still genuinely open>
+
+## Out of scope
+<bounds the interrogation established>
+```
+
+Initialize `PLAN-REVIEW-LOG.md`:
+
+```markdown
+# Plan Review Log: <task>
+Phases 0-1 (recon + interrogation) complete — plan locked with the user. MAX_ROUNDS=<n>.
+```
+
+Append a journal START at `docs/journal/<slug>.md`.
+
+## PHASE 2 — REVIEW (you ↔ Grok)
+
+You wrote the plan, so you do not get to grade it. Grok attacks it from a
+separate headless session with no access to your reasoning — only the file.
+
+### Prerequisites (verify once, fast)
+
+- `~/claude-coding-workflow/scripts/grok-review.sh` is executable and `grok` is signed in.
+- Echo the resolved model before Round 1 (`GROK_REVIEW_MODEL`, default `grok-4.7`). If the user objects, stop.
+- Run from the target repo root (where `PLAN.md` lives).
+
+### Tunables
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `MAX_ROUNDS` | `5` | Hard cap. The loop ALWAYS terminates here. |
+| `PLAN_FILE` | `PLAN.md` | The plan Phase 1 produced. |
+| `LOG_FILE` | `PLAN-REVIEW-LOG.md` | Append-only argument transcript. |
+
+If invoked with `rounds=3`, use that for `MAX_ROUNDS`. Echo resolved values before starting.
+
+### The loop
+
+Maintain `ROUND` (start 1) and `SESSION_ID` (empty until round 1 returns).
+
+**Round 1**
+
+```bash
+~/claude-coding-workflow/scripts/grok-review.sh PLAN.md
+```
+
+Read `SESSION_ID:` and `VERDICT_FILE:`. Confirm `GROK_REVIEW_RESULT: ok`. Any other result → stop and tell the user.
+
+**Rounds 2..MAX** — resume the SAME session:
+
+```bash
+~/claude-coding-workflow/scripts/grok-review.sh --resume "$SESSION_ID" PLAN.md
+```
+
+Run every invocation with the Bash tool's `run_in_background: true`: a first
+round can take ~20 minutes, past the 10-minute foreground ceiling. The harness
+re-invokes you when it exits; do not poll. Then read the `GROK_REVIEW_RESULT:`,
+`SESSION_ID:` and `VERDICT_FILE:` lines from its output file.
+
+### Each round, after the script returns
+
+1. Read the verdict file. Append to `LOG_FILE`: `## Round <n> — Grok` + the full critique.
+2. Grep the last line for the verdict:
+   - `VERDICT: APPROVED` → Resolution (converged).
+   - `VERDICT: REVISE` → decide **what is actually worth acting on**. Revise `PLAN_FILE`. Append `### Architect's response`: what changed, what was rejected, why. Increment round.
+3. If round > `MAX_ROUNDS` → Resolution (deadlock).
+
+### Resolution (user sign-off)
+
+- **APPROVED:** present the final `PLAN_FILE`, a 3-bullet summary of what the crucible improved, and the round count. Ask: *"Interrogated + survived N rounds of Grok. Sign off? Next is `/to-goals`."* On sign-off, run `to-goals`.
+- **MAX_ROUNDS without APPROVED:** do not fake convergence. List each unresolved point + the Architect's counter-position. The user breaks the tie.
+
+Append a journal END with the outcome.
+
+## Hard rules
+
+- Phases run 0 → 1 → 2. Do not write `PLAN.md` until the decision map is resolved (or the escape hatch fired).
+- The assumptions ledger is presented ONCE as a batch.
+- Grok is read-only every round (`read_file,grep_search,list_dir`). The script enforces it. Do not pass it write tools.
+- The loop ALWAYS terminates at `MAX_ROUNDS`.
+- You are the final arbiter on every REVISE. Don't cave to everything; don't ignore it. Log the reason either way — rejecting a critique without a logged reason is how a plan rots.
+- Code only after user sign-off. Implementation is `/to-goals` then `/run-goal`.
+- `LOG_FILE` is the deliverable. Keep the whole argument.
+- `GLOSSARY.md` stays a glossary.
+- If the attacker cannot run, stop. Do not self-review as a substitute — a plan you attack yourself has not been attacked.
+
+## What NOT to do
+
+- Don't review already-written code.
+- Don't skip Phase 1.
+- Don't ask questions recon already answered.
+- Don't ask a load-bearing-format question whose "if we guess wrong" is weak.
+- Don't launch deep research without an approved prompt.
+- Don't invoke `grill-me` or `grill-with-docs` on the same work.
+- Don't offer `/codex-build` or flip roles into an implementer. After sign-off, run `to-goals`.

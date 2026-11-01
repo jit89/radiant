@@ -1,0 +1,12 @@
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.grok/
+
+__pycache__/
+*.pyc
+
+# Types the engine writes into a loaded mod for the editor
+mods/*/.claude-plugin/types/

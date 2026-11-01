@@ -1,0 +1,9 @@
+{
+  "name": "walk",
+  "version": "0.5.0",
+  "description": "The walk this session launched as one task per goal in the task list, kept current; /walk-status: every goal of GOALS.md as a live git graph in a pane; and a push for each new always-on hold.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Soumyajit Chatterjee"
+  }
+}

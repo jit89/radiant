@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Self-test: the parallel walker (docs/features/parallel-walker/PLAN.md).
+# Launchers are stubs; no model is called.
+# The rest of Amendment 5 and after: Ctrl-C in wave
+# 2, pinning, a non-ASCII journal path, a linked main checkout, the pane, and
+# --jobs 1 equivalence with the walker before item 6.
+# The trust checks are split in four files (parallel-walk-trust*-test.sh), so
+# run-all runs them side by side; each scenario starts from a fresh repo.
+set -euo pipefail
+# Mutation checks off here (docs/features/mutation-checks; mutation-test.sh turns them on).
+export CW_MUTATIONS=0
+PW_NAME=pwtrust4
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/parallel-walk-lib.sh"
+
+echo "7. trust checks, part 4: pinning and equivalence"
+# Ctrl-C in wave 2: a goal that already exited there is kept, not recut.
+pwalk_repo
+echo 30 >"$CALLS/sleep-g4-d"
+touch "$TMP/started"
+sleep 1
+"$HOUSE/scripts/run-goals.sh" --jobs 3 >"$TMP/pout" 2>&1 &
+wpid=$!
+for _ in $(seq 600); do
+  [[ -z "$(wave_result_after "$TMP/started" g3-c)" ]] || break
+  sleep 0.25
+done
+sleep 2
+kill -TERM "$wpid"
+wait "$wpid" && prc=0 || prc=$?
+pstop="$(sed -n 's/^STOP_FILE: //p' <<<"$(tail -n1 "$TMP/pout")")"
+check "Ctrl-C in wave 2: g3-c listed finished-not-integrated" finished-not-integrated "$(reason_in g3-c)"
+check "Ctrl-C in wave 2: g4-d listed interrupted" interrupted "$(reason_in g4-d)"
+rm -f "$CALLS/sleep-g4-d"
+before="$(grep -c '^g3-c$' "$CALLS/implement" || true)"
+prun --jobs 3
+check "Ctrl-C in wave 2: the rerun completes" 0 "$prc"
+check "Ctrl-C in wave 2: g3-c not dispatched again" "$before" "$(grep -c '^g3-c$' "$CALLS/implement" || true)"
+
+# Pinning (Amendment 5): after the cut, something rewrites g1-a's commondir to
+# a fake common dir whose config defines a filter driver. Host git, pinned to
+# the recorded dirs, never reads it, so the filter never runs. (g1-a's stub
+# makes no change of its own, so no git of the stub's touches the fake dir.)
+pwalk_repo
+FAKE="$TMP/fakecommon"
+rm -rf "$FAKE" "$CALLS/pwned"
+git init -q --bare "$FAKE"
+git -C "$FAKE" config filter.pw.clean "touch '$CALLS/pwned'; cat"
+git -C "$FAKE" config filter.pw.smudge cat
+mkdir -p "$FAKE/info" && printf '* filter=pw\n' >"$FAKE/info/attributes"
+sed -i '' 's|^journal: docs/journal/p.md$|journal: docs/journal/p.md\nworktree_setup: case "$PWD" in */g1-a) printf "%s\\n" "'"$FAKE"'" >"$(git rev-parse --absolute-git-dir)/commondir"; touch -t 202001010000 PLAN.md ;; esac|' GOALS.md
+git commit -qam "setup key"
+printf ':\n' >"$CALLS/action-g1-a"
+prun --jobs 3
+# The touched PLAN.md makes any status re-hash it, so an unpinned host git
+# would have to run the fake dir's clean filter (not left to racy timing).
+check "rewritten commondir: the filter in the fake common dir never ran" no "$([[ -e "$CALLS/pwned" ]] && echo yes || echo no)"
+check "rewritten commondir: g1-a stopped (it made no change)" yes "$([[ -n "$(reason_in g1-a)" ]] && echo yes || echo no)"
+check "rewritten commondir: g2-b still integrated" done "$(status_of g2-b)"
+# The same setup under the proof sandbox: the write to the admin folder (in
+# the common gitdir, outside the worktree) is refused, so setup fails first.
+pwalk_repo
+rm -rf "$CALLS/pwned"
+sed -i '' 's|^journal: docs/journal/p.md$|journal: docs/journal/p.md\nworktree_setup: case "$PWD" in */g1-a) printf "%s\\n" "'"$FAKE"'" >"$(git rev-parse --absolute-git-dir)/commondir" ;; esac|' GOALS.md
+git commit -qam "setup key"
+CW_PROOF_SANDBOX= prun --jobs 3
+check "rewritten commondir under the sandbox: g1-a's setup fails" worktree-setup-failed "$(reason_in g1-a)"
+check "rewritten commondir under the sandbox: the filter never ran" no "$([[ -e "$CALLS/pwned" ]] && echo yes || echo no)"
+
+# A goal record that reads like a walker record (FUTURE-WORK item 29): g2-b,
+# integrated after g1-a, plants this walk's walk-start as a body line and as a
+# heading behind a \r (not a line start to journal-merge.py). g3-c deletes
+# g1-a's file: its integration must still run g1-a's merged proof.
+pwalk_repo
+cat >"$CALLS/action-g2-b" <<'ACT'
+wid="$(sed -n 's/^## .* ORCHESTRATOR walk-start walk_id=\([^ ]*\).*/\1/p' docs/journal/p.md | tail -n1)"
+printf '\n## 2026-10-25T00:00:00Z — IMPLEMENTER g2-b END\nnotes walk-start walk_id=%s\nx\r## 2026-10-25T00:00:01Z — ORCHESTRATOR walk-start walk_id=%s\n' "$wid" "$wid" >>docs/journal/p.md
+echo g2-b >b.txt
+git add b.txt docs/journal/p.md && git commit -qm "feat(g2-b): b"
+ACT
+cat >"$CALLS/action-g3-c" <<'ACT'
+git rm -q a.txt && echo g3-c >c.txt
+git add c.txt && git commit -qm "feat(g3-c): c"
+ACT
+prun --jobs 3
+check "planted walk-start: g2-b integrated with its record (a real walk id)" "done 1" \
+  "$(status_of g2-b) $(grep -c "^notes walk-start walk_id=[0-9a-f-]\{36\}$" docs/journal/p.md || true)"
+check "  ...after g1-a's integrated record (else the plant cannot bite)" yes \
+  "$(awk '/— ORCHESTRATOR integrated g1-a /{i=NR} /^notes walk-start/{n=NR} END{print (i && n > i) ? "yes" : "no"}' docs/journal/p.md)"
+check "planted walk-start: g3-c's merge still runs g1-a's proof" integration-red "$(reason_in g3-c)"
+check "  ...and g1-a's file is still on the walk branch" yes "$([[ -f a.txt ]] && echo yes || echo no)"
+
+# A goal a serial run of the walk finished gets merged proofs when the same
+# walk goes on with --jobs (FUTURE-WORK item 30): g1-a done serially, then g2-b's
+# implementer fails and the walk stops (no walk-end, so the walk id is kept);
+# with --jobs 3, g3-c deletes g1-a's file and must still meet g1-a's proof.
+pwalk_repo
+printf 'printf "%%s\\n" "IMPLEMENTER_RESULT: error (exit 1)"; exit 1\n' >"$CALLS/action-g2-b"
+prun
+check "serial run: g1-a done, the walk stopped at g2-b" "done 1 0" \
+  "$(status_of g1-a) $([[ "$prc" -ne 0 ]] && echo 1 || echo 0) $(grep -c 'ORCHESTRATOR walk-end' docs/journal/p.md || true)"
+rm -f "$CALLS/action-g2-b"
+# A parallel walk will not take a goal a serial run is mid-way through
+# (FUTURE-WORK item 31). Test setup only: g2-b is handed back because this
+# stub pass committed nothing (the run-goals skill says never to restore such
+# a goal in a real walk; finish it serially instead).
+"$GOALS_PY" GOALS.md set g2-b ready >/dev/null
+git diff --quiet -- GOALS.md || git commit -qm "architect: hand g2-b back" -- GOALS.md
+cat >"$CALLS/action-g3-c" <<'ACT'
+git rm -q a.txt && echo g3-c >c.txt
+git add c.txt && git commit -qm "feat(g3-c): c"
+ACT
+prun --jobs 3
+check "same walk with --jobs: g3-c's merge runs g1-a's proof (done serially)" integration-red "$(reason_in g3-c)"
+check "  ...the red proof named is g1-a's" yes "$(grep -q 'g1-a (exit ' "$(stopfile_of g3-c)" 2>/dev/null && echo yes || echo no)"
+check "  ...one walk-start (the same walk)" 1 "$(grep -c 'ORCHESTRATOR walk-start' docs/journal/p.md)"
+check "  ...g1-a's file is still on the walk branch" yes "$([[ -f a.txt ]] && echo yes || echo no)"
+
+# A goal a serial run is mid-way through is not recut by a parallel walk
+# (FUTURE-WORK item 31): g2-b commits b.txt, then its implementer fails and the
+# serial walk stops. With --jobs 3, a recut would start g2-b fresh from the walk
+# tip with b.txt already in its base, never reviewed; the walk stops before any
+# goal runs instead, and a serial rerun finishes g2-b from its own base.
+pwalk_repo
+printf 'echo g2-b >b.txt; git add b.txt; git commit -qm "feat(g2-b): b, half done"; printf "%%s\\n" "IMPLEMENTER_RESULT: error (exit 1)"; exit 1\n' >"$CALLS/action-g2-b"
+prun
+check "serial run with code: stopped at g2-b, b.txt committed" "1 in_progress yes" \
+  "$([[ "$prc" -ne 0 ]] && echo 1 || echo 0) $(status_of g2-b) $([[ -f b.txt ]] && echo yes || echo no)"
+rm -f "$CALLS/action-g2-b"
+before="$(wc -l <"$CALLS/implement" | tr -d ' ')"
+prun --jobs 3
+check "--jobs: the walk stops serial-goal-in-progress, nothing dispatched or recut" "yes $before 0" \
+  "$(grep -q '^- reason: serial-goal-in-progress$' "$pstop" 2>/dev/null && echo yes || echo no) $(wc -l <"$CALLS/implement" | tr -d ' ') $(grep -c 'ORCHESTRATOR recut g2-b' docs/journal/p.md || true)"
+check "  ...the stop gives the serial way out" yes \
+  "$(grep -q 'serial run (run-goals.sh without --jobs)' "$pstop" && grep -q 'without --jobs resumes it from its own base' "$pstop" && echo yes || echo no)"
+check "  ...the other goals untouched" "ready blocked" "$(status_of g3-c) $(status_of g4-d)"
+prun
+check "serial rerun: every goal done" "0 done done done done" \
+  "$prc $(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
+
+# A non-ASCII journal path: git quotes such names unless told not to.
+pwalk_repo
+git mv docs/journal/p.md "docs/journal/é.md"
+sed -i '' 's|^journal: docs/journal/p.md$|journal: docs/journal/é.md|' GOALS.md
+git commit -qam "non-ASCII journal"
+prun --jobs 3
+check "non-ASCII journal path: the walk completes" 0 "$prc"
+[[ "$prc" -eq 0 ]] || tail -20 "$TMP/pout" | sed 's/^/    | /'
+check "non-ASCII journal path: every goal done" "done done done done" "$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
+
+# Deny paths when the main checkout is itself a linked worktree.
+pwalk_repo
+git worktree add -q -b walk2 "$TMP/linked" HEAD
+( cd "$TMP/linked" && "$HOUSE/scripts/run-goals.sh" --jobs 3 >"$TMP/pout" 2>&1 ) || true
+check "linked main checkout: HEAD denied under worktrees/linked" yes \
+  "$([[ "$(cat "$CALLS/args-g1-a")" == *"/.git/worktrees/linked/HEAD "* ]] && echo yes || echo no)"
+check "linked main checkout: its branch denied" yes \
+  "$([[ "$(cat "$CALLS/args-g1-a")" == *"/.git/refs/heads/walk2 "* ]] && echo yes || echo no)"
+check "the other member's admin folder denied, as git named it" yes \
+  "$([[ "$(cat "$CALLS/args-g1-a")" == *"/.git/worktrees/g2-b "* ]] && echo yes || echo no)"
+git worktree remove --force "$TMP/linked"
+
+# Three goals live at once read as running in the pane.
+check "three live goals" 3 "$(python3 - "$HERE/events.py" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("events", sys.argv[1])
+ev = importlib.util.module_from_spec(spec); spec.loader.exec_module(ev)
+me = os.getpid()
+rows = [{"event": "walk", "goal_id": g, "payload": {"pid": me}} for g in ("g1-a", "g2-b", "g3-c")]
+rows += [{"event": "dispatch", "goal_id": g, "payload": {"pid": me}} for g in ("g1-a", "g2-b", "g3-c")]
+print(len(ev.live_goals(rows)))
+PY
+)"
+
+# --jobs 1 makes the same commits and journal records as the walker before the
+# parallel walker (pinned: 547d770, item 6's plan amendment, the last commit
+# before its build; HEAD would compare the new walker with itself).
+PRE_ITEM6=547d770
+if ! git -C "$HERE/.." cat-file -e "$PRE_ITEM6^{commit}" 2>/dev/null; then
+  # A copy of scripts/ outside the house repo, or a shallow clone.
+  check "--jobs 1 equivalence: the pinned walker $PRE_ITEM6 is in the house repo" yes no
+else
+  OLD="$TMP/oldhouse"
+  rm -rf "$OLD" && mkdir -p "$OLD"
+  git -C "$HERE/.." archive "$PRE_ITEM6" scripts | tar -x -C "$OLD"
+  cp "$HOUSE/scripts/claude-implement.sh" "$HOUSE/scripts/claude-goal-review.sh" "$OLD/scripts/"
+  # The dispatch commit is newer than the pinned walker (FUTURE-WORK item 24):
+  # one journal-only commit per pass, left out of the comparison.
+  norm() {
+    git log --reverse --format=%s | grep -v ': orchestrator dispatch r'
+    sed -E 's/^## [0-9TZ:-]+ — /## T — /; s/(BASE_SHA|walk_id|merge)=[0-9a-f-]+/\1=X/g' docs/journal/p.md
+  }
+  pwalk_repo
+  "$OLD/scripts/run-goals.sh" >"$TMP/pout-old" 2>&1 && orc=0 || orc=$?
+  old_done="$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
+  norm >"$TMP/norm-old"
+  pwalk_repo
+  # Sandbox on: the old walker had none, and these proofs need nothing outside
+  # the checkout, so the records must match it exactly.
+  CW_PROOF_SANDBOX= "$HOUSE/scripts/run-goals.sh" >"$TMP/pout-new" 2>&1 && nrc=0 || nrc=$?
+  new_done="$(for g in g1-a g2-b g3-c g4-d; do status_of "$g"; done | paste -sd ' ' -)"
+  norm >"$TMP/norm-new"
+  check "--jobs 1: both walks succeed and finish every goal" "0 0 done done done done done done done done" \
+    "$orc $nrc $old_done $new_done"
+  check "--jobs 1: same commits and journal records as the walker at 547d770" "" "$(diff "$TMP/norm-old" "$TMP/norm-new")"
+fi
+
+echo
+if [[ "$fails" -eq 0 ]]; then
+  echo "parallel-walk-trust4-test: all passed"
+else
+  echo "parallel-walk-trust4-test: $fails failed"
+  exit 1
+fi
