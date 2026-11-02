@@ -1070,3 +1070,51 @@ code; item 30's scenario hands the goal back), `parallel-walk-serial-test.sh`
 recut, a serial r1 record after the mark, an unreadable ledger with no advice
 to delete the branch, no ledger at all with the `in_progress` uncommitted).
 
+
+## 32. The proof sandbox refuses to set file times on macOS 27 (2026-11-03)
+
+Found by the Rust tier-rules item at its step 2b: a `worktree_setup` of
+`cargo fetch` could not set an unpacked file's mtime. On macOS 27.0.1, setting a
+file's times is checked under an operation none of the profile's named write
+operations match, so every proof and setup that sets times failed (`tar -x`,
+`cp -p`, `shutil.copy2`, cargo's unpacking), in every language.
+
+**Done (2026-11-03):** `docs/features/sandbox-write-times` (plan, Grok APPROVED
+in round 3). Every write rule in `lib/proof-sandbox.py` carries `file-write*`
+beside the named operations, denials after allows. The three named operations
+the wildcard would newly open (acl, finderinfo, mount, unmount) are denied by
+name on the allowed trees, last among the write rules. The self-test checks setting a time in the root and its
+refusal in `.git`. The evidence is the proof-sandbox `EVIDENCE.md` correction.
+
+## 33. Rust rules for Axum and SQLx (after the core Rust tier rules)
+
+The user's Rust stack is Axum, Tokio and SQLx. The core Rust item
+(`docs/features/rust-tier-rules`) covers Tokio's test macro and futures that
+are never awaited. Axum and SQLx need their own planted rules, in an item of
+their own after it (the user's choice, 2026-11-03). Hazards already found, as
+inputs to its recon:
+
+- **SQLx's compile-time macros** (`query!`) read `DATABASE_URL`, usually from
+  `.env` (through dotenvy). The host refuses a live `.env` in a checkout, and
+  proofs have no network. Offline mode needs a committed `.sqlx/` and
+  `SQLX_OFFLINE=true`; who runs `cargo sqlx prepare`, and when, is open,
+  because the implementer's sandbox cannot reach a database either.
+- **`#[sqlx::test]`** creates a database per test. It needs a running server
+  (`proof_network: loopback`) and credentials. A `DATABASE_URL` holding a
+  password is not stripped by name: it contains none of the parts
+  `proof_env_unsets` strips (KEY, APIKEY, TOKEN, SECRET, PASSWORD, PASSWD,
+  CREDENTIAL(S)).
+- **`sqlx::migrate!`** embeds the migrations folder at compile time. A
+  migration file is a registration point that parallel goals can both edit.
+- **The load-bearing choice:** SQLite in memory versus a real Postgres for the
+  oracles. Ask it first.
+- **Axum:**
+  - testing through `tower::ServiceExt::oneshot` needs no network; a real
+    listener needs loopback and a timeout;
+  - a handler panic on a runtime worker thread prints
+    `thread 'tokio-runtime-worker' panicked at` and the test sees a 500 or a
+    reset (plant it against the trap reader);
+  - a server that never answers hangs to the proof timeout (rule: wrap in
+    `tokio::time::timeout`);
+  - `CatchPanicLayer` and mocks of the database layer have the shape of the
+    mockall plant.

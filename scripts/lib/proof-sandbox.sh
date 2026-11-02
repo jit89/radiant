@@ -25,6 +25,11 @@ proof_sandbox_selftest() {
   # temp-area rule) can refuse its planted secret.
   mkdir -p "$d/root/home/.ssh" "$d/tmp"
   echo planted >"$d/root/home/.ssh/selftest"
+  # Two files with an old stamp, for the file-time checks (macOS 27 checks
+  # setting times under an operation only file-write* covers).
+  mkdir -p "$d/root/.git"
+  : >"$d/root/stamp"; : >"$d/root/.git/stamp"
+  python3 -c "import os,sys; [os.utime(p, (1e9, 1e9)) for p in sys.argv[1:]]" "$d/root/stamp" "$d/root/.git/stamp"
   vf="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)cw-psb-selftest-$$"
   echo temp >"$vf" 2>/dev/null || vf=""
   : >"$d/out"
@@ -44,6 +49,10 @@ sys.exit(4)"; }
   _psb_eperm "open('$d/outside','w')" || why+=("a write outside the root was not refused with EPERM")
   [[ -e "$d/outside" ]] && why+=("a file outside the root was created")
   _psb_eperm "open('$d/root/home/.ssh/selftest').read()" || why+=("a secret-list file inside the root was not refused with EPERM")
+  _psb_run /usr/bin/python3 -c "import os; os.utime('$d/root/stamp', (2e9, 2e9))" &&
+    [[ "$(stat -f %m "$d/root/stamp")" == 2000000000 ]] || why+=("setting a file's time in the root is refused")
+  { _psb_eperm "__import__('os').utime('$d/root/.git/stamp', (2e9, 2e9))" &&
+    [[ "$(stat -f %m "$d/root/.git/stamp")" == 1000000000 ]]; } || why+=("setting a file's time in the root's .git was not refused")
   if [[ -n "$vf" ]]; then
     _psb_eperm "open('$vf').read()" || why+=("a file under /private/var/folders was not refused with EPERM")
   fi

@@ -17,7 +17,9 @@ is here. In short:
 - no mach service lookups at all otherwise (Launch Services, AppleEvents,
   launchd, securityd are unreachable);
 - the secret list, the house's own state and the shared temp areas are denied
-  after the allows, so they win; --tmp is re-allowed last.
+  after the allows, so they win; --tmp is re-allowed after them, and only the
+  named denials of the write operations no proof needs (WRITE_EXTRA) and the
+  hard-link rules come later.
 
 Exit 2 with a message on any path outside [A-Za-z0-9._/@+-], or a --root
 that sits under a denied path (it could never be proved).
@@ -32,13 +34,20 @@ HOUSE = os.path.dirname(os.path.dirname(HERE))
 HOME = os.path.expanduser("~")
 CACHE = os.path.join(HOME, ".cache", "claude-coding-workflow")
 SAFE = re.compile(r"^[A-Za-z0-9._/@+-]+$")
-# Writes as named operations. Seatbelt lets a rule naming an operation beat a
-# wildcard rule whatever their order (measured: a file-write-create allow beats
-# a later file-write* deny), so every write allow and every write deny here
-# names these same operations, and a later deny wins as written.
-WRITE = ("file-write-create file-write-data file-write-flags file-write-mode "
-         "file-write-owner file-write-setugid file-write-times file-write-unlink "
-         "file-write-xattr")
+# Writes, as the wildcard and the named operations together. Seatbelt lets a
+# rule naming an operation beat a wildcard rule whatever their order (measured:
+# a file-write-create allow beats a later file-write* deny), so every write
+# allow and every write deny names these operations, and a later deny wins as
+# written. Since macOS 27, setting a file's times is checked under an operation
+# none of the names match, which only file-write* covers; between two wildcard
+# rules the later wins. So each rule carries both forms, and the denials stay
+# after the allows (docs/features/sandbox-write-times).
+WRITE = ("file-write* file-write-create file-write-data file-write-flags "
+         "file-write-mode file-write-owner file-write-setugid file-write-times "
+         "file-write-unlink file-write-xattr")
+# Named write operations the wildcard would also open but no proof needs; denied
+# by name on the allowed trees, after every write allow.
+WRITE_EXTRA = "file-write-acl file-write-finderinfo file-write-mount file-write-unmount"
 
 
 def die(msg):
@@ -198,6 +207,10 @@ def main():
         L.append(f"(allow file-read-metadata file-write-data (literal {lit(out)}))")
     # --tmp sits under a denied house folder; it is fresh per run.
     L.append(f"(allow file-read* {WRITE} (subpath {lit(tmp)}))")
+    # After every write allow (the --tmp re-allow included), so no later
+    # file-write* allow reopens them.
+    extra = [root, tmp] + ([deps] if deps else []) + ([lock] if a.setup else [])
+    L.append(f"(deny {WRITE_EXTRA} {subpaths(extra)})")
     # Hard links last: an explicit deny (the implicit default deny loses to
     # the named write allows, measured), then the trees a link may touch. Each
     # end is checked on its own, so a link between two allowed trees is

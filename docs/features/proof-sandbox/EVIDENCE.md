@@ -426,3 +426,78 @@ made from inside; one left by a process outside any sandbox is the proof
 sandbox's hard-link pre-check's to catch (above). These stay evidence, not
 suite tests: each needs a model pass.
 
+
+### Correction (2026-11-03, macOS 27.0.1): setting file times
+
+Found by the Rust tier-rules item (`docs/features/rust-tier-rules`): a
+`worktree_setup` of `cargo fetch` failed to set the mtime of an unpacked file in
+the deps folder. Under the profile as built above, setting a file's times was
+refused in **every** tree, the root, `--tmp` and `--deps` under `--setup`
+included, while create, write, chmod, rename and unlink worked. Measured:
+
+- `touch`, Python `os.utime`, `tar -x`, `cp -p` and `shutil.copy2` all failed;
+- allowing every named write operation (the nine in `WRITE`, plus
+  `file-write-acl`, `file-write-finderinfo`, `file-write-mount`, `file-revoke`)
+  still refused `touch`;
+- `(deny default)` with `(allow file-write-times)` refused it as well;
+- only a `file-write*` allow let it through.
+
+So on this version, setting times is checked under an operation none of the
+names match. Precedence, re-measured in minimal profiles on 27.0.1, each
+`(allow default) (deny file-write* <dir>)` followed by:
+
+| Row | Rules (T = a tree, .git inside it) | touch T | write T | touch .git | write .git |
+|---|---|---|---|---|---|
+| A | allow* T; deny named .git | ok | ok | **ok** | no |
+| B | allow* T; deny* .git | ok | ok | no | no |
+| C | deny* .git; allow* T | ok | ok | ok | ok |
+| D | allow* T; deny *+named .git | ok | ok | no | no |
+| E | allow named T; deny* .git | no | ok | no | ok |
+| F | allow *+named T; deny *+named .git | ok | ok | no | no |
+| G | deny *+named .git; allow *+named T | ok | ok | ok | ok |
+
+The rule above ("a rule naming an operation beats a wildcard whatever their
+order") still holds for named operations (row E). Between two wildcard rules
+the later wins (B and C).
+
+**The change:**
+- `WRITE` now carries `file-write*` beside the nine names, so every write allow
+  and deny has both forms, deny after allow (row F).
+- A `file-write*` allow would also open `file-write-acl`,
+  `file-write-finderinfo`, `file-write-mount` and `file-write-unmount` (a real
+  operation name on 27.0.1: a profile naming it runs, while a bogus name,
+  `file-write-nonsense`, fails with "unbound variable", exit 65). These are denied
+  by name on every allowed tree, emitted after the `--tmp` re-allow. Measured: an ACL write
+  in the root succeeds under a wildcard allow without that deny and is refused
+  with it; `touch` still works.
+- Writing `com.apple.FinderInfo` through `xattr -w` is checked as
+  `file-write-xattr`, which the profile already allowed, so it is no widening.
+  The finderinfo, mount and unmount denies have no unprivileged probe:
+  **unproved**. The ACL deny is probed in the root, `--tmp` and deps under setup,
+  not in the pnpm lock folder.
+- The self-test now checks that setting a time works in the root and is refused
+  with EPERM in the root's `.git`.
+
+**Tests** (`scripts/tests/proof-sandbox-test.sh`, "file times"): a pre-created
+file with an old stamp, set by `os.utime` in the sandbox.
+- Allowed (ok and the new stamp): the root, `--tmp`, deps under `--setup`, and
+  a `tar -x` that keeps the member's stamp.
+- Refused (EPERM and the old stamp): the root's `.git`, a secret path, `runs/`,
+  `logs/` and a `run-goal-*` folder, all with HOME inside the root (beneath the
+  root's write allow, where row A's hole would open); deps outside setup; a
+  control outside every tree.
+- ACL writes refused with EPERM in the root, `--tmp` and deps under setup.
+- The self-test case compares the exit code and any reason it printed, so a
+  plant shows which check failed.
+
+**Plants,** each on a copy of `scripts/` with `GOALS.example.md` beside it. The
+clean copy passes.
+
+| Plant | Mutation | Red cases |
+|---|---|---|
+| P1 | `WRITE` without the wildcard (the old profile) | 5: the four allowed time cases, the self-test ("setting a file's time in the root is refused") |
+| P2 | the wildcard in the allows only | 7: all six in-root refused time cases, the self-test ("… in the root's .git was not refused") |
+| P3 | the wildcard in the denies only | 5: the four allowed time cases, the self-test ("… in the root is refused") |
+| P4 | a root write allow re-emitted after the denials (the plan's "denies before allows", planted as the equivalent order) | 12: in-root write and time denials, the self-test ("… in the root's .git was not refused"); the outside control stays refused |
+| P5 | the denies carry `file-write*` alone | 5: the in-root write denials (`.git`, its case and firmlink spellings, `~/.ssh`) |
+| P6 | the extra-operations deny removed | 3: the ACL cases (the write succeeds) |
