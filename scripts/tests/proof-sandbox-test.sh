@@ -112,6 +112,49 @@ check "inside the root: the logs refused" no "$(sbx "cat \"$IH/.cache/claude-cod
 # A secret path that did not exist when the profile was made, created after it.
 check "inside the root: a secret path made after the profile" no \
   "$(mkdir -p "$IH/.aws" && echo c >"$IH/.aws/credentials"; sbx "cat \"$IH/.aws/credentials\"")"
+
+echo "== file times (macOS 27: only file-write* covers setting them)"
+# Every file exists before the sandboxed call and carries an old stamp (1e9);
+# the call sets 2e9. Allowed: ok and the new stamp. Refused: EPERM and the old.
+stamp() { "$PY" -c "import os,sys; [os.utime(p, (1e9, 1e9)) for p in sys.argv[1:]]" "$@"; }
+settime() { errno "import os,errno
+try: os.utime('$1', (2e9, 2e9)); print('ok')
+except OSError as e: print('EPERM' if e.errno == errno.EPERM else 'errno=%d' % e.errno)"; }
+# timed FILE — the sandboxed call's result, then FILE's stamp afterwards.
+timed() { echo "$(settime "$1") $(stat -f %m "$1")"; }
+mkdir -p "$IH/.cache/claude-coding-workflow/runs/x"
+for f in "$IH/.ssh/stamp" "$IH/.cache/claude-coding-workflow/runs/x/stamp" "$IH/.cache/claude-coding-workflow/logs/stamp" \
+  "$IH/.cache/claude-coding-workflow/run-goal-g1/stamp" "$ROOT/.git/stamp"; do : >"$f"; done
+stamp "$IH/.ssh/stamp" "$IH/.cache/claude-coding-workflow/runs/x/stamp" "$IH/.cache/claude-coding-workflow/logs/stamp" \
+  "$IH/.cache/claude-coding-workflow/run-goal-g1/stamp" "$ROOT/.git/stamp"
+# Refused beneath the root's write allow (HOME inside the root, as above).
+check "times: inside the root, ~/.ssh refused" "EPERM 1000000000" "$(timed "$IH/.ssh/stamp")"
+check "times: inside the root, the runs folder refused" "EPERM 1000000000" "$(timed "$IH/.cache/claude-coding-workflow/runs/x/stamp")"
+check "times: inside the root, the logs refused" "EPERM 1000000000" "$(timed "$IH/.cache/claude-coding-workflow/logs/stamp")"
+check "times: inside the root, a run-goal-* folder refused" "EPERM 1000000000" "$(timed "$IH/.cache/claude-coding-workflow/run-goal-g1/stamp")"
+check "times: the root's .git refused" "EPERM 1000000000" "$(timed "$ROOT/.git/stamp")"
+profile
+: >"$ROOT/tstamp"; : >"$T/tstamp"; : >"$HOME/tstamp"; : >"$ROOT/.git/stamp2"
+stamp "$ROOT/tstamp" "$T/tstamp" "$HOME/tstamp" "$ROOT/.git/stamp2"
+check "times: the root allowed" "ok 2000000000" "$(timed "$ROOT/tstamp")"
+check "times: the private TMPDIR allowed" "ok 2000000000" "$(timed "$T/tstamp")"
+check "times: the root's .git refused (plain profile)" "EPERM 1000000000" "$(timed "$ROOT/.git/stamp2")"
+check "times: outside every tree refused" "EPERM 1000000000" "$(timed "$HOME/tstamp")"
+mkdir -p "$TMP/tarsrc" && echo t >"$TMP/tarsrc/member" && stamp "$TMP/tarsrc/member" &&
+  (cd "$TMP/tarsrc" && tar -cf "$ROOT/one.tar" member)
+check "times: tar -x in the root keeps the member's stamp" "yes 1000000000" \
+  "$(sbx 'mkdir -p xt && tar -xf one.tar -C xt') $(stat -f %m "$ROOT/xt/member" 2>/dev/null)"
+: >"$ROOT/aclf"; : >"$T/aclf"
+# aclw FILE — an ACL write in the sandbox: "no yes" when refused with EPERM.
+aclw() { echo "$(sbx "chmod +a \"everyone deny read\" \"$1\"") $(has 'Operation not permitted' "$(cat "$OUT")")"; }
+check "an ACL write in the root is refused with EPERM" "no yes" "$(aclw "$ROOT/aclf")"
+check "an ACL write in the private TMPDIR is refused with EPERM" "no yes" "$(aclw "$T/aclf")"
+DP="$TMP/deps"; mkdir -p "$DP" && : >"$DP/dstamp" && stamp "$DP/dstamp"
+profile --deps "$DP"
+check "times: deps refused outside setup" "EPERM 1000000000" "$(timed "$DP/dstamp")"
+profile --deps "$DP" --setup
+check "times: deps allowed under --setup" "ok 2000000000" "$(timed "$DP/dstamp")"
+check "an ACL write in deps under --setup is refused with EPERM" "no yes" "$(aclw "$DP/dstamp")"
 profile
 
 echo "== hard links"
@@ -278,7 +321,7 @@ check "proof_network absent: none" none "$(python3 "$HERE/goals.py" "$HERE/../GO
 
 echo "== the self-test"
 proof_sandbox_selftest >"$TMP/st" && rc=0 || rc=$?
-check "the self-test passes on this machine" 0 "$rc"
+check "the self-test passes on this machine (exit, then any reason it printed)" "0 " "$rc $(paste -sd '|' - <"$TMP/st")"
 # On a copy of lib/ (never the house's own: other tests run beside this one).
 cp -R "$HERE/lib" "$TMP/libcopy" && rm "$TMP/libcopy/proof-sandbox.py"
 (source "$TMP/libcopy/proof-sandbox.sh" && proof_sandbox_selftest) >"$TMP/st" && rc=0 || rc=$?
@@ -295,6 +338,7 @@ check "an unsandboxed sandbox-exec fails the self-test" 1 "$rc"
 check "  ...named: the write outside" yes "$(has 'write outside the root' "$(cat "$TMP/st")")"
 check "  ...named: the secret" yes "$(has 'secret-list file' "$(cat "$TMP/st")")"
 check "  ...named: the network" yes "$(has 'public connect' "$(cat "$TMP/st")")"
+check "  ...named: the time in the root's .git" yes "$(has "time in the root's .git" "$(cat "$TMP/st")")"
 
 if [[ "$fails" -eq 0 ]]; then
   echo "proof-sandbox-test: all passed"
