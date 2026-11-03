@@ -174,12 +174,12 @@ Where the trap and the failure show up, by language:
 | C / C++ | print the message, `fflush(stdout)`, `fflush(stderr)`, `abort()` (CTest captures through a pipe; an unflushed message is lost) | the message, and CTest's abort/exception line for that test |
 | Python | `raise NotImplementedError("<feature>-trap")` | a traceback ending in that message, or the goal's `AssertionError` |
 | TypeScript | `throw new Error("<feature>-trap")`; an async body returns `Promise.reject(new Error("<feature>-trap"))` | the message in the runner's failure for that test; the `proof` runs a check and `tsc` before the runner ([TYPESCRIPT.md](TYPESCRIPT.md)) |
-| Rust / Go | `panic!("<feature>-trap")` / `panic("<feature>-trap")` | the panic message for that test |
+| Rust | `panic!("<feature>-trap")`, stub parameters named `_x` | the message on the line after libtest's `panicked at` line for that test; the `proof` runs a version check and two checks before `cargo test` ([RUST.md](RUST.md)) |
+| Go | `panic("<feature>-trap")` | the panic message for that test |
 
 Another language: the analogous trap and run; never a compile-only or collect-only step.
-A TypeScript `proof` calls Node and every tool by absolute path (the host runs
-`bash -c`, no login shell) and needs no network; TYPESCRIPT.md has the Vitest
-and node:test recipes, proved by planted oracle defects.
+A TypeScript or Rust `proof` calls its tools by absolute path (the host runs `bash -c`, no login
+shell) and needs no network; TYPESCRIPT.md and RUST.md have the recipes, proved by planted defects.
 
 The failure classes these catch, and that the self-review and the oracle review look for:
 

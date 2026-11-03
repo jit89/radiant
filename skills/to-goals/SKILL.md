@@ -67,7 +67,7 @@ Cheap, deterministic evidence first; the independent model last. In order:
 
 **0b. The language runs under the proof sandbox.** If the walk's language
 and toolchain are not yet proved under the sandbox (so far: C with CMake,
-TypeScript with Vitest or node:test, Python with pytest and uv), first run one
+TypeScript with Vitest or node:test, Python with pytest and uv, Rust with cargo), first run one
 `worktree_setup` and one proof of a small project of that language under
 `scripts/lib/proof-sandbox.py` (`--setup` for the setup) and record in the
 feature's evidence that both pass and nothing new is denied. A failure here
@@ -108,7 +108,7 @@ assertions, missing plan cases) is a Phase 3 failure, not a Phase 4 problem.
 with every body a trap carrying a unique message (C/C++ write it, flush
 stdout and stderr, then `abort()`); existing API is the real code. Run the
 goal's **`proof`** command — the command the host runs — with
-`PYTHONDONTWRITEBYTECODE=1` (TypeScript: TYPESCRIPT.md). Pass bar
+`PYTHONDONTWRITEBYTECODE=1` (TypeScript: TYPESCRIPT.md; Rust: RUST.md). Pass bar
 (GOAL-FORMAT.md, "Prove the oracle is satisfiable before committing it — the
 tiers", has the per-language notes):
 
@@ -128,7 +128,7 @@ filtered to this goal's case, like any other.
 **3. Tier 2 — computed expectations.** Any expected value the plan does not
 state verbatim is checked against an existing reference with the same
 semantics, or a small brute-force model of the spec, in the scratchpad
-(TypeScript: TYPESCRIPT.md). **Tier 3, last resort:** a full scratch
+(TypeScript: TYPESCRIPT.md; Rust: RUST.md). **Tier 3, last resort:** a full scratch
 implementation only when no reference exists and brute force is infeasible —
 tell the user first; boxed to 30 minutes unless they extend it; never
 committed, never shown to the implementer; when the box ends, stop and journal
