@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index dcfac28..9ddfe90 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -42,3 +42,8 @@ fn show_one() {
+ fn fold_dotted_i() {
+     assert_eq!(fold("İ"), "i\u{307}");
+ }
++
++#[test]
++fn total_large() {
++    assert_eq!(total_secs(3_000_000_000, 2_000_000_000), 705_032_704);
++}

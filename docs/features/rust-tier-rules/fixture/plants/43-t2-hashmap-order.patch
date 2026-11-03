@@ -1,0 +1,15 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index dcfac28..c802611 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -18,9 +18,7 @@ fn width_bytes() {
+ 
+ #[test]
+ fn units_set() {
+-    let mut u = units();
+-    u.sort();
+-    assert_eq!(u, ["d", "h", "m", "ms", "ns", "s", "us", "w"]);
++    assert_eq!(units(), ["ns", "us", "ms", "s", "m", "h", "d", "w"]);
+ }
+ 
+ #[test]

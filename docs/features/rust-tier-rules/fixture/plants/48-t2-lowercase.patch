@@ -1,0 +1,11 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index dcfac28..a862a0c 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -40,5 +40,5 @@ fn show_one() {
+ 
+ #[test]
+ fn fold_dotted_i() {
+-    assert_eq!(fold("İ"), "i\u{307}");
++    assert_eq!(fold("İ"), "i");
+ }

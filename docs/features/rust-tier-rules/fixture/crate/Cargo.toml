@@ -1,0 +1,22 @@
+[package]
+name = "duration"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+insta = "1"
+mockall = "0.15"
+proptest = "1"
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[[test]]
+name = "g1"
+path = "tests/acceptance/g1.rs"
+
+[[test]]
+name = "g2"
+path = "tests/acceptance/g2.rs"

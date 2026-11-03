@@ -1,0 +1,65 @@
+--- run 1
+total_secs(3e9,2e9) = panic (overflow)
+total_secs(1,2) = 3
+wrapping 3e9+2e9 = 705032704
+-7 % 3 = -1
+(-7).rem_euclid(3) = 2
+"go🚀".len() = 6
+"go🚀".chars().count() = 3
+hashmap keys = ["h", "ns", "s", "ms", "us", "m", "d", "w"]
+-(0.0) = -0.0, bits 0x8000000000000000, == 0.0: true
+mean([]) = NaN, == NAN: false, is_nan: true
+Display 1.0 = 1, Debug 1.0 = 1.0
+"İ".to_lowercase() = "i\u{307}", chars [105, 775]
+--- run 2
+total_secs(3e9,2e9) = panic (overflow)
+total_secs(1,2) = 3
+wrapping 3e9+2e9 = 705032704
+-7 % 3 = -1
+(-7).rem_euclid(3) = 2
+"go🚀".len() = 6
+"go🚀".chars().count() = 3
+hashmap keys = ["ns", "s", "d", "m", "us", "ms", "w", "h"]
+-(0.0) = -0.0, bits 0x8000000000000000, == 0.0: true
+mean([]) = NaN, == NAN: false, is_nan: true
+Display 1.0 = 1, Debug 1.0 = 1.0
+"İ".to_lowercase() = "i\u{307}", chars [105, 775]
+--- run 3
+total_secs(3e9,2e9) = panic (overflow)
+total_secs(1,2) = 3
+wrapping 3e9+2e9 = 705032704
+-7 % 3 = -1
+(-7).rem_euclid(3) = 2
+"go🚀".len() = 6
+"go🚀".chars().count() = 3
+hashmap keys = ["d", "w", "h", "s", "ns", "ms", "us", "m"]
+-(0.0) = -0.0, bits 0x8000000000000000, == 0.0: true
+mean([]) = NaN, == NAN: false, is_nan: true
+Display 1.0 = 1, Debug 1.0 = 1.0
+"İ".to_lowercase() = "i\u{307}", chars [105, 775]
+--- run 4
+total_secs(3e9,2e9) = panic (overflow)
+total_secs(1,2) = 3
+wrapping 3e9+2e9 = 705032704
+-7 % 3 = -1
+(-7).rem_euclid(3) = 2
+"go🚀".len() = 6
+"go🚀".chars().count() = 3
+hashmap keys = ["h", "d", "m", "us", "ms", "ns", "s", "w"]
+-(0.0) = -0.0, bits 0x8000000000000000, == 0.0: true
+mean([]) = NaN, == NAN: false, is_nan: true
+Display 1.0 = 1, Debug 1.0 = 1.0
+"İ".to_lowercase() = "i\u{307}", chars [105, 775]
+--- run 5
+total_secs(3e9,2e9) = panic (overflow)
+total_secs(1,2) = 3
+wrapping 3e9+2e9 = 705032704
+-7 % 3 = -1
+(-7).rem_euclid(3) = 2
+"go🚀".len() = 6
+"go🚀".chars().count() = 3
+hashmap keys = ["s", "d", "ms", "m", "h", "ns", "w", "us"]
+-(0.0) = -0.0, bits 0x8000000000000000, == 0.0: true
+mean([]) = NaN, == NAN: false, is_nan: true
+Display 1.0 = 1, Debug 1.0 = 1.0
+"İ".to_lowercase() = "i\u{307}", chars [105, 775]

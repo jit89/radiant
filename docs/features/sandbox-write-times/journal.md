@@ -64,3 +64,6 @@ Full suite green: 44 test scripts, 0 failures. Waiting for the user's OK to comm
 
 ## 2026-11-02T22:33:56Z — ARCHITECT commit
 The user OKd the commit, with plants.sh included (the reviewed harness; only its header comment and the house path, now relative to the script, differ).
+
+## 2026-11-02T22:34:52Z — ARCHITECT release
+Committed 75840a2 (main = workflow-optimization). install.sh ran. make-release.sh built release 8cc04de (3 shipped paths: proof-sandbox.py, proof-sandbox.sh, proof-sandbox-test.sh), with the uncommitted rust-tier-rules folder parked outside the repo for the build and moved back. Pushed main and release (no force).

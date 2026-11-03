@@ -1,0 +1,14 @@
+diff --git a/tests/acceptance/g1.rs b/tests/acceptance/g1.rs
+index 97bc08e..76d73ca 100644
+--- a/tests/acceptance/g1.rs
++++ b/tests/acceptance/g1.rs
+@@ -47,3 +47,9 @@ fn must_parse_panics_on_empty() {
+     let e = std::panic::catch_unwind(|| must_parse("")).unwrap_err();
+     assert_eq!(panic_message(e), "duration must not be empty");
+ }
++
++#[test]
++#[should_panic(expected = "duration")]
++fn must_parse_rejects_empty() {
++    must_parse("");
++}

@@ -303,7 +303,8 @@ step 4 of the workflow optimisation; build them as one change.
    | C / C++ | compile each oracle against the planned header, link against stub definitions, real flags (`-Werror`, sanitizers) |
    | Python | import the oracle against a stub module (`typing.Protocol`/stub functions), `pyright` or `mypy --strict` if the project uses one, `pytest --collect-only` so collection errors surface |
    | TypeScript | `tsc --noEmit` against a stub `.d.ts` for the planned API, the project's `strict` settings; the test runner's list mode (`vitest list` / `jest --listTests`) |
-   | Rust / Go | `cargo test --no-run` / `go vet` + `go test -run '^$'` against stub items |
+   | Rust | superseded: rustc type-checks inside the `proof` itself; see `skills/to-goals/RUST.md` (rust-tier-rules) |
+   | Go | `go vet` + `go test -run '^$'` against stub items |
    The stub is the plan's API with every body a trap (`abort()`, `raise
    NotImplementedError`, `throw`), so the oracle compiles but cannot pass.
    Prove harness seams (sanitizer traps, test registration, discovery) with
@@ -1118,3 +1119,45 @@ inputs to its recon:
     `tokio::time::timeout`);
   - `CatchPanicLayer` and mocks of the database layer have the shape of the
     mockall plant.
+
+## 34. Carried to the first Rust project's Phase 1 (from rust-tier-rules, 2026-11-03)
+
+What worked when proving the Rust tier rules (`skills/to-goals/RUST.md`,
+`docs/features/rust-tier-rules/EVIDENCE.md`), and what is still open, for the
+first Rust target's recon:
+
+- **cargo in the proof.** The host's `bash -c` does not find a rustup proxy.
+  Call the toolchain's own `cargo` and `rustc` by absolute path, and bind cargo
+  to that rustc (`RUSTC="$RUSTC"`). Keep every other path in the proof relative
+  to the checkout: the host runs a proof from the goal's checkout or a merged
+  worktree, so an absolute repo path would point at the wrong tree.
+- **Crates offline: vendor them.** Neither a proof nor the implementer's
+  sandbox has network.
+  - A serial run has no deps folder: `run-goal.sh` clears `PROOF_DEPS_DIR`
+    outside a walk's worktrees, so the proof's `CARGO_HOME` is its own empty
+    temp folder.
+  - `claude-implement.sh` never sets `CARGO_HOME`, so a `worktree_setup` fetch
+    never reaches the implementer.
+  - Measured: committing `vendor/` (`cargo vendor`) with a `.cargo/config.toml`
+    source replacement makes the proof pass with no deps folder at all. Its
+    effect on the implementer (Claude Code's sandbox) is **not measured**:
+    check it in the first Rust project's step 0b, or close the gap in the
+    launcher.
+  - `vendor/` and `.cargo/config.toml` are committed by the Architect in
+    Phase 3, and no goal edits them (an edited vendored crate still passes
+    `--locked`). The rule reaches the implementer and reviewer only through
+    each goal's **Out of scope**, which names both. The run-goal host does not
+    guard them yet; whether it should, as it guards `tests/acceptance/`, is for
+    that project.
+  - `cargo vendor` copies crates for every platform (the fixture's lockfile
+    has `windows-sys`, `linux-raw-sys`, `r-efi`), so `vendor/` is large.
+- **Build time** (cargo's own "Finished" time, Apple M1, fixture with insta,
+  mockall, proptest and tokio as dev-dependencies): cold 6.2 s from the deps
+  folder, 5.7 s vendored; warm 0.4 s. A real target's cold build is the number
+  to check against `PROOF_TIMEOUT` (default 600 s).
+- **Registration.** Every goal's `[[test]]` block is committed in Phase 3.
+- **The environment.** Unset `RUSTFLAGS`, `RUSTC_WRAPPER`, `CARGO_*` and the
+  like in the walk's environment (RUST.md lists them). The host passes it
+  through.
+- **The toolchain.** How the target pins and installs it is the project's
+  choice. The house's machine has it isolated in `~/.local/rust`.

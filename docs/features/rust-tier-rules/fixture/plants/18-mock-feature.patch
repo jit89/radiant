@@ -1,0 +1,23 @@
+diff --git a/tests/acceptance/g1.rs b/tests/acceptance/g1.rs
+index 97bc08e..8b062bd 100644
+--- a/tests/acceptance/g1.rs
++++ b/tests/acceptance/g1.rs
+@@ -47,3 +47,18 @@ fn must_parse_panics_on_empty() {
+     let e = std::panic::catch_unwind(|| must_parse("")).unwrap_err();
+     assert_eq!(panic_message(e), "duration must not be empty");
+ }
++
++mockall::mock! {
++    Src {}
++    impl DurationSource for Src {
++        fn get(&self, key: &str) -> Option<String>;
++    }
++}
++
++#[test]
++fn source_gives_value() {
++    let mut m = MockSrc::new();
++    m.expect_get()
++        .returning(|_| parse_duration("5s").ok().map(|_| "5s".to_string()));
++    assert_eq!(m.get("timeout"), Some("5s".to_string()));
++}

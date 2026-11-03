@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index dcfac28..13a8d1c 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -30,7 +30,7 @@ fn negate_zero() {
+ 
+ #[test]
+ fn mean_empty() {
+-    assert!(mean(&[]).is_nan());
++    assert_eq!(mean(&[]), f64::NAN);
+ }
+ 
+ #[test]

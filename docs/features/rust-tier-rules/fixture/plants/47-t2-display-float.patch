@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index dcfac28..45712aa 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -35,7 +35,7 @@ fn mean_empty() {
+ 
+ #[test]
+ fn show_one() {
+-    assert_eq!(show(1.0), "1");
++    assert_eq!(show(1.0), "1.0");
+ }
+ 
+ #[test]

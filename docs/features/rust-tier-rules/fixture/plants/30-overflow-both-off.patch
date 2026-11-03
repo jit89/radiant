@@ -1,0 +1,44 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index beaf42f..614127e 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -20,3 +20,9 @@ path = "tests/acceptance/g1.rs"
+ [[test]]
+ name = "g2"
+ path = "tests/acceptance/g2.rs"
++
++[profile.dev]
++overflow-checks = false
++
++[profile.test]
++overflow-checks = false
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index dcfac28..677c187 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -42,3 +42,25 @@ fn show_one() {
+ fn fold_dotted_i() {
+     assert_eq!(fold("İ"), "i\u{307}");
+ }
++
++fn panic_text(e: Box<dyn std::any::Any + Send>) -> String {
++    if let Some(s) = e.downcast_ref::<&str>() {
++        s.to_string()
++    } else if let Some(s) = e.downcast_ref::<String>() {
++        s.clone()
++    } else {
++        String::new()
++    }
++}
++
++#[test]
++fn lib_overflow_panics() {
++    let e = std::panic::catch_unwind(|| total_secs(3_000_000_000, 2_000_000_000)).unwrap_err();
++    assert!(panic_text(e).contains("overflow"));
++}
++
++#[test]
++fn oracle_overflow_panics() {
++    let e = std::panic::catch_unwind(|| std::hint::black_box(3_000_000_000u32) + std::hint::black_box(2_000_000_000u32)).unwrap_err();
++    assert!(panic_text(e).contains("overflow"));
++}

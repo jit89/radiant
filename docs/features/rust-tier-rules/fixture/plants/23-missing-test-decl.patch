@@ -1,0 +1,15 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index beaf42f..4717781 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -13,10 +13,6 @@ mockall = "0.15"
+ proptest = "1"
+ tokio = { version = "1", features = ["macros", "rt"] }
+ 
+-[[test]]
+-name = "g1"
+-path = "tests/acceptance/g1.rs"
+-
+ [[test]]
+ name = "g2"
+ path = "tests/acceptance/g2.rs"

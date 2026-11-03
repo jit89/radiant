@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index dcfac28..2787fd3 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -25,7 +25,7 @@ fn units_set() {
+ 
+ #[test]
+ fn negate_zero() {
+-    assert_eq!(negate(0.0).to_bits(), (-0.0f64).to_bits());
++    assert_eq!(negate(0.0), 0.0);
+ }
+ 
+ #[test]

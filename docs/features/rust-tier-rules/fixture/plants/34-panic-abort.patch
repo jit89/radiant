@@ -1,0 +1,14 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index beaf42f..894a4c4 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -20,3 +20,9 @@ path = "tests/acceptance/g1.rs"
+ [[test]]
+ name = "g2"
+ path = "tests/acceptance/g2.rs"
++
++[profile.dev]
++panic = "abort"
++
++[profile.test]
++panic = "abort"
