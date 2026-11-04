@@ -1302,3 +1302,63 @@ one `target/` and pays the cost once.
 - The proof sandbox denies nothing new.
 
 **First data point:** Paladin M0, after its walk ends. Time one cold proof against one warm proof in a worktree.
+
+## 39. Put the pinned Rust toolchain's `bin` on the implementer's `PATH` (2026-11-05)
+
+In the Paladin M0 walk, four implementer END records in a row (g3, g4, g5 and g6) say "`cargo clippy` / `cargo
+fmt` are unavailable in the pinned toolchain". They are installed: `cargo-clippy` and `cargo-fmt` sit next to
+`cargo` in `~/.local/rust/rustup/toolchains/1.99.1-aarch64-apple-darwin/bin/`.
+
+**Cause, reproduced on 2026-11-05.** Cargo looks for `cargo-<cmd>` subcommands on `PATH` and in `$CARGO_HOME/bin`,
+not in its own folder. The RUST.md recipe calls `$CARGO` by absolute path, and that folder is not on the
+implementer's `PATH`, so the subcommands are not found:
+
+```
+env -i HOME=$HOME PATH=/usr/bin:/bin $T/cargo clippy --version    # error: no such command: `clippy`
+env -i HOME=$HOME PATH=$T:/usr/bin:/bin $T/cargo clippy --version  # clippy 0.1.99
+```
+
+**Result.** About 39 clippy errors and 137 rustfmt diffs reached `main` unseen. g1 ran clippy only because that
+pass happened to have the toolchain on `PATH`. The repeated note is the signal that the implementer prompt and
+environment no longer fit (`/run-goals`: "propose an implementer-prompt audit").
+
+**Fix:**
+- The walker prepends `dirname "$CARGO"` to `PATH` for the implementer and for the proof sandbox, in the same place
+  it pins `$CARGO` and `$RUSTC`.
+- The implementer prompt tells the implementer to run `cargo clippy` and `cargo fmt --check` before reporting
+  `DONE`.
+
+**Done when:**
+- A Rust fixture's implementer pass can run both commands.
+- A test under `scripts/tests/` fails if the prepended `PATH` is removed.
+- The proof sandbox still denies nothing new.
+
+## 40. Rust proof recipe: opt-in clippy and rustfmt gates (2026-11-05)
+
+The RUST.md proof runs `cargo test --test <id>` only. Lint and format debt therefore passes every goal and piles up
+over a walk: about 39 clippy errors and 137 rustfmt diffs by the end of Paladin M0.
+
+**Fix:** an optional recipe tail, which a plan opts into, run after the test:
+
+```
+PATH="$(dirname "$CARGO"):$PATH" "$CARGO" clippy --offline --locked --workspace --all-targets -- -D warnings
+PATH="$(dirname "$CARGO"):$PATH" "$CARGO" fmt --all --check
+```
+
+It depends on item 39.
+
+**Open questions:**
+1. **Gate placement.** Running clippy over the whole workspace makes every goal pay for every earlier goal's lint
+   debt. The options:
+   - run it per package for the goal's `area`;
+   - run it workspace-wide only once the workspace is clean.
+2. **Pedantic warnings.** `-D warnings` turns `pedantic = "warn"` into hard errors. RUST.md should say whether the
+   gate denies only the plan's deny list (`-D clippy::<each>`) or every warning.
+3. **Ordering.** Clippy reuses the test build's metadata only partly, so check that it stays inside the proof
+   timeout on a cold `target/` ([[38]]).
+4. **Tamper.** A target's `clippy.toml` or `rustfmt.toml` can weaken the gate. Treat them like `Cargo.toml`:
+   Architect-owned and out of scope for goals. RUST.md already lists `clippy.toml`; add `rustfmt.toml` and
+   `.rustfmt.toml`.
+
+**Done when:** RUST.md documents the tail, and a `scripts/tests/` case has a planted `unwrap()` in a goal's crate
+that turns the proof red.
