@@ -1,0 +1,38 @@
+postgres (PostgreSQL) 18.6 (Homebrew)
+== initdb-inside-id2: goal id 2 chars; socket path 86 bytes (/Users/cobalt/.cache/claude-coding-workflow/runs/run-goal-g1-DJWh8u/tmp/.s.PGSQL.5432)
+rc=1; reached the server: 0
+initdb: could not look up effective user ID 501: user does not exist
+no leftover server
+-- denials:
+== initdb-inside-id12: goal id 12 chars; socket path 96 bytes (/Users/cobalt/.cache/claude-coding-workflow/runs/run-goal-parse-notes1-Mprr6L/tmp/.s.PGSQL.5432)
+rc=1; reached the server: 0
+initdb: could not look up effective user ID 501: user does not exist
+no leftover server
+-- denials:
+== initdb-inside-id23: goal id 23 chars; socket path 107 bytes (/Users/cobalt/.cache/claude-coding-workflow/runs/run-goal-notes-create-and-get-24-JrpVRy/tmp/.s.PGSQL.5432)
+rc=1; reached the server: 0
+initdb: could not look up effective user ID 501: user does not exist
+no leftover server
+-- denials:
+== server-inside-id2: goal id 2 chars; socket path 86 bytes (/Users/cobalt/.cache/claude-coding-workflow/runs/run-goal-g1-huqigo/tmp/.s.PGSQL.5432)
+initdb outside the sandbox: ok
+rc=2; reached the server: 0
+2026-11-04 16:31:30.854 IST [27851] FATAL:  shmat(id=917504, addr=0x0, flags=0x0) failed: Operation not permitted
+2026-11-04 16:31:30.854 IST [27851] LOG:  shmctl(917504, 0, 0) failed: Operation not permitted
+no leftover server
+removing System V segment 917504 (created by postgres pid 27851)
+-- denials:
+   1 spotlightknowledged.importer deny(1) mach-lookup com.apple.PowerManagement.control
+   1 postgres deny(1) ipc-sysv-shm
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:SkipperNEIgnoreAtCritical
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:PowerDistribution
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:PortControllerInfo
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:FedDetails
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:DeadBatteryBootData
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:ChargerConfiguration
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:BootVoltage
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:BatteryShutdownReason
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:AtCriticalLevel
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:AppleRawExternalConnected
+   1 dasd deny(1) iokit-get-properties iokit-class:AppleSmartBattery property:AppleRawBatteryVoltage
+-- System V segments owned by cobalt after the probes:

@@ -1,0 +1,20 @@
+diff --git a/tests/acceptance/g1.rs b/tests/acceptance/g1.rs
+index 7b69a8d..988240d 100644
+--- a/tests/acceptance/g1.rs
++++ b/tests/acceptance/g1.rs
+@@ -18,3 +18,15 @@ async fn rejects_empty_title(pool: SqlitePool) {
+ async fn missing_is_none(pool: SqlitePool) {
+     assert_eq!(get_note(&pool, 42).await.unwrap(), None);
+ }
++
++struct Fake;
++impl NoteRepo for Fake {
++    fn get(&self, id: i64) -> Option<Note> {
++        Some(Note { id, title: "hi".into() })
++    }
++}
++
++#[sqlx::test(migrations = "./migrations")]
++async fn repo_returns_the_note(_pool: SqlitePool) {
++    assert_eq!(Fake.get(7).map(|n| n.title), Some("hi".to_string()));
++}

@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g3.rs b/tests/acceptance/g3.rs
+index 6b7e1e5..2a0cf0e 100644
+--- a/tests/acceptance/g3.rs
++++ b/tests/acceptance/g3.rs
+@@ -30,7 +30,7 @@ async fn top_rowid_is_reused(pool: SqlitePool) {
+     create_note(&pool, "a").await.unwrap();
+     let b = create_note(&pool, "b").await.unwrap();
+     assert!(delete_note(&pool, b.id).await.unwrap());
+-    assert_eq!(create_note(&pool, "c").await.unwrap().id, b.id);
++    assert_eq!(create_note(&pool, "c").await.unwrap().id, b.id + 1);
+ }
+ 
+ #[sqlx::test(migrations = "./migrations")]

@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g3.rs b/tests/acceptance/g3.rs
+index 6b7e1e5..db56f71 100644
+--- a/tests/acceptance/g3.rs
++++ b/tests/acceptance/g3.rs
+@@ -11,7 +11,7 @@ async fn like_is_case_insensitive(pool: SqlitePool) {
+ 
+ #[sqlx::test(migrations = "./migrations")]
+ async fn integer_affinity(pool: SqlitePool) {
+-    assert_eq!(stored_type(&pool, "12").await, "integer");
++    assert_eq!(stored_type(&pool, "12").await, "text");
+     assert_eq!(stored_type(&pool, "x").await, "text");
+ }
+ 

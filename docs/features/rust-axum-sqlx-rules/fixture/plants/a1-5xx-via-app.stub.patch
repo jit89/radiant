@@ -1,0 +1,14 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index 5317f57..a912374 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -37,3 +37,9 @@ async fn missing_is_404_with_code(pool: SqlitePool) {
+     assert_eq!(s, StatusCode::NOT_FOUND);
+     assert_eq!(b["error"], "not_found");
+ }
++
++#[sqlx::test(migrations = "./migrations")]
++async fn get_failure_is_500(pool: SqlitePool) {
++    let (s, _) = call(app(AppState { pool }), Request::get("/notes/1").body(Body::empty()).unwrap()).await;
++    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR);
++}

@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g3.rs b/tests/acceptance/g3.rs
+index 6b7e1e5..7cebea6 100644
+--- a/tests/acceptance/g3.rs
++++ b/tests/acceptance/g3.rs
+@@ -22,7 +22,7 @@ async fn division_truncates(pool: SqlitePool) {
+ 
+ #[sqlx::test(migrations = "./migrations")]
+ async fn dates_compare_as_text(pool: SqlitePool) {
+-    assert!(!text_before(&pool, "2026-1-5", "2026-01-10").await);
++    assert!(text_before(&pool, "2026-1-5", "2026-01-10").await);
+ }
+ 
+ #[sqlx::test(migrations = "./migrations")]

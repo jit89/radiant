@@ -11,7 +11,8 @@ that passed Tier 1 into a Tier 1 failure, turned a tampering run clean, or
 turned a red run of the correct implementation green (the overflow rule).
 `RUSTC="$RUSTC"` is the exception: it makes the compiler cargo uses the one the
 version check read. Another runner (nextest) is proved the same way before its
-first oracle.
+first oracle. A project on Axum and SQLx also follows
+[RUST-AXUM-SQLX.md](RUST-AXUM-SQLX.md).
 
 ## The `proof`, as the host runs it
 

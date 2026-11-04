@@ -1,0 +1,14 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 9171ae0..3bf7246 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -52,8 +52,7 @@ pub async fn create_note(pool: &SqlitePool, title: &str) -> Result<Note, NoteErr
+ }
+ 
+ pub async fn get_note(pool: &SqlitePool, id: i64) -> Result<Option<Note>, NoteError> {
+-    sqlx::query_as::<_, Note>("SELECT id, title FROM notes WHERE id = ?")
+-        .bind(id)
++    sqlx::query_as!(Note, "SELECT id, title FROM notes WHERE id = ?", id)
+         .fetch_optional(pool)
+         .await
+         .map_err(db)

@@ -1,0 +1,14 @@
+diff --git a/migrations/0002_flags.sql b/migrations/0002_flags.sql
+new file mode 100644
+index 0000000..6dfb605
+--- /dev/null
++++ b/migrations/0002_flags.sql
+@@ -0,0 +1 @@
++CREATE TABLE flags (name TEXT);
+diff --git a/migrations/0002_tags.sql b/migrations/0002_tags.sql
+new file mode 100644
+index 0000000..23fae1d
+--- /dev/null
++++ b/migrations/0002_tags.sql
+@@ -0,0 +1 @@
++CREATE TABLE tags (name TEXT);

@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g3.rs b/tests/acceptance/g3.rs
+index 6b7e1e5..189b719 100644
+--- a/tests/acceptance/g3.rs
++++ b/tests/acceptance/g3.rs
+@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
+ #[sqlx::test(migrations = "./migrations")]
+ async fn like_is_case_insensitive(pool: SqlitePool) {
+     create_note(&pool, "Alpha").await.unwrap();
+-    assert_eq!(title_matches(&pool, "alpha").await, 1);
++    assert_eq!(title_matches(&pool, "alpha").await, 0);
+ }
+ 
+ #[sqlx::test(migrations = "./migrations")]

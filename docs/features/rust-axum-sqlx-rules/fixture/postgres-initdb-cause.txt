@@ -1,0 +1,7 @@
+== the proof profile as generated
+rc=1
+initdb: could not look up effective user ID 501: user does not exist
+== the same plus (allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))
+rc=1
+running bootstrap script ... 2026-11-04 16:48:44.878 IST [45396] FATAL:  could not create shared memory segment: Operation not permitted
+removing System V segment 1048576 left by this try

@@ -1089,6 +1089,8 @@ refusal in `.git`. The evidence is the proof-sandbox `EVIDENCE.md` correction.
 
 ## 33. Rust rules for Axum and SQLx (after the core Rust tier rules)
 
+**SQLite half done (2026-11-04):** `skills/to-goals/RUST-AXUM-SQLX.md`, `docs/features/rust-axum-sqlx-rules` (Grok APPROVED in round 5). Postgres moved to item 35: it cannot run under the proof sandbox. The hazards below are kept as the item's original input.
+
 The user's Rust stack is Axum, Tokio and SQLx. The core Rust item
 (`docs/features/rust-tier-rules`) covers Tokio's test macro and futures that
 are never awaited. Axum and SQLx need their own planted rules, in an item of
@@ -1161,3 +1163,80 @@ first Rust target's recon:
   through.
 - **The toolchain.** How the target pins and installs it is the project's
   choice. The house's machine has it isolated in `~/.local/rust`.
+
+## 35. A Postgres per proof, started by the host (from rust-axum-sqlx-rules, 2026-11-04)
+
+The user's production database is Postgres, but it cannot run under the proof
+sandbox. Measured through `proof_exec`, at a real run-goal TMPDIR length
+(`docs/features/rust-axum-sqlx-rules/EVIDENCE.md`):
+- `initdb` cannot look up the current user. Confirmed by experiment, run
+  with `sandbox-exec` and the generated proof profile rather than through
+  `proof_exec`: with only the `com.apple.system.opendirectoryd.libinfo` lookup
+  allowed, it gets past that and fails on shared memory instead
+  (`fixture/postgres-initdb-cause.sh`);
+- the server always attaches a System V shared-memory segment (`deny
+  ipc-sysv-shm`), even with `shared_memory_type=mmap`.
+
+Allowing global System V IPC to every proof is ruled out. The proposal is
+that `run-goal.sh` and the walker start a throwaway Postgres **outside** the
+sandbox for each proof:
+- `initdb` (trust, `--locale=C`), then `postgres` on a unix socket, with
+  `listen_addresses=''`;
+- the proof gets `DATABASE_URL=postgres://postgres@/postgres?host=<TMPDIR>&sslmode=disable`;
+- the host stops the server when the proof ends.
+
+It needs its own crucible and security review: an unsandboxed process
+serving a sandboxed one. **Its first load-bearing decision is where the socket
+goes.** The sandbox allows unix sockets only under the proof's own `TMPDIR`
+(`proof-sandbox.py`), and the path budget below rules out today's `TMPDIR`
+paths for merged proofs. So, either:
+- the host gives every Postgres proof a short `TMPDIR` (no profile change;
+  **chosen by the user, 2026-11-04**); or
+- the socket goes in a short directory elsewhere, which needs a new
+  `remote unix-socket` allow in the profile, reviewed as such.
+
+Inputs:
+- the socket path budget: macOS caps it at 104 bytes with the NUL, and
+  `$TMPDIR/.s.PGSQL.5432` takes 15 more than `TMPDIR`. On run-goal.sh's
+  `$RUN_DIR/tmp` it fits for goal ids up to 20 characters (86 bytes at 2, 107
+  at 23, with this `$HOME`). Other `proof_exec` paths are longer: the parallel
+  walker's merged proofs use `$WAVE_DIR/tmp-proof-<g>-<p>` (`wave-walk.sh`),
+  where two goal ids share about 7 characters, and mutation clones use their
+  own;
+- `pg_ctl start` daemonizes with `setsid`, so the server is run in the
+  foreground and stopped by the host, with its `postmaster.pid` checked
+  afterwards;
+- from research only (the probes used `psql`, not sqlx): sqlx connects to a
+  socket through its own URL form (an empty host, `?host=`), and ignores
+  `PGHOST`. Measure it first;
+- Postgres 18.6 is installed keg-only (`/opt/homebrew/opt/postgresql@18/bin`;
+  Homebrew linked it, and it was unlinked);
+- the rust-axum-sqlx-rules plan's Postgres plants and Tier 2 list (integer
+  division, `C` collation order, `ORDER BY`, `timestamptz` precision, a
+  `BIGSERIAL` gap) are written in its PLAN.md. The fixture (`notes-pg/`), the
+  Postgres recipe and their rows still have to be built on its harness;
+- sandboxed Postgres leaves System V segments behind: one from a server
+  refused the attach and its cleanup, one from an `initdb` whose later step
+  failed (two 56-byte segments, found and removed). The probes now remove what they leave; the host-run
+  server must clean up its own, and a proof that tries Postgres inside the
+  sandbox leaks one.
+
+Also carried to the first Axum + SQLx project:
+- the implementer's sandbox may not be able to reach a database, and with
+  checked macros banned (RUST-AXUM-SQLX.md) it does not need one to build;
+- lifting that ban needs a database for `cargo sqlx prepare`, or a host
+  service like this one;
+- `DATABASE_URL` is not stripped by name (`proof_env_unsets`); the recipes
+  unset it and set their own;
+- the SQLite cold proof takes about 17 s on an M1 (the bundled C build).
+
+## 36. run-all.sh loses a failing test's full output (2026-11-04)
+
+During rust-axum-sqlx-rules, a full suite run failed one test (`proof-test.sh`)
+under 4-way load. It passed alone twice and in a second full run. The failing
+assertion could not be read: `run-all.sh` prints only the tail of a failing
+test's output and removes its working folder (`rm -rf "$G"` on exit), and
+`--results` is filled only at the end. Fix: on any failure, keep that test's
+full `out` (or copy it to `~/.cache/claude-coding-workflow/tests/failed/`) and
+name the path in the report, so a one-off failure under load can be diagnosed
+afterwards.

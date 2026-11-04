@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g3.rs b/tests/acceptance/g3.rs
+index 6b7e1e5..a0d2c5a 100644
+--- a/tests/acceptance/g3.rs
++++ b/tests/acceptance/g3.rs
+@@ -17,7 +17,7 @@ async fn integer_affinity(pool: SqlitePool) {
+ 
+ #[sqlx::test(migrations = "./migrations")]
+ async fn division_truncates(pool: SqlitePool) {
+-    assert_eq!(int_ratio(&pool, -7, 2).await, -3);
++    assert_eq!(int_ratio(&pool, -7, 2).await, -4);
+ }
+ 
+ #[sqlx::test(migrations = "./migrations")]

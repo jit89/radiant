@@ -1,0 +1,13 @@
+diff --git a/tests/acceptance/g3.rs b/tests/acceptance/g3.rs
+index 6b7e1e5..685924e 100644
+--- a/tests/acceptance/g3.rs
++++ b/tests/acceptance/g3.rs
+@@ -38,7 +38,5 @@ async fn titles_in_order(pool: SqlitePool) {
+     for t in ["zeta", "alpha", "mid"] {
+         create_note(&pool, t).await.unwrap();
+     }
+-    let mut got = list_titles(&pool).await;
+-    got.sort();
+-    assert_eq!(got, ["alpha", "mid", "zeta"]);
++    assert_eq!(list_titles(&pool).await, ["zeta", "alpha", "mid"]);
+ }

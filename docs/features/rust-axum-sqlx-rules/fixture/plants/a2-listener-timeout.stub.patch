@@ -1,0 +1,21 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index 5317f57..7112d4a 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -37,3 +37,16 @@ async fn missing_is_404_with_code(pool: SqlitePool) {
+     assert_eq!(s, StatusCode::NOT_FOUND);
+     assert_eq!(b["error"], "not_found");
+ }
++
++#[sqlx::test(migrations = "./migrations")]
++async fn served_get_is_404(pool: SqlitePool) {
++    use tokio::io::{AsyncReadExt, AsyncWriteExt};
++    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let addr = l.local_addr().unwrap();
++    tokio::spawn(async move { axum::serve(l, router(AppState { pool })).await.unwrap() });
++    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
++    s.write_all(b"GET /notes/42 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await.unwrap();
++    let mut buf = Vec::new();
++    tokio::time::timeout(std::time::Duration::from_secs(5), s.read_to_end(&mut buf)).await.unwrap().unwrap();
++    assert!(String::from_utf8_lossy(&buf).starts_with("HTTP/1.1 404"));
++}

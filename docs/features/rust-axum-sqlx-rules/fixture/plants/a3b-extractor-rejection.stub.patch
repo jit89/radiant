@@ -1,0 +1,14 @@
+diff --git a/tests/acceptance/g2.rs b/tests/acceptance/g2.rs
+index 5317f57..c412275 100644
+--- a/tests/acceptance/g2.rs
++++ b/tests/acceptance/g2.rs
+@@ -37,3 +37,9 @@ async fn missing_is_404_with_code(pool: SqlitePool) {
+     assert_eq!(s, StatusCode::NOT_FOUND);
+     assert_eq!(b["error"], "not_found");
+ }
++
++#[sqlx::test(migrations = "./migrations")]
++async fn malformed_json_is_400(pool: SqlitePool) {
++    let (s, _) = call(router(AppState { pool }), post_json("not json")).await;
++    assert_eq!(s, StatusCode::BAD_REQUEST);
++}

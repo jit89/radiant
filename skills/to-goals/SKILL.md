@@ -67,7 +67,7 @@ Cheap, deterministic evidence first; the independent model last. In order:
 
 **0b. The language runs under the proof sandbox.** If the walk's language
 and toolchain are not yet proved under the sandbox (so far: C with CMake,
-TypeScript with Vitest or node:test, Python with pytest and uv, Rust with cargo), first run one
+TypeScript with Vitest or node:test, Python with pytest and uv, Rust with cargo, and Rust with SQLite through SQLx), first run one
 `worktree_setup` and one proof of a small project of that language under
 `scripts/lib/proof-sandbox.py` (`--setup` for the setup) and record in the
 feature's evidence that both pass and nothing new is denied. A failure here
