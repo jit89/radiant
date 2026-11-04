@@ -1400,3 +1400,14 @@ the two cannot drift. `oracle-files.py` already supplies the goal and oracle lis
 
 **Also:** in `skills/to-goals/SKILL.md` step 4.4, add "written before step 5 starts; `grok-review.sh --oracle`
 refuses without it".
+
+**Addendum to item 40 (2026-11-05, Paladin g8):** the Architect's own oracle files must pass the same gate.
+- g8's proof ran `clippy --workspace --all-targets -D warnings`. The oracle carried 4 pedantic findings that only
+  the Architect may fix.
+- Tier 1 missed them because the proof was already red at a library crate, so clippy never compiled the test
+  target.
+- The implementer finished everything else and stopped BLOCKED. The goal had to be re-cut from its base and
+  implemented again.
+- **Fix:** when a proof includes a lint step, Tier 1 also runs it with `--keep-going` and filters to
+  `tests/acceptance/` paths. Any finding there fails Tier 1.
+- A `scripts/tests/` case plants a `similar_names` pair in an oracle and expects Tier 1 to stop.
