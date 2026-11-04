@@ -1362,3 +1362,41 @@ It depends on item 39.
 
 **Done when:** RUST.md documents the tail, and a `scripts/tests/` case has a planted `unwrap()` in a goal's crate
 that turns the proof red.
+
+## 41. `grok-review.sh --oracle` requires the self-review first (2026-11-05)
+
+`/to-goals` step 4.4 puts the Architect's self-review before the oracle review in step 4.5. The self-review checks
+each oracle against GOAL-FORMAT.md's failure classes, with the tier results in hand, and records a checklist in the
+journal's decompose entry. Nothing enforces that order. In Paladin M0 it slipped twice:
+- **The M0 cut:** the checklist was written while Grok round 1 was already running, so it could not change what Grok
+  reviewed.
+- **The follow-up goal `g8-m0-hygiene`:** it went to Grok with no self-review. Grok's round 1 then found 11 gaps.
+  The late self-review found one more class, "claim nowhere pinned": the lint gate could be passed by switching lints
+  off. Grok had missed it.
+
+The owner noticed the skip; the workflow did not.
+
+**Fix.** Before round 1 (no `--resume`), `grok-review.sh --oracle` refuses to start unless the target journal holds a
+self-review record for every goal whose oracle `lib/oracle-files.py` lists.
+- **Record format,** for example `## <UTC> — ARCHITECT self-review <id>[, <id>…]`. Under it, one line per
+  GOAL-FORMAT.md failure class, each marked pass or fail. A fail line names the fix.
+- **Freshness.** The record must be newer than the last change to each listed oracle file. Compare against the
+  newest commit touching the file, or its mtime for an uncommitted file. A stale record refuses, so an oracle edited
+  after its self-review is reviewed again.
+- **Resumed rounds.** A `--resume` round checks only freshness: an oracle changed since the last record needs a
+  fresh record line.
+- **Refusal output.** It names the goals missing a record and the class list to fill in. It exits with a distinct
+  code, so `/to-goals` can show it. There is no override flag: the only way past is to write the record.
+
+**Placement.** Parsing lives in a new `scripts/lib/self-review.py`, with the class names read from GOAL-FORMAT.md so
+the two cannot drift. `oracle-files.py` already supplies the goal and oracle lists.
+
+**Done when** `scripts/tests/` covers:
+- no record → refuse;
+- a record missing one class → refuse;
+- an oracle edited after its record → refuse;
+- a complete, fresh record → round 1 starts;
+- `--resume` with an unchanged oracle → no new record needed.
+
+**Also:** in `skills/to-goals/SKILL.md` step 4.4, add "written before step 5 starts; `grok-review.sh --oracle`
+refuses without it".
