@@ -1264,3 +1264,41 @@ Also:
 `/walk-status` shows the walk's repo; after the walk ends, it shows the working folder's again.
 
 **Workaround until then:** `/walk-status <repo>`.
+
+## 38. Warm Rust build caches for parallel walks (2026-11-05)
+
+A `--jobs` walk gives each goal its own worktree, and the Rust proof pins `CARGO_TARGET_DIR="$PWD/target"`
+(RUST.md, "Kept"). So every worktree compiles the whole dependency graph from cold. Paladin M0 has about 110
+vendored crates, and with them the cold build eats much of what a parallel wave saves. A serial walk builds in
+one `target/` and pays the cost once.
+
+**Constraints any fix must keep:**
+- **The target directory stays where it is.** `CARGO_TARGET_DIR="$PWD/target"` is an anti-tamper rule: it stops a
+  project `.cargo/config.toml` from building into `tests/acceptance/`. A shared target outside the worktree breaks
+  that rule. It also serialises jobs on Cargo's build-directory lock.
+- **No sccache inside proofs.** `RUSTC_WRAPPER=sccache` writes its cache outside the trees a proof may write, so
+  RUST.md unsets it. The proof sandbox (`scripts/lib/proof-sandbox.py`) would also deny those writes.
+- **sccache skips incrementally built crates.** It does not cache crates built with incremental compilation, which
+  is on by default for dev and test builds. The workspace's own crates would not benefit.
+
+**Options to measure:**
+1. **Copy the main checkout's `target/` into each new worktree.** Use an APFS clone (`cp -c`, which is cheap) from
+   `worktree_setup` or the walker's fork step, before the first proof.
+   - Open question: do Cargo fingerprints survive the path change? Dep-info records absolute source paths, and
+     vendored and workspace crates move with the worktree.
+   - Measure how many crates rebuild.
+   - Remedies if most rebuild: `--remap-path-prefix`, or keeping the vendored sources at a stable path.
+2. **Pre-build dependencies once per wave on the host,** into a read-only directory that each worktree's target
+   reuses. This needs a Cargo mechanism to do it: check `-Zbuild-dir` / `build.build-dir` (stable status in
+   1.99?) and whether it keeps the anti-tamper property.
+3. **Run sccache on the host only** for the walker's warm-up build, never in proofs. This helps only if option 1
+   or 2 still needs a build step.
+
+**Done when:**
+- A measured `--jobs 3` wave on a Rust target with vendored dependencies rebuilds only the workspace crates in each
+  worktree.
+- The anti-tamper rules in RUST.md still hold, with a `scripts/tests/` case that plants
+  `build.target-dir = "tests/acceptance/x"` and stays red.
+- The proof sandbox denies nothing new.
+
+**First data point:** Paladin M0, after its walk ends. Time one cold proof against one warm proof in a worktree.
