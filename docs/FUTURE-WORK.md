@@ -1240,3 +1240,27 @@ test's output and removes its working folder (`rm -rf "$G"` on exit), and
 full `out` (or copy it to `~/.cache/claude-coding-workflow/tests/failed/`) and
 name the path in the report, so a one-off failure under load can be diagnosed
 afterwards.
+
+## 37. A bare /walk-status should show this session's live walk first (2026-11-05)
+
+During the Paladin M0 walk, the session's working folder was `~/code-analysis-toolkit` (its own `GOALS.md`, last
+goal `g9-local-approval`). The walk was launched there with `cd ~/Paladin && run-goals.sh`. A bare `/walk-status`
+drew the toolkit's old DAG instead of the running Paladin walk. The user expected the session's walk.
+
+**Cause:** `mods/walk/hooks/register.tsx` (`pollOnce`, about lines 105–117) reads the working folder's `GOALS.md`
+first. It falls back to the walk this session launched only when that read finds no `GOALS.md` (`!graph.found`).
+The header comment documents this order.
+
+**Fix:** a bare `/walk-status` resolves the repo in this order:
+1. an explicit `dir` argument;
+2. a live (unfinished) walk this session launched, chosen with the existing `walks` lookup and `chooseWalk`;
+3. the working folder's `GOALS.md`.
+
+Also:
+- The pane's "opened for" text names the repo it chose.
+- Update the header comment to the new order.
+
+**Test:** a session whose working folder has a `GOALS.md` and that launched a walk in another repo. A bare
+`/walk-status` shows the walk's repo; after the walk ends, it shows the working folder's again.
+
+**Workaround until then:** `/walk-status <repo>`.
