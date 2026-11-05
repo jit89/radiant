@@ -123,7 +123,9 @@ sanitizer traps) through the same `proof` command. Stubs live in the
 scratchpad, or in the worktree for the run only; delete them before any
 oracle review. An `oracle: inline` goal's case table skips Tier 1 (it gets
 Tier 2); its swept edits do not — they run through the project's runner,
-filtered to this goal's case, like any other.
+filtered to this goal's case, like any other. A proof with a lint step
+(`clippy`, `fmt`) also lints every oracle on its own, outside the proof's
+`&&` chain, which stops at the red test (RUST.md, "Tier 1 with the lint tail").
 
 **3. Tier 2 — computed expectations.** Any expected value the plan does not
 state verbatim is checked against an existing reference with the same

@@ -140,6 +140,11 @@ PROOF_FIRST=0
 PROOF_TMP=""
 PROOF_DEPS_DIR=""
 PROOF_NET=none
+# Set from BASE_SHA's GOALS.md once it is frozen; never taken from the caller's
+# environment.
+GOAL_TOOL_PATH=""
+PROOF_TOOL_PATH=""
+GOAL_PATH_ENV=()
 PSB_NOTE=""
 PSB_NOTED=0
 # 1 once GOALS.md and the journal hold nothing this workflow did not write;
@@ -351,6 +356,14 @@ is_non_command_proof() {
     "" | true | inline | "(case table)") return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# proof_has_lint_step PROOF — 0 when the proof invokes cargo's clippy or fmt
+# subcommand: `cargo`, "$CARGO", $CARGO, ${CARGO} or an absolute path ending in
+# /cargo, then the subcommand token (docs/features/rust-toolchain-gates step 3).
+proof_has_lint_step() {
+  local re='(^|[[:space:];&|(])"?(\$\{?CARGO\}?|cargo|/[^[:space:]"]*/cargo)"?[[:space:]]+(clippy|fmt)([[:space:]]|$)'
+  [[ "${1:-}" =~ $re ]]
 }
 
 # Wake if .git config/hooks/info differ from the saved manifest. git_meta_verify
@@ -786,7 +799,7 @@ run_mutations() {
   out="$RUN_DIR/mutations-r${ROUND}.out"
   set +e
   PHASE="mutations-call r${ROUND}"
-  run_step "$REVIEW_SECS" "$out" "$out.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --mutations "$n" \
+  run_step "$REVIEW_SECS" "$out" "$out.wrap" env CW_OUT_DIR="$RUN_DIR" "${GOAL_PATH_ENV[@]+"${GOAL_PATH_ENV[@]}"}" "$REVIEWER" --mutations "$n" \
     --resume "$SESSION_ID" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
   local mut_rc=$?
   PHASE="mutations r${ROUND}"
@@ -1255,6 +1268,16 @@ git cat-file -e "$BASE_SHA:$PLAN_PATH" 2>/dev/null && git show "$BASE_SHA:$PLAN_
   die_gate "plan $PLAN_PATH is not committed at BASE_SHA ${BASE_SHA:0:12}"
 chmod 400 "$PLAN_FROZEN"
 
+# tool_path (docs/features/rust-toolchain-gates): from BASE_SHA's GOALS.md, so
+# a resume uses the same value and an edit is contract drift. Prepended to PATH
+# for this goal's own processes only (implementer, reviewer, proof_exec); the
+# host's git/python3/shasum keep the host PATH. Empty means no change at all:
+# an empty PATH component would be `.`, the checkout.
+GOAL_TOOL_PATH="$("$GOALS_PY" "$RUN_DIR/goals-base.md" meta | python3 -c 'import json,sys; print(":".join(json.load(sys.stdin).get("tool_path") or []))')"
+PROOF_TOOL_PATH="$GOAL_TOOL_PATH"
+GOAL_PATH_ENV=()
+[[ -z "$GOAL_TOOL_PATH" ]] || GOAL_PATH_ENV=("PATH=$GOAL_TOOL_PATH:$PATH")
+
 # A run cut off before assess (timeout, quota, crash, Ctrl-C) can leave a
 # changed contract behind, and a paused goal invites hand edits. Refuse now,
 # before a paid dispatch hands the implementer the changed oracle.
@@ -1330,6 +1353,11 @@ while :; do
         echo "- tests/acceptance/ is READ-ONLY, every file in it. One that looks wrong is a blocker to report, not an edit."
         echo "- BASE_SHA: \`$BASE_SHA\`"
         echo "- Proof: \`$PROOF\`"
+        [[ -z "$GOAL_TOOL_PATH" ]] ||
+          echo "- Tool path (first on PATH for you, the proof and the reviewer): \`$GOAL_TOOL_PATH\`"
+        if proof_has_lint_step "$PROOF"; then
+          echo "- Run the proof's lint and format steps yourself before reporting DONE; they are part of the proof."
+        fi
         echo "- Suggested skills: tdd"
         echo
         "$GOALS_PY" "$RUN_DIR/goals-base.md" body "$GOAL_ID" 2>/dev/null || \
@@ -1363,9 +1391,9 @@ while :; do
     if [[ -n "$THREAD_ID" ]]; then
       no_switch=()
       ! attempt_fell_back || no_switch=(IMPLEMENTER_FALLBACK=none)
-      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "${no_switch[@]+"${no_switch[@]}"}" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" --resume "$THREAD_ID" "$HAND"
+      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "${GOAL_PATH_ENV[@]+"${GOAL_PATH_ENV[@]}"}" "${no_switch[@]+"${no_switch[@]}"}" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" --resume "$THREAD_ID" "$HAND"
     else
-      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" "$HAND"
+      run_step "$IMPL_SECS" "$DS_OUT" "$DS_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "${GOAL_PATH_ENV[@]+"${GOAL_PATH_ENV[@]}"}" "$IMPL_LAUNCHER" "${DENY_ARGS[@]+"${DENY_ARGS[@]}"}" "$HAND"
     fi
     ds_rc=$?
     set -e
@@ -1618,9 +1646,9 @@ EOF
   # PROOF_OUTPUT at all: headless Claude denies reads outside the repo and
   # there is nobody to approve the prompt. It then reviews on no evidence.
   if [[ -n "$SESSION_ID" ]]; then
-    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "${GOAL_PATH_ENV[@]+"${GOAL_PATH_ENV[@]}"}" "$REVIEWER" --resume "$SESSION_ID" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
   else
-    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "$REVIEWER" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
+    run_step "$REVIEW_SECS" "$RV_OUT" "$RV_OUT.wrap" env CW_OUT_DIR="$RUN_DIR" "${GOAL_PATH_ENV[@]+"${GOAL_PATH_ENV[@]}"}" "$REVIEWER" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
   fi
   rv_rc=$?
   set -e

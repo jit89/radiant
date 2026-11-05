@@ -13,6 +13,8 @@
 # Usage:
 #   claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... [--deny-write PATH]... <handoff.md>
 #   claude-implement.sh --smoke     (the primary, or IMPLEMENTER_SMOKE_PROVIDER=haiku|deepseek)
+#   claude-implement.sh --probe-path  (evidence only: a smoke pass with Bash that
+#                                    reports where cargo-clippy resolves)
 #
 # Optional env:
 #   IMPLEMENTER_MODEL           default claude-haiku-5-5
@@ -140,6 +142,10 @@ if [[ "$xcrun_t" =~ ^/private/var/folders/[^/]+/[^/]+/T$ ]]; then
 fi
 
 SMOKE=0
+# --probe-path (tests and evidence only; docs/features/rust-toolchain-gates
+# step 8): a smoke pass with Bash, asking where cargo-clippy resolves, to show
+# the PATH this launcher was given reaches the Bash tool.
+PROBE_PATH=0
 RESUME_ID=""
 HANDOFF=""
 ADD_DIRS=()
@@ -155,13 +161,14 @@ DENY_READS=()
 
 usage() {
   echo "usage: claude-implement.sh [--resume THREAD_ID] [--add-dir DIR]... [--deny-write PATH]... [--deny-read PATH]... <handoff.md>" >&2
-  echo "       claude-implement.sh --smoke" >&2
+  echo "       claude-implement.sh --smoke | --probe-path" >&2
   exit 2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --smoke) SMOKE=1; shift ;;
+    --probe-path) SMOKE=1; PROBE_PATH=1; shift ;;
     --resume)
       [[ $# -ge 2 ]] || usage
       RESUME_ID="$2"
@@ -633,7 +640,11 @@ if [[ "$SMOKE" -eq 1 ]]; then
     *) echo "IMPLEMENTER_SMOKE_PROVIDER must be haiku or deepseek" >&2; exit 2 ;;
   esac
   sid="$(new_session_id)"
-  run_pass "$PROVIDER" new "$sid" "Reply with exactly: PONG ${smoke_model}" Read
+  if [[ "$PROBE_PATH" -eq 1 ]]; then
+    run_pass "$PROVIDER" new "$sid" "Run the shell command \`command -v cargo-clippy || echo none\` with the Bash tool and reply with its output only." Read,Bash
+  else
+    run_pass "$PROVIDER" new "$sid" "Reply with exactly: PONG ${smoke_model}" Read
+  fi
   classify "$sid"
   emit_and_exit
 fi

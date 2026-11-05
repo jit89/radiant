@@ -151,7 +151,7 @@ stop_test() {
 }
 
 run_one() {
-  local t="$1" name d left rc=0 pid=""
+  local t="$1" name d left l2 rc=0 pid="" tools
   trap stop_test TERM
   # INT stays ignored (as a background job starts): the runner forwards it.
   trap '' INT
@@ -159,11 +159,15 @@ run_one() {
   name="$(basename "$t")"
   d="$G/$name"
   mkdir -p "$d/tmp" "$d/home"
+  # Tool folders a proof must be able to read (tool_path tests): outside every
+  # temp area, so not under $d, but this test's own and checked like it.
+  tools="$HERE/../../.test-tools/$(basename "$G")/$name"
+  mkdir -p "$tools"
   # No denial listing after a red proof (lib/proof.sh): ~4 s each, and only
   # proof-test.sh reads it, which turns it back on.
   # The implementer launcher's private TMPDIR root, inside the test's own
   # folder (not /private/tmp/cw-<uid>), so what it leaves counts as a leak.
-  "${START_TEST[@]}" env "${UNSETS[@]}" TMPDIR="$d/tmp" HOME="$d/home" CW_PROOF_DENIALS=off CW_IMPL_TMP_ROOT="$d/tmp" \
+  "${START_TEST[@]}" env "${UNSETS[@]}" TMPDIR="$d/tmp" HOME="$d/home" CW_PROOF_DENIALS=off CW_IMPL_TMP_ROOT="$d/tmp" CW_TEST_TOOLS_ROOT="$tools" \
     bash "$t" </dev/null >"$d/out" 2>&1 &
   pid=$!
   echo "$pid" >"$d/pid"
@@ -176,6 +180,9 @@ run_one() {
   pid=""
   # || true: a leaked folder find cannot read must still be reported as a leak.
   left="$(find "$d/tmp" "$d/home" -mindepth 1 -maxdepth 3 2>/dev/null | sed -n "s|^$d/||;1,5p" || true)"
+  l2="$(find "$tools" -mindepth 1 -maxdepth 1 2>/dev/null | sed -n "s|^$tools/|.test-tools/|;1,5p" || true)"
+  [[ -z "$l2" ]] || left="${left:+$left$'\n'}$l2"
+  rm -rf "$tools"; rmdir "$(dirname "$tools")" 2>/dev/null || true
   if [[ -n "$left" ]]; then
     rc=1
     printf '%s\n' "$left" >"$d/leak"

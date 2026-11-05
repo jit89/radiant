@@ -193,3 +193,55 @@ VERDICT: REVISE
 - This goes to the owner: sign off, or one confirming round.
 
 Owner decision (2026-11-05): sign off; build.
+
+## Build review round 1 — Opus (fresh headless session, plan + full diff)
+
+The 10 FIX lines, in short form; the full output is kept in the session scratchpad:
+
+1. `goals.py` accepts a tool folder inside the target repo. The implementer can write there, so a planted `cargo-clippy`, `grep` or `mktemp` would run first, and on the host too.
+2. `TOOL_PATH_UNREADABLE` copies only the temp areas, not the sandbox's secret-path or house-cache denials.
+3. The test tool folders under `scripts/tests/` race the `cp -R "$HERE/."` that other tests run in parallel.
+4. The "empty prefix adds nothing" check could never fail.
+5. The planted `./cargo` half of the check was empty, because nothing called bare `cargo`.
+6. The lint-line forms from step 3 were untested, and the check had no near-miss cases.
+7. The "no tool_path" checks depend on the developer's own `PATH`.
+8. The sibling row never confirms that g3 fails to type-check.
+9. The rule against an `#[allow]` of a denied lint sits only in RUST.md, which the goal reviewer never reads.
+10. The deviation is not logged as an Architect decision.
+
+VERDICT: REVISE
+
+### Architect's response
+
+All 10 accepted and fixed:
+
+1. `validate` rejects a folder inside GOALS.md's folder.
+2. `read_denied()` in `lib/proof-sandbox.py` is now the one list; the most specific match names the folder.
+3. Test tool folders live in `<house>/.test-tools/` (gitignored), outside `scripts/`.
+4. The empty-prefix check runs from inside the folder that holds the logging `./git`.
+5. The proof also runs bare `cargo --version`.
+6. The lint-line check gains a seven-form table and five near misses.
+7. The test sets a fixed `PATH`.
+8. The sibling row gains a control that requires `error[E0425]`.
+9. RUST.md now requires a line about this in every goal body under the gate.
+10. Logged in the journal.
+
+The plants were rerun with two new ones: removing the repo check, and removing the deny-list check.
+
+## Build review round 2 — Opus (confirming; fresh headless session)
+
+All 10 round-1 fixes were checked and none broke anything. Two FIX lines remain, both marked minor and non-blocking:
+
+1. `.test-tools/toolpath-*` sits outside the per-test folders that `run-all.sh` checks for leaks, so a killed test's folder is never reported.
+2. The fixed `PATH` keeps git's own folder. A Homebrew bin there may also hold `cargo-clippy`, and the test would then fail closed.
+
+VERDICT: APPROVED
+
+### Architect's response
+
+Both fixed before commit:
+
+1. `run-all.sh` gives each test its own `CW_TEST_TOOLS_ROOT` under `.test-tools/<run>/<test>`, reports anything left there as a leak, and removes it.
+2. git and python3 now reach the test through links in a folder the test owns.
+
+`run-all.sh -j 8`: 45 scripts, 0 failures, and `.test-tools/` is empty afterwards.

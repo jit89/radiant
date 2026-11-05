@@ -394,6 +394,28 @@ check "sandbox deps: the walk completes" 0 "$prc"
 [[ "$prc" -eq 0 ]] || tail -15 "$TMP/pout" | sed 's/^/    | /'
 check "sandbox deps: g2-b done (it read the dependency and could not write there)" done "$(status_of g2-b)"
 
+# tool_path (docs/features/rust-toolchain-gates): worktree_setup, run by the
+# walker under the sandbox, finds `cargo-clippy` through the GOALS.md tool
+# folder only. The folder sits in the house checkout: the sandbox cannot read
+# a temp area, and goals.py rejects one.
+TROOT="${CW_TEST_TOOLS_ROOT:-$HERE/../.test-tools}"; mkdir -p "$TROOT" && TOOLS="$(mktemp -d "$TROOT/toolpath-XXXXXX")"
+trap '[[ -n "${KEEP_TMP:-}" ]] || rm -rf "$TMP" "$TOOLS"' EXIT
+printf '%s\n' '#!/bin/sh' 'sub="$1"; shift' \
+  'p="$(command -v "cargo-$sub")" || { echo "error: no such command: $sub" >&2; exit 101; }' \
+  'exec "$p" "$@"' >"$TOOLS/cargo"
+printf '%s\n' '#!/bin/sh' 'mkdir -p "$npm_config_cache" && echo linted >"$npm_config_cache/clippy.txt"' >"$TOOLS/cargo-clippy"
+chmod +x "$TOOLS/cargo" "$TOOLS/cargo-clippy"
+pwalk_repo
+sed -i '' "s|^journal: docs/journal/p.md\$|journal: docs/journal/p.md\\
+tool_path: [$TOOLS]\\
+worktree_setup: $TOOLS/cargo clippy|" GOALS.md
+sed -i '' 's|^    proof: test -f b.txt$|    proof: test -f b.txt \&\& test -f "$npm_config_cache/clippy.txt"|' GOALS.md
+git commit -qam "setup runs cargo clippy through tool_path"
+sprun --jobs 3
+check "sandbox tool_path: the walk completes" 0 "$prc"
+[[ "$prc" -eq 0 ]] || tail -15 "$TMP/pout" | sed 's/^/    | /'
+check "sandbox tool_path: g2-b done (worktree_setup's cargo found cargo-clippy)" done "$(status_of g2-b)"
+
 # The proof sandbox stopping the walker's own steps (FUTURE-WORK item 12): a
 # hard link to a file outside every tree appears in the walk's dependency
 # folder after g1-a's own proof passed (its reviewer plants it), so g1-a's

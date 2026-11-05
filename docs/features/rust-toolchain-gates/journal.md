@@ -20,3 +20,24 @@ Grok REVISE 1, accepted and fixed. MAX_ROUNDS reached; to owner.
 
 ## 2026-11-04T23:13:18Z — owner sign-off
 Owner signed off after 5 Grok rounds (round-5 fix unseen by Grok). Build next.
+
+## 2026-11-05T00:07:38Z — ARCHITECT build: deviation from the signed plan
+PLAN.md's "No sandbox change. Reads are allowed everywhere" was wrong. `lib/proof-sandbox.py` denies proof reads under the temp areas, the secret paths and the house cache, and a tool folder there failed the first `tool-path-test.sh` with "Operation not permitted". The sandbox is unchanged. Instead, `goals.py validate` rejects a `tool_path` under any folder in `read_denied()`, a new function in `lib/proof-sandbox.py` that is the one list both use. After the Opus diff review, it also rejects a folder inside the target repo: the implementer could plant a `cargo-clippy` or `grep` there, and every proof would run it first. Both rules are now in GOAL-FORMAT.md and RUST.md. The `validate` cases are in `goals-contract-test.sh`, where the plan puts them. EVIDENCE.md has the details.
+
+## 2026-11-05T00:07:38Z — ARCHITECT build: Opus diff review round 1
+A fresh headless Opus session reviewed the plan and the full diff. Verdict REVISE, 10 FIX lines, all accepted:
+- repo-internal `tool_path`;
+- the deny list taken from the sandbox module;
+- test tool folders moved out of `scripts/` (another test's `cp -R` could race them);
+- the vacuous empty-prefix check;
+- the bare `cargo` check;
+- the table of lint-line forms;
+- a fixed `PATH` in the test;
+- the sibling-row E0425 control;
+- the goal-body allow line;
+- this record.
+
+The full text is in PLAN-REVIEW-LOG.md. A confirming round follows the fixes.
+
+## 2026-11-05T03:13:23Z — ARCHITECT build: done
+Opus round 2 APPROVED, and both of its minor FIX lines are fixed. Final checks: `run-all` (45 scripts, 0 failures), `events.py --self-test`, `install.sh --check`, the plants (10 of 10 caught) and `run-plants.sh lint` (4 verdicts as the plan expects, no new denials). FUTURE-WORK items 39 and 40 are marked done. Committed on `workflow-optimization`.

@@ -112,6 +112,18 @@ def parents(paths):
     return sorted(out)
 
 
+# The shared temp areas a proof may not read (its own trees re-allowed).
+TEMP_AREAS = ["/tmp", "/private/tmp", "/private/var/folders"]
+
+
+def read_denied():
+    """Every folder a proof can never read: the temp areas, the secret paths
+    and the whole house cache (its state folders, run-goal-* artifacts and
+    worktrees). goals.py rejects a tool_path under any of them: one source,
+    so a tool folder validate accepts is one every proof can read."""
+    return [f for p in TEMP_AREAS for f in forms(p)] + secret_paths() + forms(CACHE)
+
+
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("--root", required=True)
@@ -132,7 +144,7 @@ def main():
     secrets = secret_paths()
     state = [os.path.join(CACHE, d) for d in ("runs", "grok", "logs", "keys", "handoffs")]
     state = [f for p in state for f in forms(p)]
-    temp_areas = ["/tmp", "/private/tmp", "/private/var/folders"]
+    temp_areas = TEMP_AREAS
     # A checkout under a secret or the house's state can never be proved. One
     # under a temp area can: its own subtree is re-allowed after that denial.
     for d in secrets + state:

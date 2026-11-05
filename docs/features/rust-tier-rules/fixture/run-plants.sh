@@ -239,6 +239,93 @@ row_t2() {
   else verdict "$name" "red against the implementation"; fi
 }
 
+# --- the opt-in lint gate (docs/features/rust-toolchain-gates, PLAN step 8) --
+# New rows only: recipe() and every row above are rust-tier-rules' locked
+# evidence. The lint rows run on their own copy of the implementation, never on
+# impl/lib.rs.
+LINT_GREP='#!?\[(cfg_attr\([^]]*)?(allow|expect)\((warnings|clippy::(all|pedantic|restriction|style|correctness|suspicious|complexity|perf|nursery|cargo))'
+LINT_ENVS="CARGO_TARGET_DIR=\"\$PWD/target\" CARGO_PROFILE_DEV_OVERFLOW_CHECKS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true RUSTC='$TC_RUSTC' "
+
+# lint_recipe DIR TEST — the full recipe plus the lint tail, as RUST.md writes it.
+lint_recipe() {
+  printf '%s' "$(recipe "$1" "$FULL" "$2" "") && ${LINT_ENVS}'$TC_CARGO' clippy --offline --locked --workspace --lib --bins --test $2 -- -D warnings && ${LINT_ENVS}'$TC_CARGO' fmt --all --check && ( grep -rnE '$LINT_GREP' --include='*.rs' src; test \$? -eq 1 )"
+}
+
+# make_lint_copy NAME VARIANT — the implementation with a lint table
+# (`unwrap_used` is allow by default; -D warnings promotes warn-level lints
+# only), rustfmt'd, then VARIANT: clean, unwrap (an unwrap() the tests never
+# reach), or sibling (a second oracle the proof does not name, which parses and
+# is rustfmt-clean but does not type-check).
+make_lint_copy() {
+  local name="$1" variant="$2" dir
+  dir="$(make_copy "$name" impl "" "$FULL")" || return 1
+  (
+    cd "$dir" || exit 1
+    printf '\n[lints.clippy]\nunwrap_used = "warn"\n' >>Cargo.toml
+    # The oracles unwrap_err() a caught panic: the Architect allows that one
+    # named lint in the oracle (RUST.md), never a group.
+    for f in tests/acceptance/*.rs; do sed -i '' "1a\\
+#![allow(clippy::unwrap_used)]\\
+" "$f"; done
+    case "$variant" in
+      unwrap) sed -i '' 's/parse_duration(s).expect("duration must parse")/parse_duration(s).unwrap()/' src/lib.rs
+              grep -q 'parse_duration(s).unwrap()' src/lib.rs || exit 1 ;;
+      sibling) printf '\n[[test]]\nname = "g3"\npath = "tests/acceptance/g3.rs"\n' >>Cargo.toml
+               printf '#[test]\nfn sibling_not_built_yet() {\n    assert_eq!(duration::not_built_yet(), 1);\n}\n' >tests/acceptance/g3.rs ;;
+    esac
+    PATH="$TC:$PATH" "$TC_CARGO" fmt --all &&
+      command git add -A && command git commit -qm "lint copy: $variant"
+  ) || { echo "lint copy $name ($variant) failed" >&2; return 1; }
+  echo "$dir"
+}
+
+# diags LOG — the compiler's own diagnostics (not cargo's closing lines).
+diags() { grep -E '^(error|warning)(\[[A-Za-z0-9_]+\])?: ' "$1" | grep -vE 'could not compile|aborting due to|generated [0-9]+ (warning|error)|test failed|build failed, waiting' || true; }
+# denial_set LOG — the sandbox denials a row logged, without counts.
+denial_set() { sed -n '/^--- denials logged during this run ---$/,$p' "$1" | sed '1d; s/^ *[0-9]* //' | sort -u; }
+
+row_lint() {
+  local dir d
+  # Item 39 itself: without tool_path, cargo cannot find clippy (CARGO_HOME is
+  # the proof's deps folder, so PATH is cargo's only route).
+  dir="$(make_lint_copy lint-no-tool-path clean)" || { verdict lint "ERROR: no lint copy"; return; }
+  run lint-no-tool-path "$dir" "$(lint_recipe "$dir" g1)"
+  [[ "$LAST_RC" -ne 0 ]] && grep -q 'no such command' "$LAST_LOG" &&
+    verdict lint "no tool_path: red, cargo finds no clippy" || verdict lint "no tool_path: rc $LAST_RC, no 'no such command' (UNEXPECTED)"
+  # The same copy without the tail, for the denials baseline.
+  dir="$(make_lint_copy lint-baseline clean)"
+  run lint-baseline "$dir" "$(recipe "$dir" "$FULL" g1 "")" "" deny
+  local base_log="$LAST_LOG"
+  dir="$(make_lint_copy lint-clean clean)"
+  PROOF_TOOL_PATH="$TC" run lint-clean "$dir" "$(lint_recipe "$dir" g1)" "" deny
+  [[ "$LAST_RC" -eq 0 && -z "$LAST_MOVED" ]] &&
+    verdict lint "clean: green, tree unchanged" || verdict lint "clean: rc $LAST_RC, moved ${LAST_MOVED:-none} (BROKEN)"
+  d="$(comm -13 <(denial_set "$base_log") <(denial_set "$LAST_LOG"))"
+  [[ -z "$d" ]] && verdict lint "denials: none new against the run without the tail" ||
+    verdict lint "denials: NEW: $(paste -sd ';' - <<<"$d")"
+  dir="$(make_lint_copy lint-unwrap unwrap)"
+  PROOF_TOOL_PATH="$TC" run lint-unwrap "$dir" "$(lint_recipe "$dir" g1)"
+  d="$(diags "$LAST_LOG")"
+  if [[ "$LAST_RC" -ne 0 ]] && grep -q '^test result: ok' "$LAST_LOG" && grep -q 'clippy::unwrap.used\|clippy::unwrap_used' "$LAST_LOG" &&
+     [[ "$(grep -c . <<<"$d")" -eq 1 ]] && ! grep -q dead_code "$LAST_LOG"; then
+    verdict lint "unwrap: red at clippy only, unwrap_used the sole diagnostic"
+  else
+    verdict lint "unwrap: rc $LAST_RC, diagnostics: $(paste -sd ';' - <<<"$d") (UNEXPECTED)"
+  fi
+  dir="$(make_lint_copy lint-sibling sibling)"
+  PROOF_TOOL_PATH="$TC" run lint-sibling "$dir" "$(lint_recipe "$dir" g1)"
+  local g1rc="$LAST_RC"
+  # The control: g3 really does not type-check (else green proves nothing).
+  PROOF_TOOL_PATH="$TC" run lint-sibling-g3 "$dir" "${LINT_ENVS}'$TC_CARGO' clippy --offline --locked --test g3 -- -D warnings"
+  if [[ "$LAST_RC" -eq 0 ]] || ! grep -q 'error\[E0425\]' "$LAST_LOG"; then
+    verdict lint "sibling: ERROR: the control did not fail with E0425 (rc $LAST_RC)"
+  elif [[ "$g1rc" -eq 0 ]]; then
+    verdict lint "sibling: g3 fails E0425 on its own, and g1's lint proof stays green"
+  else
+    verdict lint "sibling: g3 turned g1's proof red (rc $g1rc)"
+  fi
+}
+
 ROWS=(2b ref serial clean-g1 clean-g2 01 02 03 04 05 06 07 08 10 11 12 13 14 15 16 17 18 19 20 21 zero notarget 23 24 lock 26 27 28 29 30 31 32 33 34 40 41 42 43 44 45 46 47 48)
 
 do_row() {
@@ -314,6 +401,7 @@ do_row() {
     46) row_t2 46-t2-nan-eq 46-t2-nan-eq ;;
     47) row_t2 47-t2-display-float 47-t2-display-float ;;
     48) row_t2 48-t2-lowercase 48-t2-lowercase ;;
+    lint) row_lint ;;
     *) echo "unknown row $1" >&2; return 2 ;;
   esac
 }

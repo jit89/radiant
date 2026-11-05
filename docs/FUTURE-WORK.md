@@ -1305,6 +1305,8 @@ one `target/` and pays the cost once.
 
 ## 39. Put the pinned Rust toolchain's `bin` on the implementer's `PATH` (2026-11-05)
 
+**Done (2026-11-05):** `docs/features/rust-toolchain-gates/` (PLAN, five Grok rounds signed off by the owner, two Opus diff-review rounds ending APPROVED, journal, EVIDENCE.md). GOALS.md's `tool_path:` key leads `PATH` for the implementer, every proof and the reviewer, never the host. `validate` rejects a folder inside the target repo or one the proof sandbox cannot read (`read_denied()`). Real evidence: the implementer's Bash tool sees it for both providers (`claude-implement.sh --probe-path`), and without it the fixture proof fails "no such command", the M0 failure.
+
 In the Paladin M0 walk, four implementer END records in a row (g3, g4, g5 and g6) say "`cargo clippy` / `cargo
 fmt` are unavailable in the pinned toolchain". They are installed: `cargo-clippy` and `cargo-fmt` sit next to
 `cargo` in `~/.local/rust/rustup/toolchains/1.99.1-aarch64-apple-darwin/bin/`.
@@ -1334,6 +1336,8 @@ environment no longer fit (`/run-goals`: "propose an implementer-prompt audit").
 - The proof sandbox still denies nothing new.
 
 ## 40. Rust proof recipe: opt-in clippy and rustfmt gates (2026-11-05)
+
+**Done (2026-11-05), with the addendum:** the same feature. RUST.md has the opt-in lint tail (`clippy --workspace --lib --bins --test <id> -- -D warnings`, `fmt --all --check`, a grep for blanket and group allows) and Tier 1 oracle linting, with each oracle linted on its own. The handoff tells the implementer to run the lint steps. The rust-tier-rules fixture's `run-plants.sh lint` rows cover the clean, `unwrap()` and sibling-oracle cases, and the sandbox logs no new denials. See EVIDENCE.md.
 
 The RUST.md proof runs `cargo test --test <id>` only. Lint and format debt therefore passes every goal and piles up
 over a walk: about 39 clippy errors and 137 rustfmt diffs by the end of Paladin M0.

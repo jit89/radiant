@@ -1061,6 +1061,11 @@ fi
 PROOF_NET="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof_network") or "none")')"
 [[ "$PROOF_NET" != loopback ]] || echo "NOTE: proof_network: loopback — proofs reach every loopback service on this Mac, and a server a proof binds to all interfaces is reachable from the LAN"
 [[ "$PROOF_NET" != true ]] || echo "NOTE: proof_network: true — proofs have the full network"
+# tool_path (docs/features/rust-toolchain-gates): leads PATH for worktree_setup
+# and the integration proofs this walker runs through proof_exec. Not exported:
+# each goal's run-goal.sh reads its own frozen copy, and the walker's own
+# commands keep the host PATH.
+PROOF_TOOL_PATH="$("$GOALS_PY" GOALS.md meta | python3 -c 'import json,sys; print(":".join(json.load(sys.stdin).get("tool_path") or []))')"
 # One dependency folder for the walk: worktree_setup writes it, proofs read it.
 DEPS_DIR="$(mktemp -d "$CW_CACHE/deps/walk-XXXXXX")"
 chmod 700 "$DEPS_DIR"

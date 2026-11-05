@@ -123,6 +123,41 @@ check "dirty body at fresh start: gate" "gate" "$reason"
 check "gate names GOALS.md" "yes" \
   "$([[ "$detail" == *"GOALS.md: markdown"* ]] && echo yes || echo "no: $detail")"
 
+# --- tool_path (docs/features/rust-toolchain-gates) ------------------------
+# Its folders live in the house checkout: goals.py rejects a temp-area path,
+# which the proof sandbox cannot read.
+TROOT="${CW_TEST_TOOLS_ROOT:-$HERE/../.test-tools}"; mkdir -p "$TROOT" && TOOLS="$(mktemp -d "$TROOT/toolpath-XXXXXX")"
+trap 'rm -rf "$TMP" "$TOOLS"' EXIT
+mkdir -p "$TOOLS/bin" "$TOOLS/gitbin"
+printf '#!/bin/sh\n' >"$TOOLS/gitbin/git" && chmod +x "$TOOLS/gitbin/git"
+# vcheck LINE — GOALS.example.md with LINE after `journal:`; the first
+# tool_path error, OK, or the parse error.
+vcheck() {
+  LINE="$1" awk '{ print } /^journal: docs\/journal\/example.md$/ { print ENVIRON["LINE"] }' \
+    "$HERE/../GOALS.example.md" >"$TMP/tp.md"
+  "$GOALS_PY" "$TMP/tp.md" validate 2>&1 | grep '^tool_path\|^OK\|unexpected\|bad list' | head -1 || true
+}
+has() { [[ "$1" == *"$2"* ]] && echo yes || echo "no: $1"; }
+LISTMSG="tool_path: must be a non-empty one-line list, e.g. tool_path: [/abs/bin]"
+check "tool_path: a real absolute dir" "OK" "$(vcheck "tool_path: [$TOOLS/bin]" | cut -c1-2)"
+check "tool_path: two dirs" "OK" "$(vcheck "tool_path: [$TOOLS/bin, $TOOLS/bin]" | cut -c1-2)"
+check "tool_path: relative" "tool_path: bin is not absolute" "$(vcheck 'tool_path: [bin]')"
+check "tool_path: missing" "tool_path: $TOOLS/nope is not an existing directory" "$(vcheck "tool_path: [$TOOLS/nope]")"
+check "tool_path: a colon" yes "$(has "$(vcheck "tool_path: [$TOOLS/bin:x]")" "outside [A-Za-z0-9._/@+-]")"
+check "tool_path: empty list" "$LISTMSG" "$(vcheck 'tool_path: []')"
+check "tool_path: a scalar" "$LISTMSG" "$(vcheck "tool_path: $TOOLS/bin")"
+check "tool_path: holds git" yes "$(has "$(vcheck "tool_path: [$TOOLS/gitbin]")" "holds an executable git")"
+mkdir -p "$TMP/inrepo" "$TMP/other-repo" "$HOME/.cache/claude-coding-workflow/runs"
+check "tool_path: inside the target repo" yes "$(has "$(vcheck "tool_path: [$TMP/inrepo]")" "inside the target repo, which the implementer can write")"
+# Not inside the target repo (GOALS.md moved out), so the sandbox denials decide.
+vtemp() { vcheck "$1" >/dev/null; mv "$TMP/tp.md" "$TOOLS/tp.md"; "$GOALS_PY" "$TOOLS/tp.md" validate 2>&1 | grep "^tool_path" | head -1 || true; }
+check "tool_path: a temp area" yes "$(has "$(vtemp "tool_path: [$TMP/other-repo]")" "which the proof sandbox cannot read")"
+check "tool_path: the house cache" yes "$(has "$(vtemp "tool_path: [$HOME/.cache/claude-coding-workflow/runs]")" ".cache/claude-coding-workflow, which the proof sandbox cannot read")"
+check "tool_path: a block list" yes "$([[ "$(vcheck $'tool_path:\n  - /usr/bin')" =~ (bad list|unexpected) ]] && echo yes || echo no)"
+vcheck "tool_path: [$TOOLS/bin]" >/dev/null
+check "tool_path: meta prints it" "[\"$TOOLS/bin\"]" "$("$GOALS_PY" "$TMP/tp.md" meta | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["tool_path"]))')"
+check "tool_path: meta null when absent" "null" "$("$GOALS_PY" "$HERE/../GOALS.example.md" meta | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["tool_path"]))')"
+
 if [[ "$fails" -eq 0 ]]; then
   echo "goals-contract: OK"
 else

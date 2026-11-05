@@ -10,3 +10,7 @@ __pycache__/
 
 # Types the engine writes into a loaded mod for the editor
 mods/*/.claude-plugin/types/
+
+# tool_path tests: their tool folders, outside scripts/ (other tests copy it)
+# and outside the folders the proof sandbox cannot read
+/.test-tools/

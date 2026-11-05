@@ -109,6 +109,76 @@ not a pass.
 
 The pass bar is GOAL-FORMAT's, applied to the whole `proof`.
 
+**`tool_path`.** When the pinned toolchain is not on the host's `PATH`, set
+GOALS.md's `tool_path: [<dirname "$CARGO">]` (GOAL-FORMAT.md). The proof gets
+`CARGO_HOME` pointed at an empty folder, so `$CARGO` finds `cargo-clippy` and
+`cargo-fmt` through `PATH` only. Without the key, `"$CARGO" clippy` fails
+"no such command" in the proof (Paladin M0, measured). The folder leads `PATH`
+for the implementer, the proof and the reviewer, and never for the host. It
+must sit outside the target repo (the implementer could plant a tool there)
+and somewhere the proof sandbox can read (not `/tmp`, `/var/folders`, a
+secret path or the house cache); `validate` rejects both.
+
+## Opt-in: the lint gate
+
+A plan opts in in its PLAN.md (house feature `rust-toolchain-gates`). Its
+lint table, `[workspace.lints]`, decides what is a warning, and every
+workspace package carries `[lints] workspace = true`. Tier 1 checks that each
+member has the line; without it the table does nothing. The proof appends,
+after the test step (one line in GOALS.md, shown wrapped):
+
+```bash
+&& <envs> "$CARGO" clippy --offline --locked --workspace --lib --bins --test <id> -- -D warnings
+&& <envs> "$CARGO" fmt --all --check
+&& ( grep -rnE '#!?\[(cfg_attr\([^]]*)?(allow|expect)\((warnings|clippy::(all|pedantic|restriction|style|correctness|suspicious|complexity|perf|nursery|cargo))' --include='*.rs' <source roots>; test $? -eq 1 )
+```
+
+`<envs>` is the recipe's environment prefix (`CARGO_TARGET_DIR`, the overflow
+variables, `RUSTC="$RUSTC"`). `<source roots>` are the plan's crate source
+folders, never `tests/acceptance/`.
+
+- **Not `--all-targets`.** It type-checks every `[[test]]`, later goals'
+  oracles too, which do not compile yet; every early goal would go red (Paladin
+  g1). The gate covers all library and binary code in the workspace plus this
+  goal's own oracle. `#[cfg(test)]` unit-test modules are not linted: an
+  accepted gap.
+- **`fmt --all` is safe:** rustfmt parses and does not type-check, and every
+  oracle is committed rustfmt-clean.
+- **Opting in partway** through a project needs a cleanup goal first (Paladin
+  g8).
+- **Out of scope, in every opted-in goal body** (the reviewer reads the body,
+  not this file): `clippy.toml`, `.clippy.toml`, `rustfmt.toml`,
+  `.rustfmt.toml`, every `Cargo.toml`'s `[lints]` and `[workspace.lints]`
+  tables, `Cargo.lock`, `vendor/` and `.cargo/`. Next to it, the body says:
+  "No `#[allow]` or `#[expect]` of a lint the plan denies in crate source,
+  outside a `#[cfg(test)]` item." The proof's grep catches only blanket and
+  group allows; this line is how the goal reviewer learns to look for the
+  rest.
+- **Timeout.** `PROOF_TIMEOUT` (default 600 s) must cover a cold clippy run
+  of the workspace libraries plus the goal's test target; mutation runs repeat
+  it warm. A plan near the limit raises `PROOF_TIMEOUT` in its walk
+  instructions.
+
+**Tier 1 with the lint tail.** The proof's `&&` chain stops at the red test
+step, so it never lints the oracle against the stubs. Lint separately:
+
+1. Each stubbed crate root carries
+   `#![allow(warnings, clippy::all, clippy::pedantic, clippy::restriction, clippy::panic, clippy::unwrap_used, clippy::expect_used, clippy::todo, clippy::unimplemented, missing_docs, unreachable_pub)]`.
+   The individual names beat a plan's named `deny`, which a group allow would
+   not. Stubs never use `unsafe` (`forbid` cannot be allowed).
+2. `<envs> "$CARGO" clippy --offline --locked --workspace --lib --bins -- -D warnings`
+   exits 0 against the stubs. If not, fix the stubs first.
+3. For **every** oracle, with `tool_path` on `PATH`:
+   `<envs> "$CARGO" clippy --offline --locked --test <id> --message-format=json -- -D warnings`.
+   Any diagnostic whose primary span is under `tests/acceptance/` fails
+   Tier 1 (Paladin g8 blocked on four).
+4. The blanket-allow grep above, run on `tests/acceptance/`: any hit fails
+   Tier 1. An oracle may allow one named lint (`clippy::panic` for its trap
+   assertions), never a group.
+5. `<envs> "$CARGO" fmt -- --check <every oracle file>`.
+6. Where a reference implementation exists (a prior attempt, a scratch), the
+   full proof exits 0 against it.
+
 ## Why each piece is there
 
 - **No type-check step.** rustc type-checks inside `cargo test`. A wrong-typed
@@ -241,6 +311,11 @@ Not covered by the check or by `forbid`:
 - **A macro crate that emits `#[allow(unreachable_code)]`** (async-trait does)
   fails to compile under `forbid`. That fails closed, but the walk stalls on
   it: name the crate in the plan, and keep its uses out of the oracle.
+- **Under the lint gate: an `#[allow]` or `#[expect]` of a lint the plan
+  denies,** in a crate source root, outside a `#[cfg(test)]` item. The proof's
+  grep catches blanket and group allows only; a single named lint, or an
+  allow a macro generates, is a review finding. Not under `tests/acceptance/`:
+  the Architect's named allows there are by design.
 
 ## After an upgrade
 
@@ -250,3 +325,7 @@ lockfile. Then run `docs/features/rust-tier-rules/fixture/run-plants.sh all` (on
 the house's main branch; one `cargo fetch` with network, cached by the
 lockfile's hash). Every row should match `EVIDENCE.md`. A mismatch names the
 rule to recheck before these rules are trusted on the new versions.
+
+A target under the lint gate: a newer clippy brings new lints, and under
+`-D warnings` each one turns every goal red. Re-run the lint tail on `main`
+with the new toolchain, and land a cleanup goal before the next walk.

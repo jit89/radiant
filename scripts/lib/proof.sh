@@ -93,6 +93,10 @@ proof_exec() {
     "UV_CACHE_DIR=$deps/uv" UV_LINK_MODE=copy "PIP_CACHE_DIR=$deps/pip"
     "CARGO_HOME=$deps/cargo" "GOMODCACHE=$deps/gomod"
     "GOCACHE=$tmp/go-build" "XDG_CACHE_HOME=$tmp/xdg-cache")
+  # tool_path (docs/features/rust-toolchain-gates): the caller's non-exported
+  # PROOF_TOOL_PATH leads PATH for the proof only. Only when non-empty: an empty
+  # component would be `.`, the checkout the proof runs in.
+  [[ -z "${PROOF_TOOL_PATH:-}" ]] || envs+=("PATH=$PROOF_TOOL_PATH:$PATH")
   if proof_sandbox_off; then
     run_step "$secs" "$out" "$out" \
       env -u SSH_AUTH_SOCK "${unsets[@]+"${unsets[@]}"}" "${envs[@]}" bash -c "$cmd"

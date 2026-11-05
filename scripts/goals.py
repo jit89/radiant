@@ -378,7 +378,69 @@ def owned_acceptance_paths(body: str) -> list[str]:
     return ACCEPTANCE_PATH_RE.findall(section)
 
 
-def validate(data: dict) -> list[str]:
+# tool_path (docs/features/rust-toolchain-gates): directories prepended to PATH
+# for a goal's own processes only. Safe characters only (no `:`, which would
+# split the list, and no spaces); absolute; existing; and never a directory
+# that would shadow a tool the proof or the host relies on.
+TOOL_PATH_SAFE = re.compile(r"^[A-Za-z0-9._/@+-]+$")
+TOOL_PATH_SHADOWED = ("bash", "sh", "env", "git", "python3", "shasum")
+
+
+def _read_denied() -> list[str]:
+    """lib/proof-sandbox.py's read denials: the one list of folders no proof
+    can read (temp areas, secret paths, the house cache)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "proof_sandbox", os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib", "proof-sandbox.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return [os.path.realpath(d) for d in mod.read_denied()]
+
+
+def _under(p: str, d: str) -> bool:
+    return p == d or p.startswith(d.rstrip("/") + "/")
+
+
+def tool_path_errors(value, root: str | None = None) -> list[str]:
+    """ROOT: the target repo (GOALS.md's folder). A tool folder inside it is
+    one the implementer can write, and it runs first in every proof."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not value:
+        return ["tool_path: must be a non-empty one-line list, e.g. tool_path: [/abs/bin]"]
+    errors = []
+    for entry in value:
+        if not isinstance(entry, str) or not entry:
+            errors.append(f"tool_path: entry {entry!r} is not a path")
+            continue
+        if not entry.startswith("/"):
+            errors.append(f"tool_path: {entry} is not absolute")
+            continue
+        if not TOOL_PATH_SAFE.match(entry):
+            errors.append(f"tool_path: {entry} has a character outside [A-Za-z0-9._/@+-]")
+            continue
+        if not os.path.isdir(entry):
+            errors.append(f"tool_path: {entry} is not an existing directory")
+            continue
+        real = os.path.realpath(entry)
+        if root is not None and _under(real, os.path.realpath(root)):
+            errors.append(f"tool_path: {entry} is inside the target repo, which the implementer can write")
+            continue
+        # A folder the proof sandbox cannot read fails every proof with only
+        # "Operation not permitted".
+        # The most specific match names the rule (the cache before its temp area).
+        denied = max((d for d in _read_denied() if _under(real, d)), key=len, default=None)
+        if denied is not None:
+            errors.append(f"tool_path: {entry} is under {denied}, which the proof sandbox cannot read")
+            continue
+        for name in TOOL_PATH_SHADOWED:
+            exe = os.path.join(entry, name)
+            if os.path.isfile(exe) and os.access(exe, os.X_OK):
+                errors.append(f"tool_path: {entry} holds an executable {name}, which would shadow the host's")
+    return errors
+
+
+def validate(data: dict, root: str | None = None) -> list[str]:
     errors: list[str] = []
     if not data.get("plan"):
         errors.append("missing top-level plan:")
@@ -394,6 +456,7 @@ def validate(data: dict) -> list[str]:
     net = data.get("proof_network")
     if net is not None and net not in ("loopback", "true"):
         errors.append("proof_network: must be loopback or true (leave it out for none)")
+    errors.extend(tool_path_errors(data.get("tool_path"), root))
     ids = [g.get("id") for g in data["goals"]]
     if len(ids) != len(set(ids)):
         errors.append("duplicate goal ids")
@@ -490,7 +553,7 @@ def refresh(data: dict) -> list[str]:
 
 
 def cmd_validate(path, data, text, **_):
-    errs = validate(data) + validate_bodies(text, data)
+    errs = validate(data, os.path.dirname(os.path.realpath(path))) + validate_bodies(text, data)
     if errs:
         print("INVALID")
         for e in errs:
@@ -624,6 +687,7 @@ def cmd_meta(data, **_):
                 "journal": data.get("journal"),
                 "worktree_setup": data.get("worktree_setup"),
                 "proof_network": data.get("proof_network") or "none",
+                "tool_path": data.get("tool_path"),
             },
             indent=2,
         )
