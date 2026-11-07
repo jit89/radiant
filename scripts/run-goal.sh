@@ -96,6 +96,9 @@ JOURNAL=""
 JOURNAL_BEFORE=""
 ORACLE=""
 PROOF=""
+# mutation_proof: (GOAL-FORMAT.md) the command the mutations run, from BASE_SHA's
+# GOALS.md; the goal's proof when the goal names none.
+MUT_PROOF=""
 PLAN_PATH=""
 PLAN_FROZEN=""
 BASE_SHA=""
@@ -723,11 +726,14 @@ mut_git() {
 # `git status` would then run a child git there, unsandboxed, that reads its
 # config (a clean filter, say). The name is matched in any case (.GIT opens
 # as .git on a case-insensitive disk), and the index is checked for a
-# submodule entry after all, failing closed.
+# submodule entry after all, failing closed. -p: every mtime kept, a
+# directory's too (plain cp -R resets those), so a cache keyed on the tree's
+# mtimes (a build's fingerprints, a generated test tree's digest) still matches
+# the checkout's in the copy.
 mut_clone() {
   local d="$1" nested idx
   MUT_WHY=""
-  mkdir -p "$d" && { cp -cR "$ROOT/." "$d/" 2>/dev/null || cp -R "$ROOT/." "$d/"; } ||
+  mkdir -p "$d" && { cp -cRp "$ROOT/." "$d/" 2>/dev/null || cp -Rp "$ROOT/." "$d/"; } ||
     { MUT_WHY="cannot copy the checkout"; return 1; }
   rm -rf "$d/.git" || { MUT_WHY="cannot remove the copied .git"; return 1; }
   nested="$(find "$d" -mindepth 2 -iname .git -print -quit 2>/dev/null)"
@@ -746,8 +752,18 @@ mut_clone() {
   fi
 }
 
-# mut_run CLONE OUT TMP — the goal's proof in CLONE, judged by the host's own
-# rule on CLONE's tree. Sets MUT_OUTCOME: green, red, timeout, notests,
+# mut_reset CLONE — CLONE back to its baseline commit: tracked files reset,
+# untracked ones removed (ignored ones, the build output, kept). Returns 1 when
+# the tree is not then clean (a fresh copy is made instead).
+mut_reset() {
+  local st
+  mut_git "$1" reset -q --hard HEAD >/dev/null 2>&1 && mut_git "$1" clean -fdq >/dev/null 2>&1 || return 1
+  st="$(mut_git "$1" status --porcelain 2>/dev/null)" || return 1
+  [[ -z "$st" ]]
+}
+
+# mut_run CLONE OUT TMP — the goal's mutation proof (MUT_PROOF) in CLONE,
+# judged by the host's own rule on CLONE's tree. Sets MUT_OUTCOME: green, red, timeout, notests,
 # moved or sandbox (with MUT_WHY).
 MUT_OUTCOME=""
 MUT_WHY=""
@@ -756,7 +772,7 @@ mut_run() {
   ( git() { mut_git "$clone" "$@"; }; cd "$clone" && tree_snapshot ) >"$out.before" 2>/dev/null || true
   set +e
   PROOF_ROOT="$clone" PROOF_WALK="$clone/.git" PROOF_NETWORK="$PROOF_NET" PROOF_DEPS="$PROOF_DEPS_DIR" \
-    proof_exec "$PROOF_SECS" "$out" "$tmp" "cd $(printf '%q' "$clone") && $PROOF"
+    proof_exec "$PROOF_SECS" "$out" "$tmp" "cd $(printf '%q' "$clone") && $MUT_PROOF"
   rc=$?
   set -e
   MUT_WHY=""
@@ -774,8 +790,9 @@ mut_run() {
 }
 
 # run_mutations — after a DONE review, before the goal is marked done: the
-# reviewer's mutations (a resumed turn of their own), each applied to a fresh
-# clone and proved there. Best-effort: a failure of this machinery is a skip,
+# reviewer's mutations (a resumed turn of their own), each applied in turn to
+# the baseline's clone (reset to its baseline commit before each, so the
+# build output of the runs before is reused) and proved there. Best-effort: a failure of this machinery is a skip,
 # never a stop, with one exception: the always-on spend ledger refusing the
 # turn's cost stops the goal budget (ao_refused_stop). Writes the `mutations`
 # record and event, and keeps each mutation's diff and rule in ART_DIR.
@@ -835,9 +852,17 @@ run_mutations() {
   # when a block was accepted.
   if [[ "$accepted" -gt 0 ]]; then
     if mut_clone "$dir/base"; then
-      cp -cR "$PROOF_TMP" "$dir/tmp-base" 2>/dev/null || mkdir -p "$dir/tmp-base"
+      cp -cRp "$PROOF_TMP" "$dir/tmp-base" 2>/dev/null || mkdir -p "$dir/tmp-base"
       mut_run "$dir/base" "$dir/base.out" "$dir/tmp-base"
-      if [[ "$MUT_OUTCOME" == green ]]; then base_ok=1; else base_why="the baseline in a copy: $MUT_OUTCOME${MUT_WHY:+ ($MUT_WHY)}"; fi
+      if [[ "$MUT_OUTCOME" == green ]]; then
+        base_ok=1
+      else
+        base_why="the baseline in a copy: $MUT_OUTCOME${MUT_WHY:+ ($MUT_WHY)}"
+        # Kept for the Architect: why the copy could not pass (the last 256 KiB).
+        if mkdir -p "$ART_DIR" && tail -c 262144 "$dir/base.out" >"$ART_DIR/mutation-r${ROUND}-baseline.out" 2>/dev/null; then
+          base_why+=", its output kept: $ART_DIR/mutation-r${ROUND}-baseline.out"
+        fi
+      fi
     else
       base_why="$MUT_WHY"
     fi
@@ -852,9 +877,12 @@ run_mutations() {
       skipped=$((skipped + 1)); rows+=("$k|skipped|${base_why//|//}|$rule"); continue
     fi
     d="$dir/blocks/$k.diff"
-    clone="$dir/m$k"
+    clone="$dir/base"
     skip=""
-    mut_clone "$clone" || skip="$MUT_WHY"
+    if ! mut_reset "$clone"; then
+      rm -rf "$clone"
+      mut_clone "$clone" || skip="$MUT_WHY"
+    fi
     if [[ -z "$skip" ]]; then
       # Every destination a regular file, not a link, before any apply.
       while IFS= read -r p; do
@@ -868,9 +896,9 @@ run_mutations() {
     [[ -n "$skip" ]] || mut_git "$clone" apply --recount --unidiff-zero "$d" >/dev/null 2>&1 ||
       skip="the diff does not apply"
     if [[ -n "$skip" ]]; then
-      skipped=$((skipped + 1)); rows+=("$k|skipped|$skip|$rule"); rm -rf "$clone"; continue
+      skipped=$((skipped + 1)); rows+=("$k|skipped|$skip|$rule"); continue
     fi
-    cp -cR "$PROOF_TMP" "$dir/tmp-$k" 2>/dev/null || mkdir -p "$dir/tmp-$k"
+    cp -cRp "$PROOF_TMP" "$dir/tmp-$k" 2>/dev/null || mkdir -p "$dir/tmp-$k"
     mut_run "$clone" "$dir/m$k.out" "$dir/tmp-$k"
     case "$MUT_OUTCOME" in
       red | notests) caught=$((caught + 1)); rows+=("$k|caught|-|$rule") ;;
@@ -882,7 +910,7 @@ run_mutations() {
     # Kept for the Architect: the diff and the rule it attacked.
     mkdir -p "$ART_DIR" && cp -f "$d" "$ART_DIR/mutation-r${ROUND}-$k.diff" 2>/dev/null || true
     printf '%s\n' "$rule" >"$ART_DIR/mutation-r${ROUND}-$k.rule" 2>/dev/null || true
-    rm -rf "$clone" "$dir/tmp-$k"
+    rm -rf "$dir/tmp-$k"
   done <"$dir/parsed"
   rm -rf "$dir"; MUT_DIR=""
   mut_record "$caught" "$survived" "$timeout" "$skipped" "$note" "$(printf '%s\n' ${rows[@]+"${rows[@]}"})" \
@@ -1259,6 +1287,8 @@ journal_problems="$(orch_journal_chain_problems "$BASE_SHA" | paste -sd ';' -)"
   die_gate "$journal_problems — a journal record was edited after it was written. Nothing was dispatched. Put the edited lines back as that copy has them (git show <commit>:$JOURNAL), keep everything after them, commit, and record any correction by appending; then rerun. Or hand the goal back: $HOUSE/scripts/goals.py GOALS.md set $GOAL_ID bounced"
 ORACLE="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("oracle") or "")')"
 PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof") or "")')"
+MUT_PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("mutation_proof") or "")')"
+[[ -n "$MUT_PROOF" ]] || MUT_PROOF="$PROOF"
 # The signed plan as it stood at BASE_SHA. Both agents read this copy: the live
 # file is contract (contract_drift), and an edit to it must not become the
 # spec the reviewer judges that same edit against.

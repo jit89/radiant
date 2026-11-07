@@ -298,6 +298,63 @@ run
 check "baseline red: both skipped, the goal done" "caught=0 survived=0 timeout=0 skipped=2 0 done" "$(record) $rc $(status_of)"
 check "  ...the reason names the baseline's outcome" yes "$(python3 -c 'import json,sys; rows=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; m=[r for r in rows if r.get("event")=="mutations"][-1]; print("yes" if "the baseline in a copy: red" in json.dumps(m["payload"]) else "no")' "$(find "$EVENTS_CACHE" -name '*.jsonl' | head -n1)")"
 
+check "  ...the baseline's output kept for the Architect" yes \
+  "$(grep -q 'not the checkout' "$ART/mutation-r0-baseline.out" 2>/dev/null && echo yes || echo no)"
+
+# ignore <paths...> — ignored folders in the checkout (.gitignore ignores itself).
+ignore() { printf '%s/\n' "$@" >>.gitignore; }
+
+echo "== the copy keeps a directory's mtime"
+make_repo '[ "$(stat -f %Sm -t %Y cache)" = 2000 ] || { echo "cache mtime $(stat -f %Sm cache)"; exit 1; }
+'"$ORACLE_OK"
+ignore cache
+mkdir cache && echo c >cache/c && touch -t 200001010000 cache
+mut 'the sum' "$SUM_TO_MINUS" >"$CALLS/mutations"
+run
+check "a directory's mtime kept: the baseline green, the mutation caught" "caught=1 survived=0 timeout=0 skipped=0" "$(record)"
+
+echo "== one copy for every mutation: the baseline's build output reused"
+# The proof goes red in a copy it has run in before: the usage mutation, a
+# survivor in a fresh copy, is caught only in the baseline's copy.
+make_repo 'mkdir -p build; case "$PWD" in */cw-mut-*) if grep -qxF "$PWD" build/runs 2>/dev/null; then echo "a copy run before"; exit 1; fi; echo "$PWD" >>build/runs ;; esac
+'"$ORACLE_OK"
+ignore build
+mut 'the usage text' "$USAGE_TEXT" >"$CALLS/mutations"
+run
+check "the mutation runs in the baseline's copy" "caught=1 survived=0 timeout=0 skipped=0" "$(record)"
+
+echo "== one copy: each mutation starts from the baseline (tracked and untracked files reset)"
+make_repo '[ ! -e src/stray.txt ] || { echo "a stray file"; exit 1; }
+'"$ORACLE_OK"
+{ mut 'the sum, with a stray file' '--- a/src/calc.sh
++++ b/src/calc.sh
+@@ -4,1 +4,1 @@
+-echo $(( $1 + $2 ))
++touch src/stray.txt; echo $(( $1 - $2 ))'; mut 'the sum' "$SUM_TO_MINUS"; mut 'the usage text' "$USAGE_TEXT"; } >"$CALLS/mutations"
+run
+check "reset between mutations: caught, caught, survived" "caught=2 survived=1 timeout=0 skipped=0" "$(record)"
+check "  ...the survivor is the usage text" "warning the usage text" "$(event)"
+check "no copy left in the temp area" "" "$(ls -d "$TMP"/cw-mut-* 2>/dev/null)"
+
+echo "== mutation_proof: the mutations run it, not the proof"
+make_repo "$ORACLE_OK"
+python3 - <<'PYX'
+import re
+t = open("GOALS.md").read()
+t, n = re.subn(r"(id: g1-store[\s\S]*?\n(\s+)proof: [^\n]*\n)", r"\1\2mutation_proof: true\n", t, count=1)
+assert n == 1
+open("GOALS.md", "w").write(t)
+PYX
+git commit -qam "g1-store: a mutation proof"
+check "mutation_proof: validate accepts it" 0 "$("$HERE/goals.py" GOALS.md validate >/dev/null 2>&1; echo $?)"
+mut 'the sum' "$SUM_TO_MINUS" >"$CALLS/mutations"
+run
+check "mutation_proof true: the sum mutation survives, the goal done" "caught=0 survived=1 timeout=0 skipped=0 0 done" "$(record) $rc $(status_of)"
+sed -i '' 's/mutation_proof: true/mutation_proof: [a, b]/' GOALS.md
+v="$("$HERE/goals.py" GOALS.md validate 2>&1 || true)"
+check "mutation_proof: a list is refused" yes "$(has 'mutation_proof must be one shell command' "$v$(grep -n mutation_proof GOALS.md)")"
+git checkout -q GOALS.md
+
 echo "== the mutations turn returns nothing"
 make_repo "$ORACLE_OK"
 : >"$CALLS/mutations"

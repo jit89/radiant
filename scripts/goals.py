@@ -465,6 +465,9 @@ def validate(data: dict, root: str | None = None) -> list[str]:
         gid = g.get("id", "")
         if not ID_RE.match(str(gid)):
             errors.append(f"{gid}: id must match g<n>-<slug>")
+        mp = g.get("mutation_proof")
+        if mp is not None and (not isinstance(mp, str) or not mp.strip()):
+            errors.append(f"{gid}: mutation_proof must be one shell command (a non-empty string)")
         st = g.get("status", "")
         if st not in STATUSES:
             errors.append(f"{gid}: bad status {st!r}")
