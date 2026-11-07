@@ -435,7 +435,7 @@ FIX: <path>:<line> — <defect> — <what to change>
 
 The path must be the file YOU want the implementer to change, and it must be
 the first thing after "FIX:". Never open a FIX line with the oracle path or
-anything under tests/acceptance/ — those are read-only, and doing so bounces
+anything under tests/acceptance/ or tests/e2e/ — those are read-only, and doing so bounces
 the goal to the Architect. Referring to the oracle later in the sentence is
 fine ("... to satisfy tests/acceptance/test_x.py").
 

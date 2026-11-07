@@ -154,12 +154,12 @@ proof_exec() {
 # proof, so it is tampering. Under a contract path that policy does not
 # apply: ignored files there are listed too, or a proof could drop an
 # ignored script into tests/acceptance/ that no check and no reviewer sees.
-# Contract paths: tests/acceptance, .claude, .mcp.json, $PLAN_PATH, $ORACLE,
+# Contract paths: tests/acceptance, tests/e2e, .claude, .mcp.json, $PLAN_PATH, $ORACLE,
 # and any in PROOF_GUARDED_EXTRA (the walker's other goals' file oracles).
 tree_snapshot() {
   git rev-parse HEAD
   git status --porcelain --untracked-files=all
-  local guarded=(tests/acceptance .claude .mcp.json) p
+  local guarded=(tests/acceptance tests/e2e .claude .mcp.json) p
   [[ -z "${ORACLE:-}" || "$ORACLE" == inline ]] || guarded+=("$ORACLE")
   [[ -z "${PLAN_PATH:-}" ]] || guarded+=("$PLAN_PATH")
   for p in ${PROOF_GUARDED_EXTRA:-}; do

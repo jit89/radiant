@@ -257,9 +257,9 @@ def signature_problem(st):
     oracles = run(["python3", ORACLE_FILES, tmp], cwd=repo)
     if oracles.returncode != 0:
         return "the signed GOALS.md's oracle files cannot be listed"
-    paths = [p for p in [plan] + oracles.stdout.split() if p] + ["tests/acceptance"]
+    paths = [p for p in [plan] + oracles.stdout.split() if p] + ["tests/acceptance", "tests/e2e"]
     if git(repo, "diff", "--quiet", sha, "HEAD", "--", *paths).returncode != 0:
-        return "the plan, an oracle or tests/acceptance changed since the signature"
+        return "the plan, an oracle, tests/acceptance or tests/e2e changed since the signature"
     head = git(repo, "show", "HEAD:GOALS.md")
     if head.returncode != 0:
         return "GOALS.md is missing at HEAD"

@@ -49,7 +49,8 @@ paths = [p.strip().lower().lstrip("./")
 oracle = (sys.argv[2] or "").strip().lower().lstrip("./")
 
 for p in paths:
-    if p.startswith("tests/acceptance/") or p == "tests/acceptance":
+    if (p.startswith("tests/acceptance/") or p == "tests/acceptance"
+            or p.startswith("tests/e2e/") or p == "tests/e2e"):
         sys.exit(0)
     if oracle and oracle != "inline" and p == oracle:
         sys.exit(0)

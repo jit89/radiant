@@ -394,7 +394,7 @@ verify_claude_meta() {
 }
 
 # Contract drift since BASE_SHA: the plan, this goal's file oracle,
-# tests/acceptance/, and all of GOALS.md except this goal's status. Sets
+# the guarded test folders (tests/acceptance/ and tests/e2e/), and all of GOALS.md except this goal's status. Sets
 # CONTRACT_PATHS and one-line lists, one per git state, each with its own
 # remedy (contract_report): CONTRACT_COMMITTED (commits after BASE_SHA, listed
 # in CONTRACT_COMMITS), CONTRACT_STAGED (HEAD → index), CONTRACT_UNSTAGED
@@ -405,7 +405,7 @@ verify_claude_meta() {
 # BASE_SHA, PLAN_PATH and ORACLE from goals-base.md, and RUN_DIR.
 contract_drift() {
   local drift goals_commit=0
-  CONTRACT_PATHS=(tests/acceptance "$PLAN_PATH")
+  CONTRACT_PATHS=(tests/acceptance tests/e2e "$PLAN_PATH")
   if [[ "$ORACLE" != "inline" && -n "$ORACLE" ]]; then
     CONTRACT_PATHS+=("$ORACLE")
   fi
@@ -817,7 +817,7 @@ run_mutations() {
   fi
   git -c core.quotePath=false diff --name-only "$BASE_SHA" HEAD >"$dir/allowed" 2>/dev/null || : >"$dir/allowed"
   {
-    printf '%s\n' tests/acceptance/ .claude/ .mcp.json GOALS.md
+    printf '%s\n' tests/acceptance/ tests/e2e/ .claude/ .mcp.json GOALS.md
     [[ -z "$JOURNAL" ]] || printf '%s\n' "$JOURNAL"
     [[ -z "$PLAN_PATH" ]] || printf '%s\n' "$PLAN_PATH"
     "$GOALS_PY" "$RUN_DIR/goals-base.md" graph 2>/dev/null | awk '{print $1}' | while read -r p; do
@@ -1350,7 +1350,7 @@ while :; do
         echo "- GOALS: GOALS.md (read fence from BASE_SHA)"
         echo "- Journal: \`$JOURNAL\` — stage it by path with each checkpoint commit"
         echo "- Oracle (READ-ONLY): \`$ORACLE\`"
-        echo "- tests/acceptance/ is READ-ONLY, every file in it. One that looks wrong is a blocker to report, not an edit."
+        echo "- tests/acceptance/ and tests/e2e/ are READ-ONLY, every file in them. One that looks wrong is a blocker to report, not an edit."
         echo "- BASE_SHA: \`$BASE_SHA\`"
         echo "- Proof: \`$PROOF\`"
         [[ -z "$GOAL_TOOL_PATH" ]] ||
@@ -1576,7 +1576,7 @@ while :; do
       {
         echo "# Fix handoff: $GOAL_ID (after round $ROUND: red host proof)"
         echo
-        echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\` or tests/acceptance/."
+        echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\`, tests/acceptance/ or tests/e2e/."
         echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
         echo
         echo "The host ran the goal's proof after your last pass, in this working tree but"
@@ -1635,7 +1635,7 @@ DIFF_RANGE: ${BASE_SHA}..HEAD
 PROOF_OUTPUT: ${PROOF_FILE}
 
 Findings: the FIX: line format in your instructions. Numbered lists are not parsed.
-Do not ask the implementer to edit the oracle or tests/acceptance/.
+Do not ask the implementer to edit the oracle, tests/acceptance/ or tests/e2e/.
 EOF
 
   RV_OUT="$RUN_DIR/reviewer-r${ROUND}.out"
@@ -1772,14 +1772,14 @@ EOF
           "$GOALS_PY" GOALS.md set "$GOAL_ID" bounced
           orch_commit "chore(${GOAL_ID}): orchestrator bounced" "$GOAL_ID=*:bounced"
         fi
-        wake "blocked-oracle-edit" "a FIX finding names the oracle / tests/acceptance"
+        wake "blocked-oracle-edit" "a FIX finding names the oracle / tests/acceptance / tests/e2e"
       fi
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
       FIXH="$IMPL_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
       {
         echo "# Fix handoff: $GOAL_ID (round $ROUND)"
         echo
-        echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\` or tests/acceptance/."
+        echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\`, tests/acceptance/ or tests/e2e/."
         echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
         echo
         echo "## Findings"

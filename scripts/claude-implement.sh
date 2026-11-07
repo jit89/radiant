@@ -702,7 +702,7 @@ You are the IMPLEMENTATION agent. You implement one goal; planning and review be
      (a) ACCEPTANCE TESTS at a named path, read-only: make them pass exactly as written.
      (b) A CASE TABLE in the goal body: implement exactly those cases, encoding them as
          tests via TDD, with the cases as given.
-   Everything under tests/acceptance/ stays exactly as you found it. A contract test that
+   Everything under tests/acceptance/ and tests/e2e/ stays exactly as you found it. A contract test that
    looks wrong is a blocker to report (step 8). Your own finer unit tests sit on top.
 6. TDD: see each test or check fail before the code that makes it pass, in small steps,
    testing behavior through the seams the handoff names. Where the oracle is one

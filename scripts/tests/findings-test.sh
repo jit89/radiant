@@ -69,6 +69,20 @@ else
   check "editing the oracle bounces" "BOUNCED" "no-bounce"
 fi
 
+cat >"$TMP/verdict-e2e.md" <<'MD'
+The end-to-end test is wrong.
+
+FIX: tests/e2e/m1-pipeline.rs:10 — wrong corpus count — change it
+VERDICT: FIX
+MD
+n="$(extract_findings "$TMP/verdict-e2e.md" "$TMP/f2e.txt" "$TMP/t2e.txt")"
+check "e2e finding parsed" "1" "$n"
+if findings_touch_oracle "$TMP/t2e.txt"; then
+  check "editing tests/e2e bounces" "BOUNCED" "BOUNCED"
+else
+  check "editing tests/e2e bounces" "BOUNCED" "no-bounce"
+fi
+
 ORACLE="inline"
 cat >"$TMP/verdict-inline.md" <<'MD'
 - **FIX:** `src/a.py:3` — wrong default — use 0

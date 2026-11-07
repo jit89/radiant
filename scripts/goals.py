@@ -357,19 +357,19 @@ def validate_bodies(text: str, data: dict) -> list[str]:
             for path in owned_acceptance_paths(goal_body(text, gid)):
                 errors.append(
                     f"{gid}: {path} is under **Edits owned** — the host guards all of "
-                    "tests/acceptance/; the Architect applies that edit before dispatch "
-                    "and lists it under **Acceptance edits (applied, read-only)**"
+                    "tests/acceptance/ and tests/e2e/; the Architect applies that edit before "
+                    "dispatch and lists it under **Acceptance edits (applied, read-only)**"
                 )
     return errors
 
 
 # A body section starts with a bold label line, "**Label:**".
 SECTION_RE = re.compile(r"^\*\*[^*\n]+:\*\*", re.M)
-ACCEPTANCE_PATH_RE = re.compile(r"tests/acceptance/[^\s`'\"),;]*")
+ACCEPTANCE_PATH_RE = re.compile(r"tests/(?:acceptance|e2e)/[^\s`'\"),;]*")
 
 
 def owned_acceptance_paths(body: str) -> list[str]:
-    """tests/acceptance/ paths listed under the body's **Edits owned:** section."""
+    """tests/acceptance/ and tests/e2e/ paths listed under the body's **Edits owned:** section."""
     m = re.search(r"^\*\*Edits owned:\*\*", body, re.M)
     if not m:
         return []

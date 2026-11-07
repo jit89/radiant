@@ -241,6 +241,16 @@ IGNORE=$'tests/acceptance/junk/\n' \
   proof 'mkdir -p tests/acceptance/junk && printf "x\n" >tests/acceptance/junk/x.sh'
 check "ignored acceptance directory: proof-tamper" "proof-tamper" "$reason"
 
+# 11b. tests/e2e/ is guarded like tests/acceptance/ (Paladin owner, 2026-11-07): an
+#      edit, an addition, and an ignored addition there are each tampering.
+proof 'mkdir -p tests/e2e && echo x >tests/e2e/extra.rs'
+check "e2e addition: proof-tamper" "proof-tamper" "$reason"
+check "e2e addition: names it" "yes" "$(has 'tests/e2e/extra.rs')"
+IGNORE=$'tests/e2e/\n' \
+  proof 'mkdir -p tests/e2e && printf "x\n" >tests/e2e/hidden.rs'
+check "ignored e2e addition: proof-tamper" "proof-tamper" "$reason"
+check "ignored e2e addition: no review" "no" "$reviewed"
+
 # 12. A Python proof that imports a module under tests/acceptance/ must not leave
 #     bytecode there: an ignored .pyc under the contract is tamper (case 11), so
 #     without PYTHONDONTWRITEBYTECODE every Python target would wake (D-09).

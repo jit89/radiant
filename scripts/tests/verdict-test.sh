@@ -87,7 +87,7 @@ check "brief asks for no numbered findings" "0" \
   "$(grep -cE '"?1\. *file:line' "$TMP/brief.md" || true)"
 check "brief points at FIX: lines" "1" "$(grep -c 'FIX:' "$TMP/brief.md" || true)"
 check "handoff marks all of tests/acceptance read-only" "1" \
-  "$(grep -c 'tests/acceptance/ is READ-ONLY, every file' "$TMP/handoff.md" || true)"
+  "$(grep -c 'tests/acceptance/ and tests/e2e/ are READ-ONLY, every file' "$TMP/handoff.md" || true)"
 
 # A finding written from the prompt's own template must parse.
 template="$(grep -m1 '^FIX: <path>' "$HERE/claude-goal-review.sh")"

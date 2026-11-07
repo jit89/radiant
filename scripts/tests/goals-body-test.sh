@@ -132,6 +132,19 @@ goals inline '
 ## g1-store — Store
 cases
 
+**Edits owned:**
+- `src/store.py`
+- `tests/e2e/m1-pipeline.rs` corpus count
+
+**Out of scope:** retries' >"$TMP/owned-e2e.md"
+check "e2e path under Edits owned: invalid" "INVALID" "$(verdict "$TMP/owned-e2e.md")"
+check "error names the e2e path" "1" \
+  "$(says "$TMP/owned-e2e.md" 'g1-store: tests/e2e/m1-pipeline.rs is under \*\*Edits owned\*\*')"
+
+goals inline '
+## g1-store — Store
+cases
+
 **Edits owned:** `src/store.py`
 
 **Out of scope:** changes to `tests/acceptance/test_g0.py`' >"$TMP/owned-later.md"
