@@ -62,6 +62,8 @@ EVENTS = (
     "mutations",
     # The always-on decider's choice (docs/features/always-on, step 12).
     "decision",
+    # Processes an agent step left running in the checkout, ended (lib/reap-strays.py).
+    "strays",
 )
 SEVERITIES = ("info", "warning", "error")
 SUMMARY_MAX = 200

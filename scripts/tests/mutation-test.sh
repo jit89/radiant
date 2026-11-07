@@ -167,6 +167,8 @@ if [[ -f "$CALLS/nested" ]]; then
   # piped to grep -q would see ls-files die of SIGPIPE.
   [[ ! -f "$CALLS/nested-case" ]] || mv vendor/x/.git vendor/x/.GIT
 fi
+# $CALLS/stray: leave a detached process in the checkout, the way a harness does.
+[[ ! -f "$CALLS/stray" ]] || python3 -c 'import subprocess,sys; p=subprocess.Popen(["sleep","307"], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); open(sys.argv[1],"w").write(str(p.pid))' "$CALLS/stray.pid"
 printf '%s\n' "IMPLEMENTER_RESULT: ok" "THREAD_ID: haiku:t1" "IMPLEMENTER_STATUS: DONE" "IMPLEMENTER_MODEL: stub"
 SH
 # The reviewer: a verdict from $CALLS/verdicts (one a call, DONE when none
@@ -354,6 +356,16 @@ sed -i '' 's/mutation_proof: true/mutation_proof: [a, b]/' GOALS.md
 v="$("$HERE/goals.py" GOALS.md validate 2>&1 || true)"
 check "mutation_proof: a list is refused" yes "$(has 'mutation_proof must be one shell command' "$v$(grep -n mutation_proof GOALS.md)")"
 git checkout -q GOALS.md
+
+echo "== a process the implementer left running in the checkout is ended"
+make_repo "$ORACLE_OK"
+touch "$CALLS/stray"
+: >"$CALLS/mutations"
+run
+sp="$(cat "$CALLS/stray.pid" 2>/dev/null || echo 0)"
+check "the stray ended, the goal done" "gone 0 done" "$(kill -0 "$sp" 2>/dev/null && echo alive || echo gone) $rc $(status_of)"
+check "  ...a strays event names it" yes "$(python3 -c 'import json,sys; rows=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; s=[r for r in rows if r.get("event")=="strays"]; print("yes" if s and "sleep 307" in json.dumps(s[-1]["payload"]) else "no")' "$(find "$EVENTS_CACHE" -name '*.jsonl' | head -n1)")"
+kill -9 "$sp" 2>/dev/null || true
 
 echo "== the mutations turn returns nothing"
 make_repo "$ORACLE_OK"

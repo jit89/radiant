@@ -702,6 +702,19 @@ ao_review_costs() {
   fi
 }
 
+# reap_strays SINCE STEP — end the processes an agent step left running in the
+# checkout (lib/reap-strays.py: started since SINCE, no terminal, cwd in ROOT,
+# outside this script's own tree). An `strays` warning event names each one.
+reap_strays() {
+  local since="$1" step="$2" found
+  found="$(python3 "$HERE/lib/reap-strays.py" "$ROOT" "$since" "$$" 2>/dev/null || true)"
+  [[ -n "$found" ]] || return 0
+  echo "strays after ${step}: ended $(wc -l <<<"$found" | tr -d ' '): $(cut -d' ' -f2- <<<"$found" | cut -c1-80 | paste -sd ';' -)" >&2
+  events_append --event strays --severity warning --goal "$GOAL_ID" --round "$ROUND" \
+    --base-sha "$BASE_SHA" --summary "strays ${GOAL_ID} r${ROUND} after ${step}: $(wc -l <<<"$found" | tr -d ' ')" \
+    --payload "$(python3 -c 'import json,sys; print(json.dumps({"step": sys.argv[1], "strays": [l for l in sys.argv[2].splitlines() if l]}))' "$step" "$found")"
+}
+
 # --- mutation checks (docs/features/mutation-checks) ---------------------
 # mut_git CLONE ARGS... — git on a mutation clone only: its private git dir,
 # no GIT_* from this run (host git is pinned to the goal's checkout), no user
@@ -816,9 +829,11 @@ run_mutations() {
   out="$RUN_DIR/mutations-r${ROUND}.out"
   set +e
   PHASE="mutations-call r${ROUND}"
+  STEP_T0="$(python3 -c 'import time; print(f"{time.time():.6f}")')"
   run_step "$REVIEW_SECS" "$out" "$out.wrap" env CW_OUT_DIR="$RUN_DIR" "${GOAL_PATH_ENV[@]+"${GOAL_PATH_ENV[@]}"}" "$REVIEWER" --mutations "$n" \
     --resume "$SESSION_ID" --add-dir "$RUN_DIR" --add-dir "$IMPL_DIR" "$BRIEF"
   local mut_rc=$?
+  reap_strays "$STEP_T0" "mutations turn r${ROUND}"
   PHASE="mutations r${ROUND}"
   set -e
   ao_review_costs "$out" "$mut_rc" mutations
@@ -1417,6 +1432,7 @@ while :; do
     if [[ -n "$JOURNAL" && -f "$JOURNAL" ]]; then cp "$JOURNAL" "$JOURNAL_BEFORE"; else rm -f "$JOURNAL_BEFORE"; fi
     DS_OUT="$RUN_DIR/implementer-r${ROUND}.out"
     PHASE="implementer r${ROUND}"
+    STEP_T0="$(python3 -c 'import time; print(f"{time.time():.6f}")')"
     set +e
     if [[ -n "$THREAD_ID" ]]; then
       no_switch=()
@@ -1427,6 +1443,7 @@ while :; do
     fi
     ds_rc=$?
     set -e
+    reap_strays "$STEP_T0" "implementer r${ROUND}"
     PHASE="assess r${ROUND}"
     LAST_IMPL="$(kv "$DS_OUT" "$IMPL_KEY")"
     kv_keep THREAD_ID "$DS_OUT" THREAD_ID
@@ -1671,6 +1688,7 @@ EOF
   RV_OUT="$RUN_DIR/reviewer-r${ROUND}.out"
   PHASE="review r${ROUND}"
   event_phase review
+  STEP_T0="$(python3 -c 'import time; print(f"{time.time():.6f}")')"
   set +e
   # --add-dir $RUN_DIR or the reviewer cannot open BRIEF / DIFF_FILE /
   # PROOF_OUTPUT at all: headless Claude denies reads outside the repo and
@@ -1682,6 +1700,7 @@ EOF
   fi
   rv_rc=$?
   set -e
+  reap_strays "$STEP_T0" "review r${ROUND}"
   PHASE="route r${ROUND}"
   # This review's result first (no git in these), so a stop below reports it.
   [[ -s "$RV_OUT.wrap" ]] && cat "$RV_OUT.wrap" >&2 || true
