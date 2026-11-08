@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Self-test: a goal's soak (GOAL-FORMAT.md `soak:`): a long check after a green
-# host proof, before the review; red or timed out, a proof fix round. Nothing
+# Self-test: a goal's soak (GOAL-FORMAT.md `soak:`): a long check started after
+# a green host proof and run alongside the review; red or timed out, a fix round
+# (on its own after a DONE, with the review's findings after a FIX). Nothing
 # calls a model: the implementer and the reviewer are stubs.
 set -euo pipefail
 
@@ -45,12 +46,21 @@ git add src/calc.sh
 git -c commit.gpgSign=false commit -qm "feat(g1-store): calc pass $n"
 printf '%s\n' "IMPLEMENTER_RESULT: ok" "THREAD_ID: haiku:t1" "IMPLEMENTER_STATUS: DONE" "IMPLEMENTER_MODEL: stub"
 SH
+# The reviewer: a verdict from $CALLS/verdicts (one a call; DONE when none
+# left); $CALLS/review-sleep seconds first; RATE_LIMITED fails the call.
 cat >"$HOUSE/scripts/claude-goal-review.sh" <<'SH'
 #!/usr/bin/env bash
 echo review >>"$CALLS/log"
+[[ ! -f "$CALLS/review-sleep" ]] || sleep "$(cat "$CALLS/review-sleep")"
+v=DONE
+if [[ -s "$CALLS/verdicts" ]]; then v="$(head -n1 "$CALLS/verdicts")"; sed -i '' 1d "$CALLS/verdicts"; fi
+if [[ "$v" == RATE_LIMITED ]]; then
+  printf '%s\n' "CLAUDE_REVIEW_RESULT: rate_limited (exit 1)" "SESSION_ID: s1" "VERDICT: MISSING"
+  exit 75
+fi
 vf="$CW_OUT_DIR/verdict-$RANDOM.md"
-printf 'VERDICT: DONE\n' >"$vf"
-printf '%s\n' "CLAUDE_REVIEW_RESULT: ok" "SESSION_ID: s1" "VERDICT: DONE" "VERDICT_FILE: $vf" "CLAUDE_REVIEW_MODEL: stub"
+if [[ "$v" == FIX ]]; then printf 'FIX: src/calc.sh:3 — REVIEW-NIT-9 — change it\nVERDICT: FIX\n' >"$vf"; else printf 'VERDICT: %s\n' "$v" >"$vf"; fi
+printf '%s\n' "CLAUDE_REVIEW_RESULT: ok" "SESSION_ID: s1" "VERDICT: $v" "VERDICT_FILE: $vf" "CLAUDE_REVIEW_MODEL: stub"
 SH
 chmod +x "$HOUSE/scripts/"*.sh
 
@@ -100,21 +110,38 @@ make_repo "$ORACLE_OK"
 run
 check "no soak: done, no soak record" "0 done 0" "$rc $(status_of) $(soak_lines)"
 
-echo "== a green soak runs after the proof, before the review"
+echo "== a green soak runs beside the review"
 SOAK_BODY='grep -q "pass 1" src/calc.sh || exit 1; echo soak-green' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
 run
 check "green soak: done" "0 done" "$rc $(status_of)"
-check "  ...one soak record, exit 0, before the review" yes \
+check "  ...one soak record, exit 0, read after the review" yes \
   "$(order="$(git show HEAD:docs/journal/example.md | grep -oE 'ORCHESTRATOR (soak|review) g1-store' | awk '{print $2}' | paste -sd ' ' -)"
-     [[ "$order" == "soak review" ]] && git show HEAD:docs/journal/example.md | grep -q 'ORCHESTRATOR soak g1-store r0 exit=0 secs=' && echo yes || echo "no: $order")"
+     [[ "$order" == "review soak" ]] && git show HEAD:docs/journal/example.md | grep -q 'ORCHESTRATOR soak g1-store r0 exit=0 secs=' && echo yes || echo "no: $order")"
 check "  ...its output kept for the Architect" yes "$(grep -q soak-green "$ART/soak-r0.out" 2>/dev/null && echo yes || echo no)"
 check "  ...one implementer pass, one review" "implement review" "$(paste -sd ' ' - <"$CALLS/log")"
 
-echo "== a red soak is a proof fix round; the fixed pass goes green"
+echo "== the soak and the review run side by side, and the soak is no stray"
+# 4 s each: in series the goal takes 8 s or more. Still running when the review
+# returns, the soak would be ended as a stray (reap_strays) and read red.
+# A control run (the soak alone) prices the goal's own steps; the review's 4 s
+# must add well under its length.
+now() { python3 -c 'import time; print(f"{time.time():.2f}")'; }
+SOAK_BODY='sleep 4; echo slept' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+t0="$(now)"; run; t1="$(now)"
+control="$(python3 -c "print($t1 - $t0)")"
+SOAK_BODY='sleep 4; echo slept' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+echo 4 >"$CALLS/review-sleep"
+t0="$(now)"; run; t1="$(now)"
+both="$(python3 -c "print($t1 - $t0)")"
+check "side by side: done, one implementer pass" "0 done implement review" "$rc $(status_of) $(paste -sd ' ' - <"$CALLS/log")"
+check "  ...a 4 s review beside a 4 s soak adds under 2.5 s" yes \
+  "$(python3 -c "print('yes' if $both - $control < 2.5 else 'no: control %.1f s, both %.1f s' % ($control, $both))")"
+
+echo "== a red soak after a DONE is a fix round of its own; the fixed pass goes green"
 SOAK_BODY='grep -q "pass 2" src/calc.sh || { echo "SOAK-CASE-17 failed"; exit 1; }' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
 run
 check "red then green: done after one fix round" "0 done" "$rc $(status_of)"
-check "  ...the implementer ran twice, the reviewer once (after the green soak)" "implement implement review" "$(paste -sd ' ' - <"$CALLS/log")"
+check "  ...implement, review (DONE, soak red), implement, review" "implement review implement review" "$(paste -sd ' ' - <"$CALLS/log")"
 check "  ...the fix handoff says red soak and carries the failing case" "yes yes" \
   "$(grep -q '^# Fix handoff: g1-store (after round 0: red soak)' "$CALLS/handoff-bodies" 2>/dev/null && echo yes || echo no) $(grep -q 'SOAK-CASE-17' "$CALLS/handoff-bodies" 2>/dev/null && echo yes || echo no)"
 check "  ...the fix record names the soak" yes "$(git show HEAD:docs/journal/example.md | grep -q 'ORCHESTRATOR fix g1-store r0 count=1 .* source=proof .*step=soak' && echo yes || echo no)"
@@ -124,13 +151,36 @@ echo "== a soak red every time spends the fix budget"
 SOAK_BODY='echo never; exit 1' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
 MAX_FIX_ROUNDS=1 run
 check "always red: max-fix-rounds after a red soak" "1 max-fix-rounds yes" "$rc $reason $(has 'after a red soak' "$detail")"
-check "  ...no review ran" "implement implement" "$(paste -sd ' ' - <"$CALLS/log")"
+check "  ...each pass reviewed beside its soak" "implement review implement review" "$(paste -sd ' ' - <"$CALLS/log")"
 
 echo "== a soak past SOAK_TIMEOUT is red, with the timeout named"
 SOAK_BODY='grep -q "pass 2" src/calc.sh || sleep 30' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
 SOAK_TIMEOUT=3 run
 check "timeout: a fix round, then done" "0 done" "$rc $(status_of)"
 check "  ...the handoff names the timeout" yes "$(grep -q 'ran past 3s' "$CALLS/handoff-bodies" 2>/dev/null && echo yes || echo no)"
+
+echo "== a red soak beside a FIX: one fix round with both findings"
+SOAK_BODY='grep -q "pass 2" src/calc.sh || { echo "SOAK-CASE-23 failed"; exit 1; }' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+echo FIX >"$CALLS/verdicts"
+run
+check "FIX and a red soak: done after one fix round" "0 done implement review implement review" "$rc $(status_of) $(paste -sd ' ' - <"$CALLS/log")"
+check "  ...one handoff carries the review's finding and the soak's case" "yes yes" \
+  "$(grep -q 'REVIEW-NIT-9' "$CALLS/handoff-bodies" && echo yes || echo no) $(grep -q 'SOAK-CASE-23' "$CALLS/handoff-bodies" && echo yes || echo no)"
+check "  ...the fix record counts both, from the review, with the soak" yes \
+  "$(git show HEAD:docs/journal/example.md | grep -q 'ORCHESTRATOR fix g1-store r0 count=2 hash=[0-9a-f]* source=review step=soak' && echo yes || echo no)"
+
+echo "== a wake during the review takes the running soak down"
+# The soak records its own pid, then becomes the sleep: the check looks at that
+# one process, not at every command line that mentions a sleep.
+SOAK_BODY='echo $$ >soak.pid; exec sleep 37' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+echo RATE_LIMITED >"$CALLS/verdicts"
+echo 1 >"$CALLS/review-sleep"
+run
+sleep 1
+soak_pid="$(cat "$TMP/repo/soak.pid" 2>/dev/null || true)"
+check "  ...the soak had started" yes "$([[ -n "$soak_pid" ]] && echo yes || echo no)"
+check "a failed review wakes; no soak left running" "1 gone" \
+  "$rc $( [[ -n "$soak_pid" ]] && kill -0 "$soak_pid" 2>/dev/null && echo "alive: $(ps -o command= -p "$soak_pid")" || echo gone)"
 
 echo "== a soak that changes the repo wakes"
 SOAK_BODY='echo x >src/planted.txt' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"

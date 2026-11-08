@@ -67,9 +67,9 @@ MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
 IMPL_SECS="${IMPLEMENTER_TIMEOUT:-${DEEPSEEK_TIMEOUT:-1200}}"
 REVIEW_SECS="${CLAUDE_REVIEW_TIMEOUT:-600}"
 PROOF_SECS="${PROOF_TIMEOUT:-600}"
-# soak: (GOAL-FORMAT.md) a long check run after a green host proof, before the
-# review, under its own timeout: a long fuzz run that a goal's proof is too short
-# for. Red or timed out, it is a proof fix round like a red proof.
+# soak: (GOAL-FORMAT.md) a long check started after a green host proof and run
+# alongside the review, under its own timeout: a long fuzz run that a goal's
+# proof is too short for. Red or timed out, it is a fix round.
 SOAK_SECS="${SOAK_TIMEOUT:-1800}"
 # Mutation checks after a DONE review (docs/features/mutation-checks): how many
 # the reviewer is asked for, 0 off. Checked here, before any pass.
@@ -180,6 +180,7 @@ on_exit() {
   local ec=$?
   trap - EXIT INT TERM
   stop_child
+  stop_soak
   [[ -z "$MUT_DIR" ]] || rm -rf "$MUT_DIR"
   if [[ "$ec" -ne 0 && "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
     stop_unplanned "trap" "exit $ec during ${PHASE}"
@@ -201,6 +202,7 @@ on_signal() {
   local sig="$1" code="$2"
   trap - INT TERM
   stop_child
+  stop_soak
   ao_signal_standin || true
   if [[ "$STOP_WRITTEN" -eq 0 && -n "$RUN_DIR" ]]; then
     stop_unplanned "interrupted" "SIG${sig} during ${PHASE}"
@@ -723,31 +725,79 @@ reap_strays() {
 }
 
 # --- the soak (GOAL-FORMAT.md `soak:`) ------------------------------------
-# run_soak — the goal's soak in the checkout, in the proof sandbox, under
-# SOAK_SECS. Sets SOAK_EXIT and SOAK_FILE; keeps the output's last 256 KiB in
-# ART_DIR for the Architect (a soak's report is read after the walk); journals
-# one record and one event. A soak that changes the tree or the contract wakes
-# as the proof would; the sandbox stopping it wakes too.
+# soak_start — the goal's soak in the checkout, in the proof sandbox, under
+# SOAK_SECS, in the background beside the review (a model call that uses no
+# local CPU). Its exit status and any sandbox stop land in files beside its
+# output. As the host's own descendant it is no stray (reap-strays.py spares
+# KEEP_PID's tree).
 SOAK_EXIT=0
 SOAK_FILE=""
-run_soak() {
-  local start secs moved=() m
+SOAK_PID=""
+SOAK_START=0
+# SOAK_DONE: this round's soak was read (soak_finish); SOAK_RED: and it was red.
+SOAK_DONE=0
+SOAK_RED=0
+soak_start() {
   SOAK_FILE="$RUN_DIR/soak-${GOAL_ID}-r${ROUND}.txt"
-  PHASE="soak r${ROUND}"
+  rm -f "$SOAK_FILE.rc" "$SOAK_FILE.sandbox"
   event_phase soak
   tree_snapshot >"$RUN_DIR/tree-before-soak.txt"
-  start="$(date +%s)"
-  set +e
-  PROOF_ROOT="$ROOT" PROOF_WALK="${GIT_PIN_COMMON:-}" PROOF_NETWORK="$PROOF_NET" \
-    PROOF_DEPS="$PROOF_DEPS_DIR" proof_exec "$SOAK_SECS" "$SOAK_FILE" "$PROOF_TMP" "$SOAK"
-  SOAK_EXIT=$?
-  set -e
-  secs=$(( $(date +%s) - start ))
+  SOAK_START="$(date +%s)"
+  (
+    set +e
+    PROOF_ROOT="$ROOT" PROOF_WALK="${GIT_PIN_COMMON:-}" PROOF_NETWORK="$PROOF_NET" \
+      PROOF_DEPS="$PROOF_DEPS_DIR" proof_exec "$SOAK_SECS" "$SOAK_FILE" "$PROOF_TMP" "$SOAK"
+    rc=$?
+    printf '%s\n' "${PROOF_SANDBOX_REASON:-}" >"$SOAK_FILE.sandbox"
+    printf '%s\n' "$rc" >"$SOAK_FILE.rc"
+  ) </dev/null &
+  SOAK_PID=$!
+}
+
+# stop_soak — a soak still running when the host stops (a wake during the
+# review, a signal) is taken down with its whole process tree. The tree is
+# frozen first (STOP: a stopped process cannot fork) and listed again until no
+# new process appears, then KILLed: a TERM sent to a list taken once misses a
+# child started meanwhile (a soak still starting up when the review woke).
+stop_soak() {
+  [[ -n "$SOAK_PID" ]] || return 0
+  local pid="$SOAK_PID" all=() todo=() p c n prev=-1
+  SOAK_PID=""
+  for n in $(seq 20); do
+    all=()
+    todo=("$pid")
+    while ((${#todo[@]})); do
+      p="${todo[0]}"; todo=("${todo[@]:1}")
+      all+=("$p")
+      while IFS= read -r c; do [[ -z "$c" ]] || todo+=("$c"); done < <(pgrep -P "$p" 2>/dev/null || true)
+    done
+    kill -STOP "${all[@]}" 2>/dev/null || true
+    [[ "${#all[@]}" -ne "$prev" ]] || break
+    prev="${#all[@]}"
+  done
+  kill -KILL "${all[@]}" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+# soak_finish — after the review: waits for the soak, then judges it as the
+# proof is judged. Sets SOAK_EXIT; keeps the output's last 256 KiB in ART_DIR
+# for the Architect; journals one record and one event. A soak that changed the
+# tree or the contract wakes; the sandbox stopping it wakes too.
+soak_finish() {
+  [[ -n "$SOAK_PID" ]] || return 0
+  local secs moved=() m reason
+  PHASE="soak r${ROUND}"
+  wait "$SOAK_PID" 2>/dev/null || true
+  SOAK_PID=""
+  SOAK_DONE=1
+  SOAK_EXIT="$(cat "$SOAK_FILE.rc" 2>/dev/null || echo 125)"
+  reason="$(cat "$SOAK_FILE.sandbox" 2>/dev/null || true)"
+  secs=$(( $(date +%s) - SOAK_START ))
   PHASE="assess r${ROUND}"
   verify_git_meta "during soak r${ROUND}"
   verify_claude_meta "during soak r${ROUND}"
-  if [[ -n "$PROOF_SANDBOX_REASON" ]]; then
-    wake "$PROOF_SANDBOX_REASON" "the proof sandbox stopped the soak before it ran. Output: $SOAK_FILE"
+  if [[ -n "$reason" ]]; then
+    wake "$reason" "the proof sandbox stopped the soak before it ran. Output: $SOAK_FILE"
   fi
   tree_snapshot >"$RUN_DIR/tree-after-soak.txt"
   contract_drift
@@ -763,6 +813,24 @@ run_soak() {
   events_append --event soak --severity "$( [[ "$SOAK_EXIT" -eq 0 ]] && echo info || echo warning)" \
     --goal "$GOAL_ID" --round "$ROUND" --base-sha "$BASE_SHA" \
     --summary "soak ${GOAL_ID} r${ROUND} exit=${SOAK_EXIT} secs=${secs}"
+}
+
+# soak_findings OUT — a red soak's findings: what failed, then the excerpt of
+# its output. Wakes when the excerpt cannot be built, as a red proof does.
+soak_findings() {
+  local out="$1" rc
+  {
+    echo "SOAK: the goal's soak (GOALS.md \`soak:\`: \`$SOAK\`) failed$( [[ "$SOAK_EXIT" -eq 124 ]] && printf ': it ran past %ss' "$SOAK_SECS"). The proof passed; fix the code so the soak passes too. Its output names the failing case:"
+  } >"$out"
+  set +e
+  run_step "$PROOF_SECS" "$out.excerpt" "$out.err" \
+    python3 "$HERE/lib/proof-excerpt.py" "$SOAK_FILE" "$SOAK" "$SOAK_EXIT"
+  rc=$?
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    wake "proof-excerpt-error" "soak exit $SOAK_EXIT; its excerpt could not be built (rc=$rc, $out.err). Output: $SOAK_FILE"
+  fi
+  cat "$out.excerpt" >>"$out"
 }
 
 # --- mutation checks (docs/features/mutation-checks) ---------------------
@@ -1691,18 +1759,12 @@ while :; do
     if ((${#moved[@]})); then
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
     fi
-    # The soak (GOAL-FORMAT.md `soak:`), after a green proof: red, it stands in
-    # for the proof below, so its fix round is a proof fix round.
-    RED_STEP=proof
-    RED_CMD="$PROOF"
+    # The soak (GOAL-FORMAT.md `soak:`) starts after a green proof and runs
+    # alongside the review; its result is read after the review returns.
+    SOAK_PID=""
+    SOAK_DONE=0
     if [[ -n "$SOAK" && "$PROOF_EXIT" -eq 0 ]] && ! grep -q 'Ran 0 tests' "$PROOF_FILE"; then
-      run_soak
-      if [[ "$SOAK_EXIT" -ne 0 ]]; then
-        PROOF_FILE="$SOAK_FILE"
-        PROOF_EXIT="$SOAK_EXIT"
-        RED_STEP=soak
-        RED_CMD="$SOAK"
-      fi
+      soak_start
     fi
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
       # A proof fix round that changed nothing outside the journal: the
@@ -1721,7 +1783,7 @@ while :; do
       # Bounded like the proof: a pathological log must not stall the walk.
       set +e
       run_step "$PROOF_SECS" "$FINDINGS" "$FINDINGS.err" \
-        python3 "$HERE/lib/proof-excerpt.py" "$PROOF_FILE" "$RED_CMD" "$PROOF_EXIT"
+        python3 "$HERE/lib/proof-excerpt.py" "$PROOF_FILE" "$PROOF" "$PROOF_EXIT"
       excerpt_rc=$?
       set -e
       if [[ "$excerpt_rc" -ne 0 ]]; then
@@ -1731,23 +1793,12 @@ while :; do
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
       FIXH="$IMPL_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
       {
-        if [[ "$RED_STEP" == soak ]]; then
-          echo "# Fix handoff: $GOAL_ID (after round $ROUND: red soak)"
-        else
-          echo "# Fix handoff: $GOAL_ID (after round $ROUND: red host proof)"
-        fi
+        echo "# Fix handoff: $GOAL_ID (after round $ROUND: red host proof)"
         echo
         echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\`, tests/acceptance/ or tests/e2e/."
         echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
         sandbox_skips_line
         echo
-        if [[ "$RED_STEP" == soak ]]; then
-          echo "The goal's proof passed on the host. Its soak, a longer check the proof is too"
-          echo "short for (GOALS.md \`soak:\`: \`$SOAK\`), then failed$( [[ "$PROOF_EXIT" -eq 124 ]] && printf ': it ran past %ss' "$SOAK_SECS")."
-          echo "The output below names the failing case. Fix the code so the soak passes; the"
-          echo "proof must stay green. Then:"
-          echo
-        fi
         echo "The host ran the goal's proof after your last pass, in this working tree but"
         echo "outside your sandbox, and it failed. Make it pass without changing a contract"
         echo "(step 5 of your instructions). If you believe the oracle or the case table is"
@@ -1769,14 +1820,14 @@ while :; do
       } >"$FIXH"
       # Saved before the journal names their hash, as for a review fix.
       cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
-      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof head=${FIX_HEAD}$( [[ "$RED_STEP" == soak ]] && printf ' step=soak')"
+      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof head=${FIX_HEAD}"
       events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
         --verdict FIX --base-sha "$BASE_SHA" \
         --summary "fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof" \
         --payload "$(printf '{"fix_count":1,"fix_hash":"%s","source":"proof"}' "$FIX_HASH")"
       ROUND=$((ROUND + 1))
       if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
-        wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; after a red ${RED_STEP}; output: $PROOF_FILE"
+        wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; after a red proof; output: $PROOF_FILE"
       fi
       FIX_HANDOFF="$FIXH"
       CUR_FIX_SOURCE=proof
@@ -1889,6 +1940,49 @@ EOF
     --verdict "$LAST_VERDICT" --base-sha "$BASE_SHA" \
     --summary "review ${GOAL_ID} r${ROUND} VERDICT=${LAST_VERDICT} ${review_note}"
 
+  # The soak ran beside the review. Red, it is a fix round: on its own after a
+  # DONE (a proof-source round, so a resume proves first), or with the review's
+  # findings after a FIX. Any other verdict wakes as it would anyway.
+  soak_finish
+  SOAK_RED=0
+  [[ "$SOAK_DONE" -eq 0 || "$SOAK_EXIT" -eq 0 ]] || SOAK_RED=1
+  if [[ "$SOAK_RED" -eq 1 && "$LAST_VERDICT" == DONE ]]; then
+    FINDINGS="$RUN_DIR/findings-r${ROUND}.txt"
+    soak_findings "$FINDINGS"
+    FIX_HEAD="$(git rev-parse HEAD)"
+    FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
+    FIXH="$IMPL_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
+    {
+      echo "# Fix handoff: $GOAL_ID (after round $ROUND: red soak)"
+      echo
+      echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\`, tests/acceptance/ or tests/e2e/."
+      echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
+      sandbox_skips_line
+      echo
+      echo "The goal's proof passed on the host and the review found nothing to fix. Its soak,"
+      echo "a longer check the proof is too short for, then failed. Fix the case it names"
+      echo "without changing a contract; the proof must stay green. If you believe the soak"
+      echo "or the oracle is wrong, report BLOCKED with the exact question."
+      echo
+      echo "## Findings"
+      cat "$FINDINGS"
+    } >"$FIXH"
+    cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
+    journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof head=${FIX_HEAD} step=soak"
+    events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
+      --verdict FIX --base-sha "$BASE_SHA" \
+      --summary "fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=soak" \
+      --payload "$(printf '{"fix_count":1,"fix_hash":"%s","source":"soak"}' "$FIX_HASH")"
+    ROUND=$((ROUND + 1))
+    if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
+      wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; after a red soak; output: $SOAK_FILE"
+    fi
+    FIX_HANDOFF="$FIXH"
+    CUR_FIX_SOURCE=proof
+    CUR_FIX_HEAD="$FIX_HEAD"
+    continue
+  fi
+
   case "$LAST_VERDICT" in
     DONE)
       if [[ "${PROOF_NONE:-0}" -eq 1 ]]; then
@@ -1933,6 +2027,15 @@ EOF
       if [[ "$FIX_COUNT_N" -eq 0 ]]; then
         wake "fix-unparseable" "VERDICT=FIX but no FIX: lines. $VERDICT_FILE"
       fi
+      fix_note=""
+      if [[ "$SOAK_RED" -eq 1 ]]; then
+        # The red soak's case joins the review's findings, inside what the
+        # journaled hash covers.
+        soak_findings "$RUN_DIR/soak-findings-r${ROUND}.txt"
+        { echo; cat "$RUN_DIR/soak-findings-r${ROUND}.txt"; } >>"$FINDINGS"
+        FIX_COUNT_N=$((FIX_COUNT_N + 1))
+        fix_note=" step=soak"
+      fi
       if findings_touch_oracle "$TARGETS"; then
         if [[ -n "$WT_MAIN" ]]; then
           # The walker sets bounced; the record ends this attempt (exit 3).
@@ -1961,7 +2064,7 @@ EOF
       # fix round from these (never from the journal, which the implementer
       # reads and which must not carry finding text).
       cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
-      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH} source=review"
+      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH} source=review${fix_note}"
       events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
         --verdict FIX --base-sha "$BASE_SHA" \
         --summary "fix ${GOAL_ID} r${ROUND} count=${FIX_COUNT_N} hash=${FIX_HASH}" \

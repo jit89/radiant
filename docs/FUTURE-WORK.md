@@ -1464,14 +1464,21 @@ goal's proof (a 30-case fuzz smoke) and every mutation step had passed:
 The owner asked for the long check to move into each goal.
 
 DONE (2026-11-08, in-session):
-- GOALS.md gains a per-goal `soak:` key. The host runs it after a green proof and before the review, under
-  `SOAK_TIMEOUT` (default 1,800 s).
-- Red or timed out, it is a proof fix round. The handoff says "red soak", and the fix record carries `step=soak`.
+- GOALS.md gains a per-goal `soak:` key. The host starts it after a green proof and runs it alongside the review
+  (owner: "make the soak run alongside the review"), under `SOAK_TIMEOUT` (default 1,800 s).
+  - Measured on the stub goal: a 4 s soak beside a 4 s review took the same 9.4 s as the soak alone.
+- Red or timed out, it is a fix round:
+  - on its own after a DONE (`source=proof step=soak`);
+  - with the review's findings after a FIX (`source=review step=soak`, inside the journaled hash).
+- A wake during the review takes the soak's process tree down: frozen with STOP, listed until stable, then KILLed.
 - The output is kept as `soak-r<n>.out`, and the journal records `ORCHESTRATOR soak`. A tree change wakes
   `soak-tamper`.
 - Docs: GOAL-FORMAT.md, and RUST.md "Soaks" (the release fuzz recipe).
-- Test: `soak-test.sh`, 18 checks. Two plants are red: a red soak not standing in for the proof (7 failures), and
-  a soak run after a red proof (1 failure).
+- Test: `soak-test.sh`. Plants are red:
+  - waiting for the soak before the review (the overlap check and the record order);
+  - a no-op stop (a soak left running after a wake);
+  - a FIX that drops the soak's case;
+  - a soak run after a red proof.
 
 **Not here:** the origin check of a green soak's `read_error`/`internal_error` counts. That needs origin, which only
 the Architect runs, so it is a step in the Architect's per-goal review. Paladin's fuzz report should tally notes and
