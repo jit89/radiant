@@ -154,6 +154,14 @@ After a goal's DONE review, the reviewer mutates the implementer's code and the 
 
 `mutation_proof:` (optional) is one shell command the mutations run instead of `proof`, in the same proof sandbox, on a copy of the checkout (one copy per goal, reset to its baseline commit before each mutation, so the baseline's build output is reused). Use it when the proof carries steps no mutation can turn red and that cost minutes each: release timing, lint, format, fuzz, the earlier milestones' suites. Give it the goal's own oracle and its ancestors', in the proof's build flags (the same features and profile env, so the copied build is reused), failing fast. The mutations (and the proof, when there is no `mutation_proof`) see `CW_MUT_CHECKOUT`, the checkout's physical path, for a build that fingerprints absolute source paths (a vendored Rust project: RUST.md, "Mutation proofs"). It must still pass unmutated: a baseline that is not green skips every mutation, with its output kept as `mutation-r<n>-baseline.out` beside the diffs. `validate` refuses anything but a non-empty string. A goal reads it from GOALS.md at its base commit, so changing it mid-goal is contract drift.
 
+`soak:` (optional) is one shell command the host runs after a green host proof and before the review, in the same proof sandbox, under its own timeout (`SOAK_TIMEOUT`, default 1,800 s). Use it for a check the proof is too short for: a parser's long fuzz run. Paladin M1b.1 found a panic and a parity bug only at the slice's exit, in a 600 s run, after every goal's 30-case proof smoke and every mutation step had passed.
+- **Red or timed out:** a proof fix round, inside `MAX_FIX_ROUNDS`. The handoff says "red soak" and carries the soak's output, so the implementer fixes the case it names. The next round proves, then soaks again.
+- **Green:** the review runs as usual.
+- **Kept and recorded:** every soak's output is kept as `soak-r<n>.out` beside the mutation diffs, for the Architect. A green soak can still report outcomes worth checking against origin (a `read_error`, an `internal_error`). The journal gets `ORCHESTRATOR soak <id> r<n> exit=<rc> secs=<s>`.
+- **A soak that changes the tree** wakes `soak-tamper`, as the proof would.
+- **Validation:** `validate` refuses anything but a non-empty string.
+- **Base commit:** like `mutation_proof`, it is read from GOALS.md at the goal's base commit.
+
 ### Prove the oracle is satisfiable before committing it — the tiers
 
 Red is not enough: a case can be red because the feature is missing, or because the case is

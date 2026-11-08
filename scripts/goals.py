@@ -485,6 +485,9 @@ def validate(data: dict, root: str | None = None) -> list[str]:
         mp = g.get("mutation_proof")
         if mp is not None and (not isinstance(mp, str) or not mp.strip()):
             errors.append(f"{gid}: mutation_proof must be one shell command (a non-empty string)")
+        soak = g.get("soak")
+        if soak is not None and (not isinstance(soak, str) or not soak.strip()):
+            errors.append(f"{gid}: soak must be one shell command (a non-empty string)")
         st = g.get("status", "")
         if st not in STATUSES:
             errors.append(f"{gid}: bad status {st!r}")

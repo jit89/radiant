@@ -67,6 +67,10 @@ MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
 IMPL_SECS="${IMPLEMENTER_TIMEOUT:-${DEEPSEEK_TIMEOUT:-1200}}"
 REVIEW_SECS="${CLAUDE_REVIEW_TIMEOUT:-600}"
 PROOF_SECS="${PROOF_TIMEOUT:-600}"
+# soak: (GOAL-FORMAT.md) a long check run after a green host proof, before the
+# review, under its own timeout: a long fuzz run that a goal's proof is too short
+# for. Red or timed out, it is a proof fix round like a red proof.
+SOAK_SECS="${SOAK_TIMEOUT:-1800}"
 # Mutation checks after a DONE review (docs/features/mutation-checks): how many
 # the reviewer is asked for, 0 off. Checked here, before any pass.
 MUTATIONS="${CW_MUTATIONS:-3}"
@@ -99,6 +103,8 @@ PROOF=""
 # mutation_proof: (GOAL-FORMAT.md) the command the mutations run, from BASE_SHA's
 # GOALS.md; the goal's proof when the goal names none.
 MUT_PROOF=""
+# soak: the goal's soak command from BASE_SHA's GOALS.md, or empty.
+SOAK=""
 PLAN_PATH=""
 PLAN_FROZEN=""
 BASE_SHA=""
@@ -714,6 +720,49 @@ reap_strays() {
   events_append --event strays --severity warning --goal "$GOAL_ID" --round "$ROUND" \
     --base-sha "$BASE_SHA" --summary "strays ${GOAL_ID} r${ROUND} after ${step}: $(wc -l <<<"$found" | tr -d ' ')" \
     --payload "$(python3 -c 'import json,sys; print(json.dumps({"step": sys.argv[1], "strays": [l for l in sys.argv[2].splitlines() if l]}))' "$step" "$found")"
+}
+
+# --- the soak (GOAL-FORMAT.md `soak:`) ------------------------------------
+# run_soak — the goal's soak in the checkout, in the proof sandbox, under
+# SOAK_SECS. Sets SOAK_EXIT and SOAK_FILE; keeps the output's last 256 KiB in
+# ART_DIR for the Architect (a soak's report is read after the walk); journals
+# one record and one event. A soak that changes the tree or the contract wakes
+# as the proof would; the sandbox stopping it wakes too.
+SOAK_EXIT=0
+SOAK_FILE=""
+run_soak() {
+  local start secs moved=() m
+  SOAK_FILE="$RUN_DIR/soak-${GOAL_ID}-r${ROUND}.txt"
+  PHASE="soak r${ROUND}"
+  event_phase soak
+  tree_snapshot >"$RUN_DIR/tree-before-soak.txt"
+  start="$(date +%s)"
+  set +e
+  PROOF_ROOT="$ROOT" PROOF_WALK="${GIT_PIN_COMMON:-}" PROOF_NETWORK="$PROOF_NET" \
+    PROOF_DEPS="$PROOF_DEPS_DIR" proof_exec "$SOAK_SECS" "$SOAK_FILE" "$PROOF_TMP" "$SOAK"
+  SOAK_EXIT=$?
+  set -e
+  secs=$(( $(date +%s) - start ))
+  PHASE="assess r${ROUND}"
+  verify_git_meta "during soak r${ROUND}"
+  verify_claude_meta "during soak r${ROUND}"
+  if [[ -n "$PROOF_SANDBOX_REASON" ]]; then
+    wake "$PROOF_SANDBOX_REASON" "the proof sandbox stopped the soak before it ran. Output: $SOAK_FILE"
+  fi
+  tree_snapshot >"$RUN_DIR/tree-after-soak.txt"
+  contract_drift
+  while IFS= read -r m; do
+    [[ -z "$m" ]] || moved+=("$m")
+  done < <(proof_moved "$RUN_DIR/tree-before-soak.txt" "$RUN_DIR/tree-after-soak.txt")
+  contract_any && moved+=("contract — $(contract_report)")
+  if ((${#moved[@]})); then
+    wake "soak-tamper" "the soak changed the repo — $(printf '%s; ' "${moved[@]}")output: $SOAK_FILE"
+  fi
+  mkdir -p "$ART_DIR" && tail -c 262144 "$SOAK_FILE" >"$ART_DIR/soak-r${ROUND}.out" 2>/dev/null || true
+  journal_line "## $(utc) — ORCHESTRATOR soak ${GOAL_ID} r${ROUND} exit=${SOAK_EXIT} secs=${secs}"
+  events_append --event soak --severity "$( [[ "$SOAK_EXIT" -eq 0 ]] && echo info || echo warning)" \
+    --goal "$GOAL_ID" --round "$ROUND" --base-sha "$BASE_SHA" \
+    --summary "soak ${GOAL_ID} r${ROUND} exit=${SOAK_EXIT} secs=${secs}"
 }
 
 # --- mutation checks (docs/features/mutation-checks) ---------------------
@@ -1334,6 +1383,7 @@ ORACLE="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'imp
 PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("proof") or "")')"
 MUT_PROOF="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("mutation_proof") or "")')"
 [[ -n "$MUT_PROOF" ]] || MUT_PROOF="$PROOF"
+SOAK="$("$GOALS_PY" "$RUN_DIR/goals-base.md" show "$GOAL_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("soak") or "")')"
 # The signed plan as it stood at BASE_SHA. Both agents read this copy: the live
 # file is contract (contract_drift), and an edit to it must not become the
 # spec the reviewer judges that same edit against.
@@ -1641,6 +1691,19 @@ while :; do
     if ((${#moved[@]})); then
       wake "proof-tamper" "the proof changed the repo — $(printf '%s; ' "${moved[@]}")output: $PROOF_FILE"
     fi
+    # The soak (GOAL-FORMAT.md `soak:`), after a green proof: red, it stands in
+    # for the proof below, so its fix round is a proof fix round.
+    RED_STEP=proof
+    RED_CMD="$PROOF"
+    if [[ -n "$SOAK" && "$PROOF_EXIT" -eq 0 ]] && ! grep -q 'Ran 0 tests' "$PROOF_FILE"; then
+      run_soak
+      if [[ "$SOAK_EXIT" -ne 0 ]]; then
+        PROOF_FILE="$SOAK_FILE"
+        PROOF_EXIT="$SOAK_EXIT"
+        RED_STEP=soak
+        RED_CMD="$SOAK"
+      fi
+    fi
     if [[ "$PROOF_EXIT" -ne 0 ]] || grep -q 'Ran 0 tests' "$PROOF_FILE"; then
       # A proof fix round that changed nothing outside the journal: the
       # implementer saw nothing to change (its sandboxed proof is likely
@@ -1658,7 +1721,7 @@ while :; do
       # Bounded like the proof: a pathological log must not stall the walk.
       set +e
       run_step "$PROOF_SECS" "$FINDINGS" "$FINDINGS.err" \
-        python3 "$HERE/lib/proof-excerpt.py" "$PROOF_FILE" "$PROOF" "$PROOF_EXIT"
+        python3 "$HERE/lib/proof-excerpt.py" "$PROOF_FILE" "$RED_CMD" "$PROOF_EXIT"
       excerpt_rc=$?
       set -e
       if [[ "$excerpt_rc" -ne 0 ]]; then
@@ -1668,12 +1731,23 @@ while :; do
       FIX_HASH="$(shasum -a 256 "$FINDINGS" | awk '{print $1}')"
       FIXH="$IMPL_DIR/handoff-${GOAL_ID}-fix-r${ROUND}.md"
       {
-        echo "# Fix handoff: $GOAL_ID (after round $ROUND: red host proof)"
+        if [[ "$RED_STEP" == soak ]]; then
+          echo "# Fix handoff: $GOAL_ID (after round $ROUND: red soak)"
+        else
+          echo "# Fix handoff: $GOAL_ID (after round $ROUND: red host proof)"
+        fi
         echo
         echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\`, tests/acceptance/ or tests/e2e/."
         echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
         sandbox_skips_line
         echo
+        if [[ "$RED_STEP" == soak ]]; then
+          echo "The goal's proof passed on the host. Its soak, a longer check the proof is too"
+          echo "short for (GOALS.md \`soak:\`: \`$SOAK\`), then failed$( [[ "$PROOF_EXIT" -eq 124 ]] && printf ': it ran past %ss' "$SOAK_SECS")."
+          echo "The output below names the failing case. Fix the code so the soak passes; the"
+          echo "proof must stay green. Then:"
+          echo
+        fi
         echo "The host ran the goal's proof after your last pass, in this working tree but"
         echo "outside your sandbox, and it failed. Make it pass without changing a contract"
         echo "(step 5 of your instructions). If you believe the oracle or the case table is"
@@ -1695,14 +1769,14 @@ while :; do
       } >"$FIXH"
       # Saved before the journal names their hash, as for a review fix.
       cp -f "$FIXH" "$ART_DIR/fix-r${ROUND}.md"
-      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof head=${FIX_HEAD}"
+      journal_line "## $(utc) — ORCHESTRATOR fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof head=${FIX_HEAD}$( [[ "$RED_STEP" == soak ]] && printf ' step=soak')"
       events_append --event fix --severity warning --goal "$GOAL_ID" --round "$ROUND" \
         --verdict FIX --base-sha "$BASE_SHA" \
         --summary "fix ${GOAL_ID} r${ROUND} count=1 hash=${FIX_HASH} source=proof" \
         --payload "$(printf '{"fix_count":1,"fix_hash":"%s","source":"proof"}' "$FIX_HASH")"
       ROUND=$((ROUND + 1))
       if [[ "$ROUND" -gt "$MAX_FIX_ROUNDS" ]]; then
-        wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; after a red proof; output: $PROOF_FILE"
+        wake "max-fix-rounds" "MAX_FIX_ROUNDS=$MAX_FIX_ROUNDS; after a red ${RED_STEP}; output: $PROOF_FILE"
       fi
       FIX_HANDOFF="$FIXH"
       CUR_FIX_SOURCE=proof

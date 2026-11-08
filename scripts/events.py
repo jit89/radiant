@@ -60,6 +60,8 @@ EVENTS = (
     "recut",
     # The mutation checks after a DONE review (docs/features/mutation-checks).
     "mutations",
+    # A goal's soak after a green proof (GOAL-FORMAT.md `soak:`).
+    "soak",
     # The always-on decider's choice (docs/features/always-on, step 12).
     "decision",
     # Processes an agent step left running in the checkout, ended (lib/reap-strays.py).

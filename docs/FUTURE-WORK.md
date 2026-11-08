@@ -1453,3 +1453,27 @@ DONE (2026-11-08, in-session):
   crate). The first goal cut after this lands carries it.
 - Re-measure the per-run overhead on a quiet machine.
 - The same remedy for `--jobs` worktrees: item 38, option 1.
+
+## 43. A goal's soak: the long check a proof is too short for (2026-11-08, Paladin M1b.1 exit)
+
+Paladin M1b.1's exit check ran each parser's fuzz target for 600 s. The YAML target found two bugs that every
+goal's proof (a 30-case fuzz smoke) and every mutation step had passed:
+- a panic in the vendored scanner (g42);
+- 146 parity errors, only visible as `read_error` in the report and confirmed by an origin probe.
+
+The owner asked for the long check to move into each goal.
+
+DONE (2026-11-08, in-session):
+- GOALS.md gains a per-goal `soak:` key. The host runs it after a green proof and before the review, under
+  `SOAK_TIMEOUT` (default 1,800 s).
+- Red or timed out, it is a proof fix round. The handoff says "red soak", and the fix record carries `step=soak`.
+- The output is kept as `soak-r<n>.out`, and the journal records `ORCHESTRATOR soak`. A tree change wakes
+  `soak-tamper`.
+- Docs: GOAL-FORMAT.md, and RUST.md "Soaks" (the release fuzz recipe).
+- Test: `soak-test.sh`, 18 checks. Two plants are red: a red soak not standing in for the proof (7 failures), and
+  a soak run after a red proof (1 failure).
+
+**Not here:** the origin check of a green soak's `read_error`/`internal_error` counts. That needs origin, which only
+the Architect runs, so it is a step in the Architect's per-goal review. Paladin's fuzz report should tally notes and
+keep a sample input per note to make it cheap (a Paladin goal).
+

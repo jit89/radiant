@@ -212,6 +212,22 @@ To check a new recipe: run its cargo step once in a copy of the checkout
 (`cp -cRp`, with `target/`), with `CW_MUT_CHECKOUT` set to the checkout and
 `-v`. No line says `Dirty` for a vendored crate.
 
+## Soaks
+
+A parser goal's `soak:` (GOAL-FORMAT.md) is its long fuzz run, built in release with the checks a debug build
+has: about ten times the cases per second.
+
+```bash
+CARGO_TARGET_DIR="$PWD/target/soak" CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true <envs> "$CARGO" run --offline --locked --release -q -p xtask -- fuzz <target> --secs 600
+```
+
+- **Its own target folder:** `target/soak`, still inside `target/` (the anti-tamper rule, "Kept"). Its release
+  flags never fight a release timing build in `target/release` over one fingerprint set.
+- **Timing:** 600 s of fuzzing plus one release build sits inside the default `SOAK_TIMEOUT` (1,800 s).
+- **After the walk:** the Architect reads the kept `soak-r<n>.out`. A `read_error` or `internal_error` the fuzz
+  report counts is checked against origin, by probing a sample input. Paladin g42: 146 `AttributeError`s that origin
+  reports as `syntax`.
+
 ## Why each piece is there
 
 - **No type-check step.** rustc type-checks inside `cargo test`. A wrong-typed
