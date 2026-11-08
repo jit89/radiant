@@ -360,12 +360,36 @@ def validate_bodies(text: str, data: dict) -> list[str]:
                     "tests/acceptance/ and tests/e2e/; the Architect applies that edit before "
                     "dispatch and lists it under **Acceptance edits (applied, read-only)**"
                 )
+            if g.get("status") != "done":
+                for name in required_section_names(data):
+                    if not section_text(goal_body(text, gid), name):
+                        errors.append(
+                            f"{gid}: no **{name}:** section with text — required_sections names it, "
+                            "so every goal not yet done states it"
+                        )
     return errors
 
 
 # A body section starts with a bold label line, "**Label:**".
 SECTION_RE = re.compile(r"^\*\*[^*\n]+:\*\*", re.M)
 ACCEPTANCE_PATH_RE = re.compile(r"tests/(?:acceptance|e2e)/[^\s`'\"),;]*")
+
+
+def required_section_names(data: dict) -> list[str]:
+    """The body sections a target requires of every goal not yet done (required_sections:)."""
+    names = data.get("required_sections")
+    if not isinstance(names, list):
+        return []
+    return [name for name in names if isinstance(name, str) and name.strip()]
+
+
+def section_text(body: str, name: str) -> str:
+    """The text of the body's **name:** section, stripped; empty when it is missing or blank."""
+    m = re.search(rf"^\*\*{re.escape(name)}:\*\*", body, re.M)
+    if not m:
+        return ""
+    nxt = SECTION_RE.search(body, m.end())
+    return body[m.end() : nxt.start() if nxt else len(body)].strip()
 
 
 def owned_acceptance_paths(body: str) -> list[str]:
@@ -472,6 +496,13 @@ def validate(data: dict, root: str | None = None) -> list[str]:
     net = data.get("proof_network")
     if net is not None and net not in ("loopback", "true"):
         errors.append("proof_network: must be loopback or true (leave it out for none)")
+    required = data.get("required_sections")
+    if required is not None and (
+        not isinstance(required, list)
+        or not required
+        or not all(isinstance(name, str) and name.strip() for name in required)
+    ):
+        errors.append("required_sections: must be a list of section names (leave it out for none)")
     errors.extend(tool_path_errors(data.get("tool_path"), root))
     errors.extend(sandbox_skips_errors(data.get("implementer_sandbox_skips")))
     ids = [g.get("id") for g in data["goals"]]

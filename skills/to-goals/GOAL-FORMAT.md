@@ -56,6 +56,8 @@ goals:
 
 **Out of scope:** <bounds + ceilings that need a ponytail comment>
 
+**<A section `required_sections:` names, such as Logging:>** <what the target asks every goal to state>
+
 **Oracle:** `tests/acceptance/g1-store.test.ts` (read-only to the implementer)
 **Proof:** `pnpm test tests/acceptance/g1-store.test.ts`
 ````
@@ -86,6 +88,11 @@ The case table in the body *is* the oracle.
   parallel walk the walker sets all three).
 
 `blocked_by` and `conflicts_with` in the markdown body must match the YAML. The YAML wins if they drift.
+
+`required_sections` (top level, optional) — body sections a target asks of every goal, such as `[Logging]`.
+`goals.py validate` refuses a goal not yet `done` whose body has no such section with text, so the cut cannot be
+committed and the walk cannot start without it. Goals already `done` are not re-opened. A section states a duty; the
+goal's oracle is what proves it, so name the case that pins it, or say why the goal has nothing to state.
 
 ### Registration points
 

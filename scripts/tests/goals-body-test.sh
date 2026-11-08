@@ -87,6 +87,26 @@ goals tests/acceptance/test_store.py '
 **What it delivers:** stored mail' >"$TMP/file-oracle-body.md"
 check "file-oracle goal with a body: valid" "OK" "$(verdict "$TMP/file-oracle-body.md")"
 
+# required_sections: a target's duty, refused while a goal not yet done omits it.
+sections() { # name, the key's line, goal status, extra body text
+  printf '# Goals: sections\n\n```yaml\nplan: PLAN.md\njournal: j.md\n%s\ngoals:\n  - id: g1-store\n    title: Store\n    blocked_by: []\n    conflicts_with: []\n    area: mail\n    proof: "true"\n    oracle: tests/acceptance/g1-store.test.ts\n    status: %s\n```\n\n## g1-store — Store\n\n**What it delivers:** stored mail\n%b\n**Oracle:** x\n' "$2" "$3" "$4" >"$TMP/$1.md"
+}
+sections no-key "" ready ""
+check "no required_sections: a body without it is valid" "OK" "$(verdict "$TMP/no-key.md")"
+sections missing-section "required_sections: [Logging]" ready ""
+check "a required section missing: invalid" "INVALID" "$(verdict "$TMP/missing-section.md")"
+check "  ...the error names the goal and the section" "1" "$(says "$TMP/missing-section.md" 'g1-store: no \*\*Logging:\*\* section')"
+sections blank-section "required_sections: [Logging]" ready "\n**Logging:**\n"
+check "a required section with no text: invalid" "INVALID" "$(verdict "$TMP/blank-section.md")"
+sections present-section "required_sections: [Logging]" ready "\n**Logging:** no new boundary: a test tool.\n"
+check "a required section with text: valid" "OK" "$(verdict "$TMP/present-section.md")"
+sections done-goal "required_sections: [Logging]" done ""
+check "a done goal is not re-opened" "OK" "$(verdict "$TMP/done-goal.md")"
+sections bad-key "required_sections: Logging" ready ""
+check "required_sections not a list: invalid" "INVALID" "$(verdict "$TMP/bad-key.md")"
+sections empty-key "required_sections: []" ready ""
+check "required_sections empty: invalid" "INVALID" "$(verdict "$TMP/empty-key.md")"
+
 goals tests/acceptance/test_store.py '
 ## g1-store — Store
 first
