@@ -1299,6 +1299,11 @@ one `target/` and pays the cost once.
      vendored and workspace crates move with the worktree.
    - Measure how many crates rebuild.
    - Remedies if most rebuild: `--remap-path-prefix`, or keeping the vendored sources at a stable path.
+   - **Answered (2026-11-08, item 42):** workspace crates survive the move: Cargo hashes their paths relative
+     to the workspace. Every vendored crate rebuilds ("the path to the source changed": its absolute path is
+     hashed). `--config "source.vendored-sources.directory='<main checkout>/vendor'"` in the worktree's
+     proof rebuilt nothing in a probe. A `vendor` symlink and the `CARGO_SOURCE_…` env form do not help.
+     That leaves the anti-tamper question: a proof that reads `vendor/` from outside its own worktree.
 2. **Pre-build dependencies once per wave on the host,** into a read-only directory that each worktree's target
    reuses. This needs a Cargo mechanism to do it: check `-Zbuild-dir` / `build.build-dir` (stable status in
    1.99?) and whether it keeps the anti-tamper property.
@@ -1426,3 +1431,25 @@ refuses without it".
 - **Fix:** when a proof includes a lint step, Tier 1 also runs it with `--keep-going` and filters to
   `tests/acceptance/` paths. Any finding there fails Tier 1.
 - A `scripts/tests/` case plants a `similar_names` pair in an oracle and expects Tier 1 to stop.
+
+## 42. Mutation copies rebuild every vendored crate (2026-11-08, Paladin g39)
+
+The mutations run in a copy of the checkout at another path, with `target/` copied along. Cargo hashed each vendored
+crate's absolute source path, so the copy rebuilt the whole vendored graph (`serde`, `syn`, `clap`, `strum`,
+`sysctl` …) and every workspace crate after it. g39's mutation step took 20 minutes under load.
+
+DONE (2026-11-08, in-session):
+- `mut_run` exports `CW_MUT_CHECKOUT`, the checkout's physical path, to the mutation proof. Only the copies get it;
+  the host proof does not.
+- A vendored Rust project's `mutation_proof` adds
+  `--config "source.vendored-sources.directory='$CW_MUT_CHECKOUT/vendor'"` to each cargo call. That is
+  RUST.md, "Mutation proofs".
+- Probe (1.99.1, a different `CARGO_HOME`, serde with its build script and derive): nothing rebuilt.
+- Test: `mutation-test.sh`, "the mutation proof is told the checkout it was copied from". Planted without the export:
+  red (the baseline red, the mutation skipped).
+
+**Open:**
+- Measure one real Paladin mutation step with the flag (`cargo test -v --no-run` in a copy: no `Dirty` vendored
+  crate). The first goal cut after this lands carries it.
+- Re-measure the per-run overhead on a quiet machine.
+- The same remedy for `--jobs` worktrees: item 38, option 1.

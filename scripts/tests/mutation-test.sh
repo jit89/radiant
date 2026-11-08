@@ -359,6 +359,19 @@ v="$("$HERE/goals.py" GOALS.md validate 2>&1 || true)"
 check "mutation_proof: a list is refused" yes "$(has 'mutation_proof must be one shell command' "$v$(grep -n mutation_proof GOALS.md)")"
 git checkout -q GOALS.md
 
+echo "== the mutation proof is told the checkout it was copied from (CW_MUT_CHECKOUT)"
+# In a copy: the checkout's physical path, not the copy's; in the host proof:
+# unset. A wrong value turns the baseline red and every mutation is skipped.
+make_repo 'case "$PWD" in
+  */cw-mut-*) [ "${CW_MUT_CHECKOUT:-}" = "'"$TMP/repo"'" ] || { echo "CW_MUT_CHECKOUT=[${CW_MUT_CHECKOUT:-}]"; exit 1; } ;;
+  *) [ -z "${CW_MUT_CHECKOUT+x}" ] || { echo "set in the host proof"; exit 1; } ;;
+esac
+'"$ORACLE_OK"
+mut 'the sum' "$SUM_TO_MINUS" >"$CALLS/mutations"
+run
+check "CW_MUT_CHECKOUT: the checkout in a copy, unset on the host; the mutation caught" \
+  "caught=1 survived=0 timeout=0 skipped=0 0 done" "$(record) $rc $(status_of)"
+
 echo "== a process the implementer left running in the checkout is ended"
 make_repo "$ORACLE_OK"
 touch "$CALLS/stray"

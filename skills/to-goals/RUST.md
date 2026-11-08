@@ -179,6 +179,39 @@ step, so it never lints the oracle against the stubs. Lint separately:
 6. Where a reference implementation exists (a prior attempt, a scratch), the
    full proof exits 0 against it.
 
+## Mutation proofs
+
+A `mutation_proof` (GOAL-FORMAT.md) runs in a copy of the checkout at another
+path, with the checkout's `target/` copied along. Cargo fingerprints a
+vendored crate by its **absolute** source path, so in the copy every vendored
+crate rebuilds (`cargo build -v`: `Dirty serde vX: the path to the source
+changed`), and every workspace crate after them. Workspace crates alone would
+stay fresh: their paths are hashed relative to the workspace. Paladin g39: the
+mutation step rebuilt the vendored graph and took 20 minutes.
+
+The host gives the mutation proof `CW_MUT_CHECKOUT`, the checkout's physical
+path. Point the vendored source back at the checkout's own `vendor/`, in each
+cargo call of the `mutation_proof` (after the subcommand):
+
+```bash
+"$CARGO" test --offline --locked --config "source.vendored-sources.directory='$CW_MUT_CHECKOUT/vendor'" ...
+```
+
+The name is the `[source.<name>]` table of `.cargo/config.toml`. The
+mutation proof keeps the proof's build flags (the same features and profile
+env), so its fingerprints match the copied ones. A probe (1.99.1; cfg-if,
+memchr, serde with its build script and derive, a different `CARGO_HOME`)
+rebuilt nothing. Only `--config` works: `CARGO_SOURCE_VENDORED_SOURCES_DIRECTORY`
+is ignored, and a `vendor` symlink in the copy still rebuilds (Cargo uses
+the path it was given). The proof reads the checkout's `vendor/` and writes
+only in the copy. A checkout under a temp area (`/tmp`, `/var/folders`) is
+unreadable to the proof, so the baseline goes red and every mutation is
+skipped.
+
+To check a new recipe: run its cargo step once in a copy of the checkout
+(`cp -cRp`, with `target/`), with `CW_MUT_CHECKOUT` set to the checkout and
+`-v`. No line says `Dirty` for a vendored crate.
+
 ## Why each piece is there
 
 - **No type-check step.** rustc type-checks inside `cargo test`. A wrong-typed

@@ -781,15 +781,24 @@ mut_reset() {
 # this same clone, with only git reset/clean/apply since),
 # judged by the host's own rule on CLONE's tree. Sets MUT_OUTCOME: green, red, timeout, notests,
 # moved or sandbox (with MUT_WHY).
+# The proof sees CW_MUT_CHECKOUT, the checkout's physical path (the clone's
+# source): a build whose fingerprints hold absolute source paths can point at
+# the checkout's own copy of those sources and reuse the copied build output.
+# Cargo hashes a vendored crate's absolute path, so in a clone every vendored
+# crate rebuilds ("the path to the source changed"); a mutation_proof passing
+# --config "source.<name>.directory='$CW_MUT_CHECKOUT/vendor'" rebuilds none
+# (RUST.md, "Mutation proofs"). Read only: the proof may write in CLONE and TMP.
 MUT_OUTCOME=""
 MUT_WHY=""
 mut_run() {
-  local clone="$1" out="$2" tmp="$3" checked="${4:-0}" rc moved
+  local clone="$1" out="$2" tmp="$3" checked="${4:-0}" rc moved origin
+  origin="$(cd "$ROOT" && pwd -P)"
   ( git() { mut_git "$clone" "$@"; }; cd "$clone" && tree_snapshot ) >"$out.before" 2>/dev/null || true
   set +e
   PROOF_ROOT="$clone" PROOF_WALK="$clone/.git" PROOF_NETWORK="$PROOF_NET" PROOF_DEPS="$PROOF_DEPS_DIR" \
     PROOF_ROOT_LINKS_CHECKED="$checked" \
-    proof_exec "$PROOF_SECS" "$out" "$tmp" "cd $(printf '%q' "$clone") && $MUT_PROOF"
+    proof_exec "$PROOF_SECS" "$out" "$tmp" \
+    "cd $(printf '%q' "$clone") && export CW_MUT_CHECKOUT=$(printf '%q' "$origin") && $MUT_PROOF"
   rc=$?
   set -e
   MUT_WHY=""
