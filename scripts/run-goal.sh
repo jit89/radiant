@@ -142,6 +142,8 @@ PENDING_FIX_STUCK=0
 # proof fix, the HEAD it was issued at (the no-progress rule, PLAN step 2).
 CUR_FIX_SOURCE=""
 CUR_FIX_HEAD=""
+# soak when the current fix round answers a red soak (its no-progress stop).
+CUR_FIX_STEP=""
 # 1 on a resume after a proof fix's no-progress stop: prove before dispatching.
 PROOF_FIRST=0
 # The proof's private TMPDIR in worktree mode (parallel goals side by side);
@@ -737,9 +739,13 @@ SOAK_START=0
 # SOAK_DONE: this round's soak was read (soak_finish); SOAK_RED: and it was red.
 SOAK_DONE=0
 SOAK_RED=0
+SOAK_JOURNAL_BYTES=0
+SOAK_JOURNAL_HEAD=""
+SOAK_GOALS_HASH=""
 soak_start() {
   SOAK_FILE="$RUN_DIR/soak-${GOAL_ID}-r${ROUND}.txt"
   rm -f "$SOAK_FILE.rc" "$SOAK_FILE.sandbox"
+  soak_reap_stale
   event_phase soak
   tree_snapshot >"$RUN_DIR/tree-before-soak.txt"
   SOAK_START="$(date +%s)"
@@ -752,6 +758,32 @@ soak_start() {
     printf '%s\n' "$rc" >"$SOAK_FILE.rc"
   ) </dev/null &
   SOAK_PID=$!
+  # A host killed outright (no EXIT trap) leaves its soak running; the next
+  # soak of this goal ends it (soak_reap_stale). Its start time names it, so a
+  # reused pid is never hit.
+  mkdir -p "$ART_DIR" && printf '%s %s\n' "$SOAK_PID" "$(ps -o lstart= -p "$SOAK_PID" 2>/dev/null | tr -s ' ')" >"$ART_DIR/soak.pid" 2>/dev/null || true
+  # The orchestration files the host itself writes while the soak runs (the
+  # ids and review records): judged apart from the tree (soak_finish).
+  SOAK_JOURNAL_BYTES="$(wc -c <"$JOURNAL" 2>/dev/null | tr -d ' ' || echo 0)"
+  SOAK_JOURNAL_HEAD="$(head -c "${SOAK_JOURNAL_BYTES:-0}" "$JOURNAL" 2>/dev/null | shasum -a 256 | awk '{print $1}')"
+  SOAK_GOALS_HASH="$(shasum -a 256 GOALS.md 2>/dev/null | awk '{print $1}')"
+}
+
+# soak_reap_stale — the soak a hard-killed host left running for this goal,
+# ended with its tree when its pid still has the recorded start time.
+soak_reap_stale() {
+  local line pid started now
+  line="$(cat "$ART_DIR/soak.pid" 2>/dev/null || true)"
+  rm -f "$ART_DIR/soak.pid"
+  [[ -n "$line" ]] || return 0
+  pid="${line%% *}"
+  started="${line#* }"
+  [[ "$pid" =~ ^[0-9]+$ && -n "$started" ]] || return 0
+  now="$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ' || true)"
+  [[ -n "$now" && "$now" == "$started" ]] || return 0
+  echo "soak: ending the soak a stopped run left running (pid $pid)" >&2
+  SOAK_PID="$pid"
+  stop_soak
 }
 
 # stop_soak — a soak still running when the host stops (a wake during the
@@ -777,6 +809,7 @@ stop_soak() {
   done
   kill -KILL "${all[@]}" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
+  rm -f "${ART_DIR:-/nonexistent}/soak.pid"
 }
 
 # soak_finish — after the review: waits for the soak, then judges it as the
@@ -790,7 +823,11 @@ soak_finish() {
   wait "$SOAK_PID" 2>/dev/null || true
   SOAK_PID=""
   SOAK_DONE=1
-  SOAK_EXIT="$(cat "$SOAK_FILE.rc" 2>/dev/null || echo 125)"
+  rm -f "$ART_DIR/soak.pid"
+  if [[ ! -s "$SOAK_FILE.rc" ]]; then
+    wake "soak-lost" "the soak ended without its exit status (killed from outside?). Output: $SOAK_FILE"
+  fi
+  SOAK_EXIT="$(cat "$SOAK_FILE.rc")"
   reason="$(cat "$SOAK_FILE.sandbox" 2>/dev/null || true)"
   secs=$(( $(date +%s) - SOAK_START ))
   PHASE="assess r${ROUND}"
@@ -801,6 +838,14 @@ soak_finish() {
   fi
   tree_snapshot >"$RUN_DIR/tree-after-soak.txt"
   contract_drift
+  # The host appended its own records to the journal while the soak ran, so the
+  # journal and GOALS.md are judged apart: GOALS.md unchanged, the journal only
+  # grown past the bytes it had at the start.
+  soak_drop_orch "$RUN_DIR/tree-before-soak.txt"
+  soak_drop_orch "$RUN_DIR/tree-after-soak.txt"
+  [[ "$(shasum -a 256 GOALS.md 2>/dev/null | awk '{print $1}')" == "$SOAK_GOALS_HASH" ]] || moved+=("GOALS.md changed")
+  [[ "$(head -c "${SOAK_JOURNAL_BYTES:-0}" "$JOURNAL" 2>/dev/null | shasum -a 256 | awk '{print $1}')" == "$SOAK_JOURNAL_HEAD" ]] ||
+    moved+=("$JOURNAL: its existing text changed")
   while IFS= read -r m; do
     [[ -z "$m" ]] || moved+=("$m")
   done < <(proof_moved "$RUN_DIR/tree-before-soak.txt" "$RUN_DIR/tree-after-soak.txt")
@@ -813,6 +858,19 @@ soak_finish() {
   events_append --event soak --severity "$( [[ "$SOAK_EXIT" -eq 0 ]] && echo info || echo warning)" \
     --goal "$GOAL_ID" --round "$ROUND" --base-sha "$BASE_SHA" \
     --summary "soak ${GOAL_ID} r${ROUND} exit=${SOAK_EXIT} secs=${secs}"
+}
+
+# soak_drop_orch SNAPSHOT — the status lines of the journal and GOALS.md
+# removed from a tree snapshot (the first line, HEAD, is kept).
+soak_drop_orch() {
+  python3 - "$1" "$JOURNAL" <<'PY2'
+import sys
+path, journal = sys.argv[1], sys.argv[2]
+lines = open(path).read().splitlines()
+skip = {journal, "GOALS.md"}
+kept = lines[:1] + [l for l in lines[1:] if l[3:] not in skip]
+open(path, "w").write("".join(x + "\n" for x in kept))
+PY2
 }
 
 # soak_findings OUT — a red soak's findings: what failed, then the excerpt of
@@ -1832,6 +1890,7 @@ while :; do
       FIX_HANDOFF="$FIXH"
       CUR_FIX_SOURCE=proof
       CUR_FIX_HEAD="$FIX_HEAD"
+      CUR_FIX_STEP=""
       continue
     fi
   fi
@@ -1946,6 +2005,11 @@ EOF
   soak_finish
   SOAK_RED=0
   [[ "$SOAK_DONE" -eq 0 || "$SOAK_EXIT" -eq 0 ]] || SOAK_RED=1
+  # A soak fix round that changed nothing outside the journal: another round
+  # cannot help (as proof-red for a red proof).
+  if [[ "$SOAK_RED" -eq 1 && "$CUR_FIX_STEP" == soak ]] && no_change_since "$CUR_FIX_HEAD"; then
+    wake "soak-red" "no change since the red soak at r$((ROUND - 1)); the soak may be failing for a reason the code cannot fix (its command, the host). Output: $SOAK_FILE"
+  fi
   if [[ "$SOAK_RED" -eq 1 && "$LAST_VERDICT" == DONE ]]; then
     FINDINGS="$RUN_DIR/findings-r${ROUND}.txt"
     soak_findings "$FINDINGS"
@@ -1980,6 +2044,7 @@ EOF
     FIX_HANDOFF="$FIXH"
     CUR_FIX_SOURCE=proof
     CUR_FIX_HEAD="$FIX_HEAD"
+    CUR_FIX_STEP=soak
     continue
   fi
 
@@ -2079,6 +2144,7 @@ EOF
       FIX_HANDOFF="$FIXH"
       CUR_FIX_SOURCE=review
       CUR_FIX_HEAD=""
+      CUR_FIX_STEP=""
       continue
       ;;
     BLOCKED)

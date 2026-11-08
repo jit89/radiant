@@ -158,7 +158,9 @@ After a goal's DONE review, the reviewer mutates the implementer's code and the 
 - **Red or timed out, beside a DONE:** a fix round of its own, inside `MAX_FIX_ROUNDS`. The handoff says "red soak" and carries the soak's output, so the implementer fixes the case it names. The record is `source=proof step=soak`, so a resume proves first. The next round proves, then soaks again beside its review.
 - **Red, beside a FIX:** one fix round. The soak's case joins the review's findings, inside the journaled hash. The record is `source=review step=soak`.
 - **Green:** the verdict stands as it is.
-- **A wake during the review** (the review failed, or a signal) takes the running soak down with its whole process tree.
+- **A wake during the review** (the review failed, or a signal) takes the running soak down with its whole process tree. A soak a hard-killed host left behind (no exit handler ran) is ended at the goal's next soak, when its recorded pid still has its recorded start time.
+- **No progress:** a soak red again after a soak fix round that changed nothing outside the journal wakes `soak-red`, as a red proof's no-change round wakes `proof-red`. A soak whose exit status never arrived wakes `soak-lost`. Neither burns a fix round.
+- **The orchestration files:** the host writes its own records to the journal while the soak runs, so the soak is held to "GOALS.md unchanged and the journal only grown at its end", not to the journal's status line.
 - **Kept and recorded:** every soak's output is kept as `soak-r<n>.out` beside the mutation diffs, for the Architect. A green soak can still report outcomes worth checking against origin (a `read_error`, an `internal_error`). The journal gets `ORCHESTRATOR soak <id> r<n> exit=<rc> secs=<s>`.
 - **A soak that changes the tree** wakes `soak-tamper`, as the proof would.
 - **Validation:** `validate` refuses anything but a non-empty string.

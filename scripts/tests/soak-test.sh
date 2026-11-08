@@ -41,9 +41,12 @@ echo implement >>"$CALLS/log"
 for a in "$@"; do [[ -f "$a" ]] && cat "$a" >>"$CALLS/handoff-bodies"; done
 mkdir -p src
 n="$(grep -c implement "$CALLS/log")"
-printf '#!/usr/bin/env bash\n# calc (pass %s)\necho $(( $1 + $2 ))\n' "$n" >src/calc.sh
-git add src/calc.sh
-git -c commit.gpgSign=false commit -qm "feat(g1-store): calc pass $n"
+# $CALLS/nochange: every pass after the first changes nothing.
+if [[ ! -f "$CALLS/nochange" || "$n" -eq 1 ]]; then
+  printf '#!/usr/bin/env bash\n# calc (pass %s)\necho $(( $1 + $2 ))\n' "$n" >src/calc.sh
+  git add src/calc.sh
+  git -c commit.gpgSign=false commit -qm "feat(g1-store): calc pass $n"
+fi
 printf '%s\n' "IMPLEMENTER_RESULT: ok" "THREAD_ID: haiku:t1" "IMPLEMENTER_STATUS: DONE" "IMPLEMENTER_MODEL: stub"
 SH
 # The reviewer: a verdict from $CALLS/verdicts (one a call; DONE when none
@@ -181,6 +184,35 @@ soak_pid="$(cat "$TMP/repo/soak.pid" 2>/dev/null || true)"
 check "  ...the soak had started" yes "$([[ -n "$soak_pid" ]] && echo yes || echo no)"
 check "a failed review wakes; no soak left running" "1 gone" \
   "$rc $( [[ -n "$soak_pid" ]] && kill -0 "$soak_pid" 2>/dev/null && echo "alive: $(ps -o command= -p "$soak_pid")" || echo gone)"
+
+echo "== a soak fix round that changes nothing stops (soak-red), as a red proof's does"
+SOAK_BODY='echo never; exit 1' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+touch "$CALLS/nochange"
+run
+check "no change: soak-red after the second red soak" "1 soak-red" "$rc $reason"
+check "  ...two passes, two reviews" "implement review implement review" "$(paste -sd ' ' - <"$CALLS/log")"
+
+echo "== a soak that rewrites the journal's existing text wakes"
+SOAK_BODY="sed -i '' '1s/.*/# Journal: rewritten/' docs/journal/example.md" make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+run
+check "journal rewritten: soak-tamper naming the journal" "1 soak-tamper yes" "$rc $reason $(has 'its existing text changed' "$detail")"
+
+echo "== a soak a stopped run left running is ended at the next soak; a reused pid is not"
+SOAK_BODY='exit 0' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+mkdir -p "$ART"
+sleep 47 & stale=$!
+sleep 49 & reused=$!
+sleep 0.3
+printf '%s %s\n' "$stale" "$(ps -o lstart= -p "$stale" | tr -s ' ')" >"$ART/soak.pid"
+run
+alive() { kill -0 "$1" 2>/dev/null && echo alive || echo gone; }
+check "stale: the recorded soak ended, the goal done" "0 done gone" "$rc $(status_of) $(alive "$stale")"
+SOAK_BODY='exit 0' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"
+mkdir -p "$ART"
+printf '%s %s\n' "$reused" "Thu Jan  1 00:00:00 1970" >"$ART/soak.pid"
+run
+check "reused pid: another start time, the process left alone" "0 alive" "$rc $(alive "$reused")"
+kill "$stale" "$reused" 2>/dev/null || true
 
 echo "== a soak that changes the repo wakes"
 SOAK_BODY='echo x >src/planted.txt' make_repo "$ORACLE_OK" "bash tests/acceptance/g1-soak.sh"

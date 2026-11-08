@@ -1471,6 +1471,23 @@ DONE (2026-11-08, in-session):
   - on its own after a DONE (`source=proof step=soak`);
   - with the review's findings after a FIX (`source=review step=soak`, inside the journaled hash).
 - A wake during the review takes the soak's process tree down: frozen with STOP, listed until stable, then KILLed.
+- Hardened after an owner-asked review of the other scenarios:
+  - `soak-red`: a soak fix round that changed nothing stops, as `proof-red` does;
+  - `soak-lost`: a missing exit status stops instead of reading as a red soak;
+  - a soak a hard-killed host left running is ended at the next soak (pid plus start time, so a reused pid is
+    never hit);
+  - the host's own journal records, written during the review, no longer read as the soak changing the tree
+    (GOALS.md unchanged, the journal only grown at its end).
+- Checked safe:
+  - the subshell runs no EXIT trap (bash 3.2);
+  - a resume dispatches a pending soak fix directly (resume-state reads fields by name);
+  - each run has its own `RUN_DIR`, so no result file is shared;
+  - `reap_strays` spares the host's own descendants;
+  - the soak and the proof build in different target folders.
+- Open:
+  - `soak-lost` has no test (it needs the subshell killed from outside);
+  - after a resume, the no-progress stop needs one more red soak, since `CUR_FIX_STEP` is not journaled;
+  - `/walk-status` shows "review" while the soak runs beside it.
 - The output is kept as `soak-r<n>.out`, and the journal records `ORCHESTRATOR soak`. A tree change wakes
   `soak-tamper`.
 - Docs: GOAL-FORMAT.md, and RUST.md "Soaks" (the release fuzz recipe).
