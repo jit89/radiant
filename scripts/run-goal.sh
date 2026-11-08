@@ -786,7 +786,7 @@ soak_reap_stale() {
   stop_soak
 }
 
-# stop_soak — a soak still running when the host stops (a wake during the
+# stop_soak — a soak still running when the host stops (a stop in the
 # review, a signal) is taken down with its whole process tree. The tree is
 # frozen first (STOP: a stopped process cannot fork) and listed again until no
 # new process appears, then KILLed: a TERM sent to a list taken once misses a

@@ -52,6 +52,7 @@ reviewer-error	C
 reviewer-timeout	C
 proof-timeout	C
 proof-excerpt-error	C
+soak-lost	C
 commit-failed	C
 result-write-failed	C
 merge-failed	C
@@ -61,6 +62,7 @@ rate_limited	wait
 reviewer-rate-limited	wait
 max-fix-rounds	D
 proof-red	D
+soak-red	D
 integration-red	D
 merge-conflict	D
 worktree-setup-dirty	D
