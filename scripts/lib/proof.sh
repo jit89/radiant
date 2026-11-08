@@ -13,6 +13,9 @@ source "$PROOF_LIB_DIR/proof-sandbox.sh"
 # Set by proof_exec when the sandbox itself stopped the run (not a red proof):
 # proof-hardlink or proof-sandbox-path. The caller wakes with it.
 PROOF_SANDBOX_REASON=""
+# Only a caller's per-call assignment (VAR=1 proof_exec ...) may skip the root's
+# hard-link walk; a value inherited from the environment never does.
+unset PROOF_ROOT_LINKS_CHECKED
 
 # run_step SECS OUT ERR CMD... — CMD under a timeout (0 = none), in its own
 # process group, in the background. Waiting with `wait` rather than in the
@@ -108,8 +111,17 @@ proof_exec() {
     return 126
   fi
   # A hard link left before the run can reach a file outside these trees.
-  local walk=("$PROOF_ROOT" "$tmp") w
-  for w in ${PROOF_WALK:-}; do walk+=(--gitdir "$w"); done
+  # PROOF_ROOT_LINKS_CHECKED=1: the caller walked PROOF_ROOT (and PROOF_WALK)
+  # already and nothing since could add a link out of it: a mutation clone
+  # between its baseline and a mutant run is changed only by git reset, clean
+  # and apply, and by sandboxed proofs, which may link only inside their own
+  # trees. The run's TMP and deps are still walked (prompt audit 2 follow-up:
+  # ~16 s a walk of a 670k-file checkout).
+  local walk=("$tmp") w
+  if [[ "${PROOF_ROOT_LINKS_CHECKED:-0}" != 1 ]]; then
+    walk=("$PROOF_ROOT" "$tmp")
+    for w in ${PROOF_WALK:-}; do walk+=(--gitdir "$w"); done
+  fi
   [[ -z "${PROOF_DEPS:-}" ]] || walk+=("$PROOF_DEPS")
   if ! python3 "$PROOF_LIB_DIR/hardlink-check.py" "${walk[@]}" >"$out.links" 2>&1; then
     { echo "proof-hardlink: these files have a name outside the proof's trees (a hard link):"; cat "$out.links"; } >"$out"

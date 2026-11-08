@@ -282,7 +282,9 @@ check "the survivor's diff and rule kept" yes \
 check "the checkout untouched: calc.sh as the implementer wrote it" yes \
   "$(grep -q '^echo \$(( \$1 + \$2 ))$' src/calc.sh && grep -q 'usage: calc.sh A B' src/calc.sh && echo yes || echo no)"
 check "the checkout untouched: clean, no stash" "" "$(git status --porcelain; git stash list)"
-check "no clone left in the temp area" "" "$(ls -d "$TMP"/cw-mut-* 2>/dev/null)"
+# The copy is removed in the background (run-goal.sh mut_discard): wait for it.
+copies_left() { local _; for _ in $(seq 40); do ls -d "$TMP"/cw-mut-* >/dev/null 2>&1 || return 0; sleep 0.25; done; ls -d "$TMP"/cw-mut-* 2>/dev/null; }
+check "no clone left in the temp area (removed in the background)" "" "$(copies_left)"
 check "the mutations turn ran once, after the DONE" "implement review mutations" "$(paste -sd ' ' - <"$CALLS/log")"
 
 echo "== a timeout, Ran 0 tests, a diff that does not apply"
@@ -336,7 +338,7 @@ make_repo '[ ! -e src/stray.txt ] || { echo "a stray file"; exit 1; }
 run
 check "reset between mutations: caught, caught, survived" "caught=2 survived=1 timeout=0 skipped=0" "$(record)"
 check "  ...the survivor is the usage text" "warning the usage text" "$(event)"
-check "no copy left in the temp area" "" "$(ls -d "$TMP"/cw-mut-* 2>/dev/null)"
+check "no copy left in the temp area" "" "$(copies_left)"
 
 echo "== mutation_proof: the mutations run it, not the proof"
 make_repo "$ORACLE_OK"

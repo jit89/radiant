@@ -340,6 +340,13 @@ for a, b in pairs:
     if tmp_root.startswith(a):
         tmp_roots.append(b + tmp_root[len(a):])
         allow.append(b + pass_tmp[len(a):])
+# Unix sockets under this pass's own temp folder only (0700, made for the pass):
+# a test that binds one there (Paladin's g9/g10 socket children) runs in the
+# sandbox, and no service outside it is reachable (allowAllUnixSockets would
+# open ssh-agent's socket too). Probed 2026-11-08: a bind there is "Operation
+# not permitted" without it and succeeds with it (AUDIT-2026-11-08, F3 b).
+if pass_tmp:
+    settings["sandbox"]["network"]["allowUnixSockets"] = list(allow)
 if xcrun_db:
     allow += [xcrun_db, xcrun_db[len("/private"):]]
 settings["sandbox"]["filesystem"]["denyRead"] += [p for p in tmp_roots if p not in secrets]

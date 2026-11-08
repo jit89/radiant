@@ -96,6 +96,18 @@ orch_journal_chain_problems() {
   rm -rf "$dir"
 }
 
+# Headings appended since BASE without a full UTC time (lib/orch-files.py
+# --headings), committed or not. One problem a line; the caller warns.
+orch_journal_heading_problems() {
+  local base="$1" f
+  [[ -n "${JOURNAL:-}" ]] || return 0
+  f="$(mktemp "${TMPDIR:-/tmp}/orch-head-XXXXXX")"
+  if git show "$base:$JOURNAL" >"$f" 2>/dev/null; then
+    { python3 "$ORCH_FILES_PY" journal "$f" "$JOURNAL" --headings || true; } | sed "s|^|$JOURNAL: |"
+  fi
+  rm -f "$f"
+}
+
 # The journal must still start with FILE, taken before a pass that may also
 # rewrite the history the chain walks (lib/orch-files.py --prefix).
 orch_journal_kept_problems() {

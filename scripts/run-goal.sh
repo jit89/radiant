@@ -776,16 +776,19 @@ mut_reset() {
   [[ -z "$st" ]]
 }
 
-# mut_run CLONE OUT TMP — the goal's mutation proof (MUT_PROOF) in CLONE,
+# mut_run CLONE OUT TMP [CHECKED] — the goal's mutation proof (MUT_PROOF) in CLONE,
+# CHECKED=1 when CLONE's hard-link walk already passed (its baseline run, on
+# this same clone, with only git reset/clean/apply since),
 # judged by the host's own rule on CLONE's tree. Sets MUT_OUTCOME: green, red, timeout, notests,
 # moved or sandbox (with MUT_WHY).
 MUT_OUTCOME=""
 MUT_WHY=""
 mut_run() {
-  local clone="$1" out="$2" tmp="$3" rc moved
+  local clone="$1" out="$2" tmp="$3" checked="${4:-0}" rc moved
   ( git() { mut_git "$clone" "$@"; }; cd "$clone" && tree_snapshot ) >"$out.before" 2>/dev/null || true
   set +e
   PROOF_ROOT="$clone" PROOF_WALK="$clone/.git" PROOF_NETWORK="$PROOF_NET" PROOF_DEPS="$PROOF_DEPS_DIR" \
+    PROOF_ROOT_LINKS_CHECKED="$checked" \
     proof_exec "$PROOF_SECS" "$out" "$tmp" "cd $(printf '%q' "$clone") && $MUT_PROOF"
   rc=$?
   set -e
@@ -813,7 +816,7 @@ mut_run() {
 MUT_DIR=""
 run_mutations() {
   local n="$MUTATIONS" dir out mfile size k status why rule d clone base_ok=0 base_why="" p skip accepted note=""
-  local caught=0 survived=0 timeout=0 skipped=0 rows=() phase_before="$PHASE"
+  local caught=0 survived=0 timeout=0 skipped=0 rows=() phase_before="$PHASE" walked=0
   [[ "$n" -gt 0 && "${PROOF_NONE:-0}" -eq 0 ]] || return 0
   PHASE="mutations r${ROUND}"
   event_phase mutations
@@ -895,8 +898,10 @@ run_mutations() {
     d="$dir/blocks/$k.diff"
     clone="$dir/base"
     skip=""
+    walked=1
     if ! mut_reset "$clone"; then
       rm -rf "$clone"
+      walked=0
       mut_clone "$clone" || skip="$MUT_WHY"
     fi
     if [[ -z "$skip" ]]; then
@@ -915,7 +920,9 @@ run_mutations() {
       skipped=$((skipped + 1)); rows+=("$k|skipped|$skip|$rule"); continue
     fi
     cp -cRp "$PROOF_TMP" "$dir/tmp-$k" 2>/dev/null || mkdir -p "$dir/tmp-$k"
-    mut_run "$clone" "$dir/m$k.out" "$dir/tmp-$k"
+    # The baseline walked this clone for hard links; a fresh clone (mut_reset
+    # failed) has not been walked.
+    mut_run "$clone" "$dir/m$k.out" "$dir/tmp-$k" "$walked"
     case "$MUT_OUTCOME" in
       red | notests) caught=$((caught + 1)); rows+=("$k|caught|-|$rule") ;;
       timeout) timeout=$((timeout + 1)); rows+=("$k|timeout|-|$rule") ;;
@@ -928,10 +935,23 @@ run_mutations() {
     printf '%s\n' "$rule" >"$ART_DIR/mutation-r${ROUND}-$k.rule" 2>/dev/null || true
     rm -rf "$dir/tmp-$k"
   done <"$dir/parsed"
-  rm -rf "$dir"; MUT_DIR=""
+  mut_discard "$dir"; MUT_DIR=""
   mut_record "$caught" "$survived" "$timeout" "$skipped" "$note" "$(printf '%s\n' ${rows[@]+"${rows[@]}"})" \
     "$(kv "$out" CLAUDE_REVIEW_MODEL)$( f="$(kv "$out" CLAUDE_REVIEW_FALLBACK)"; [[ -z "$f" ]] || printf ' (fallback: %s)' "$f")"
   PHASE="$phase_before"
+}
+
+# mut_discard DIR — remove the mutation copy without waiting for it: a clone of
+# a checkout with its build output is ~670k files (Paladin), whose removal the
+# goal need not wait on. Renamed first, so no later step can mistake it for a
+# live copy; removed by a detached, low-priority process.
+mut_discard() {
+  local d="$1" gone="$1.discard"
+  if mv "$d" "$gone" 2>/dev/null; then
+    (nice -n 19 rm -rf "$gone" </dev/null >/dev/null 2>&1 &)
+  else
+    rm -rf "$d"
+  fi
 }
 
 # mut_record CAUGHT SURVIVED TIMEOUT SKIPPED NOTE ROWS — the host record (in
@@ -1553,6 +1573,15 @@ while :; do
     orch_journal_chain_problems "$BASE_SHA"
     [[ "$PROOF_FIRST" -eq 1 ]] || orch_journal_kept_problems "$JOURNAL_BEFORE" "its copy before implementer r${ROUND}"
   } | paste -sd ';' -)"
+  # A typed record time (FUTURE-WORK: g30's "23:5x") cannot be fixed append-only:
+  # warned, not stopped.
+  heading_problems="$(orch_journal_heading_problems "$BASE_SHA" | paste -sd ';' -)"
+  if [[ -n "$heading_problems" ]]; then
+    echo "journal: $heading_problems" >&2
+    events_append --event journal-shape --severity warning --goal "$GOAL_ID" --round "$ROUND" \
+      --base-sha "$BASE_SHA" --summary "journal-shape ${GOAL_ID} r${ROUND}: ${heading_problems:0:200}" \
+      --payload "$(python3 -c 'import json,sys; print(json.dumps({"problems": sys.argv[1]}))' "$heading_problems")"
+  fi
   if [[ -n "$journal_problems" ]]; then
     wake "journal-tamper" "$journal_problems — the journal grew by something other than this goal's records, or a record already written was edited (even if committed). Review those lines; put an edited one back as the named copy has it (git show <commit>:$JOURNAL, or the copy from before the pass in $RUN_DIR), keep what follows, commit, and rerun."
   fi

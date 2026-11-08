@@ -275,6 +275,9 @@ check "private tmp: it exists during the pass, 0700" 700 "$(call_field 1 tmpmode
 check "private tmp: the fallback pass shares it" "$t1" "$(call_field 2 tmpdir)"
 check "private tmp: removed after the run" no "$([[ -e "$t1" ]] && echo yes || echo no)"
 check "private tmp: the root setting is not passed on" "" "$(call_field 1 tmproot)"
+check "unix sockets: only the pass's own temp folder (AUDIT-2026-11-08 F3 b)" yes \
+  "$(setting 1 sandbox.network.allowUnixSockets | python3 -c 'import json,sys; v=json.load(sys.stdin); t=sys.argv[1]; print("yes" if v and t in v and all(x.endswith(t.split("/tr/",1)[1]) for x in v) else "no: %s" % v)' "$t1")"
+check "unix sockets: never all of them" "" "$(setting 1 sandbox.network.allowAllUnixSockets | sed 's/^null$//')"
 for p in "/private/tmp/claude-$uid" "/tmp/claude-$uid" "$TMP/tr"; do
   check "private tmp: reads denied under $p" yes "$(has "\"$p\"" "$(setting 1 sandbox.filesystem.denyRead)")"
 done

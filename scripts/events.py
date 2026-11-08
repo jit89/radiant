@@ -64,6 +64,8 @@ EVENTS = (
     "decision",
     # Processes an agent step left running in the checkout, ended (lib/reap-strays.py).
     "strays",
+    # A journal heading appended with no UTC time (lib/orch-files.py --headings); a warning.
+    "journal-shape",
 )
 SEVERITIES = ("info", "warning", "error")
 SUMMARY_MAX = 200

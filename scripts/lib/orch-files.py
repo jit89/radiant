@@ -25,6 +25,14 @@ MODE:
               record forged by anyone else is not committed under its name.
               (A resume reads the ledger, not the journal: FUTURE-WORK item 25.)
 
+  --headings  every heading line ("## ...") appended after HEAD_COPY has a
+              full UTC time, "## <YYYY-MM-DDTHH:MM:SSZ> — <ROLE> ...". With
+              HEAD_COPY the journal at BASE_SHA this also sees records the
+              implementer committed itself, which --records (against HEAD)
+              does not: g30's END record went in as "## 2026-11-07T23:5x — …"
+              (a typed time). Records are append-only, so the host reports
+              this (a warning event), it does not stop: no fix could remove it.
+
 Exit 0 when the mode holds; otherwise print why and exit 1.
 
   orch-files.py journal-chain LABEL PATH [LABEL PATH ...]
@@ -133,7 +141,7 @@ def main(argv):
             host = set()
         argv = argv[:-2]
     if len(argv) not in (4, 5) or argv[0] != "journal" or argv[3] not in (
-        "--none", "--records", "--prefix"
+        "--none", "--records", "--prefix", "--headings"
     ):
         sys.exit(__doc__)
     _, head_path, work_path, mode = argv[:4]
@@ -159,6 +167,13 @@ def main(argv):
     if mode == "--none":
         print("has uncommitted additions")
         return 1
+    if mode == "--headings":
+        bad = [line for line in work[len(head):].decode("utf-8", "replace").splitlines()
+               if line.startswith("## ") and OTHER_ROLE.match(line)
+               and not re.match(r"^## \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — ", line)]
+        for line in bad:
+            print(f"a heading with no UTC time from date -u: {line[:80]!r}")
+        return 1 if bad else 0
     problem = check_records(work[len(head):].decode("utf-8", "replace"), goal_id, host)
     if problem:
         print(problem)

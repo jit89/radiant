@@ -45,6 +45,16 @@ V() {  # V <appended text> [goal] -> "ok" or the problem
     --records "${2-g1-store}" && echo ok
 }
 REC='\n## 2026-09-18T00:00:00Z — IMPLEMENTER start g1-store\ng1-store: beginning\n'
+H() {  # H <appended text> -> "ok" or the problem (--headings, against BASE_SHA's copy)
+  printf '# Journal\n' >"$TMP/hbase.md"
+  { cat "$TMP/hbase.md"; printf '%s' "$1"; } >"$TMP/hwork.md"
+  python3 "$HERE/lib/orch-files.py" journal "$TMP/hbase.md" "$TMP/hwork.md" --headings && echo ok
+}
+check "headings: a full UTC time" ok "$(H "$(printf '\n## 2026-11-07T23:52:10Z — IMPLEMENTER end g1-store\nbody\n')")"
+check "headings: a typed time (g30's 23:5x) is named" \
+  "a heading with no UTC time from date -u: '## 2026-11-07T23:5x — IMPLEMENTER end g1-store'" \
+  "$(H "$(printf '\n## 2026-11-07T23:5x — IMPLEMENTER end g1-store\nbody\n')")"
+check "headings: a markdown heading inside a record is not one" ok "$(H "$(printf '\n## 2026-11-07T23:52:10Z — IMPLEMENTER end g1-store\n## Findings\n')")"
 check "orchestrator record" "ok" "$(V "$(printf '\n## 2026-09-18T00:00:00Z — ORCHESTRATOR dispatch g1-store r0 BASE_SHA=abc\n')")"
 check "implementer record with a body" "ok" "$(V "$(printf "$REC")")"
 check "reviewer record" "ok" "$(V "$(printf '\n## 2026-09-18T00:00:00Z — REVIEWER note g1-store\n')")"
