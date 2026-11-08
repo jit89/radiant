@@ -122,6 +122,22 @@ check "no tool_path: no tool-path line" no "$(handoff | grep -q 'Tool path' && e
 run_goal "tool_path: [$TP]" "true"
 check "handoff: no lint line without clippy/fmt" no "$(handoff | grep -q "lint and format steps" && echo yes || echo no)"
 
+# --- implementer_sandbox_skips (AUDIT-2026-11-08 F3): named in the handoff --
+run_goal "implementer_sandbox_skips: [g10-seam::a_socket_is_bound_here, host::reads_sysctl]" "true"
+check "skips: the handoff names each skipped test" yes "$(handoff | grep -qF -- "- Tests your sandbox cannot run (GOALS.md \`implementer_sandbox_skips\`; the host's proof runs them): \`g10-seam::a_socket_is_bound_here\`, \`host::reads_sysctl\`." && echo yes || echo no)"
+check "skips: meta carries the list" '["g10-seam::a_socket_is_bound_here", "host::reads_sysctl"]' \
+  "$("$HERE/goals.py" GOALS.md meta | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["implementer_sandbox_skips"]))')"
+run_goal "" "true"
+check "no skips: no skips line" no "$(handoff | grep -q 'Tests your sandbox cannot run' && echo yes || echo no)"
+skips_err() {
+  sed "s|^journal: docs/journal/example.md\$|journal: docs/journal/example.md\\
+$1|" "$HERE/../GOALS.example.md" >"$TMP/skips.md"
+  "$HERE/goals.py" "$TMP/skips.md" validate 2>&1 | grep -c 'implementer_sandbox_skips' || true
+}
+check "skips: an empty list is refused" 1 "$(skips_err 'implementer_sandbox_skips: []')"
+check "skips: a shell character is refused" 1 "$(skips_err 'implementer_sandbox_skips: [a;rm]')"
+check "skips: a good list validates" 0 "$(skips_err 'implementer_sandbox_skips: [g9-bulk-sys::host::x]')"
+
 # --- resume after tool_path changed mid-goal: contract drift ----------------
 printf '%s\n' '#!/usr/bin/env bash' \
   'printf "%s\n" "IMPLEMENTER_RESULT: ok" "IMPLEMENTER_STATUS: BLOCKED" "THREAD_ID: t1"' >"$HOUSE/scripts/claude-implement.sh"

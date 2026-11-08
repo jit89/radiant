@@ -13,7 +13,7 @@ trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
 mkdir -p "$HOME"
 unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL DEEPSEEK_API_KEY IMPLEMENTER_MODEL \
-  IMPLEMENTER_EFFORT IMPLEMENTER_FALLBACK IMPLEMENTER_DRY_RUN IMPLEMENTER_ALLOWED_DOMAINS \
+  IMPLEMENTER_EFFORT IMPLEMENTER_FALLBACK IMPLEMENTER_DRY_RUN IMPLEMENTER_ALLOWED_DOMAINS IMPLEMENTER_BASH_MAX_MS \
   IMPLEMENTER_MAX_BUDGET_USD DEEPSEEK_MODEL DEEPSEEK_ANTHROPIC_BASE_URL IMPLEMENTER_PRIMARY \
   DEEPSEEK_EFFORT CLAUDE_CODE_EFFORT_LEVEL DEEPSEEK_PRICE_MISS DEEPSEEK_PRICE_HIT DEEPSEEK_PRICE_OUT \
   IMPLEMENTER_SMOKE_PROVIDER
@@ -85,7 +85,7 @@ printf '%s' "${args[1]:-}" >"$d/prompt.$n"
 helper="$(printf '%s' "$settings" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("apiKeyHelper",""))')"
 helper_out=""
 [[ -z "$helper" ]] || helper_out="$(eval "$helper")"
-echo "model=$model sid=$sid resume=$res effort=$effort safe=$safe bare=$bare tools=$tools allow=$allow base=${ANTHROPIC_BASE_URL:-} anthkey=${ANTHROPIC_API_KEY:+set} dskey=${DEEPSEEK_API_KEY:+set} secret=${FAKE_SECRET_TOKEN:+set} helper_out=$helper_out adddirs=$adddirs budget=$budget cel=${CLAUDE_CODE_EFFORT_LEVEL:-} tmpdir=${CLAUDE_CODE_TMPDIR:-} tmpmode=$(stat -f %Lp "${CLAUDE_CODE_TMPDIR:-/nonexistent}" 2>/dev/null) tmproot=${CW_IMPL_TMP_ROOT:-}" >>"$d/calls"
+echo "model=$model sid=$sid resume=$res effort=$effort safe=$safe bare=$bare tools=$tools allow=$allow base=${ANTHROPIC_BASE_URL:-} anthkey=${ANTHROPIC_API_KEY:+set} dskey=${DEEPSEEK_API_KEY:+set} secret=${FAKE_SECRET_TOKEN:+set} helper_out=$helper_out adddirs=$adddirs budget=$budget cel=${CLAUDE_CODE_EFFORT_LEVEL:-} tmpdir=${CLAUDE_CODE_TMPDIR:-} tmpmode=$(stat -f %Lp "${CLAUDE_CODE_TMPDIR:-/nonexistent}" 2>/dev/null) tmproot=${CW_IMPL_TMP_ROOT:-} bashmax=${BASH_MAX_TIMEOUT_MS:-}" >>"$d/calls"
 [[ -f "$d/resp.$n" ]] || { echo "no canned response $n" >&2; exit 9; }
 [[ -f "$d/err.$n" ]] && cat "$d/err.$n" >&2
 sed "s/SID/${sid:-$res}/" "$d/resp.$n"
@@ -269,6 +269,7 @@ reset "$REFUSAL" "$DONE"
 run -- "$HANDOFF"
 check "private tmp: exit 0" 0 "$RC"
 t1="$(call_field 1 tmpdir)"
+check "bash cap: one Bash call may run 30 minutes (AUDIT-2026-11-08 F4)" yes "$(grep -q 'bashmax=1800000' "$FAKE_DIR/calls" && echo yes || echo no)"
 check "private tmp: the pass gets CLAUDE_CODE_TMPDIR under the root" yes "$([[ "$t1" == "$TMP/tr/"?* ]] && echo yes || echo "no: $t1")"
 check "private tmp: it exists during the pass, 0700" 700 "$(call_field 1 tmpmode)"
 check "private tmp: the fallback pass shares it" "$t1" "$(call_field 2 tmpdir)"
@@ -439,6 +440,11 @@ check "resume keeps the rules by reference" yes "$(has "The rules from your firs
 check "resume omits the numbered steps" yes "$(lacks "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.1")")"
 check "fresh session keeps them" yes "$(has "CHECKPOINT YOUR WORK" "$(cat "$FAKE_DIR/prompt.2")")"
 check "the sandbox line names \$TMPDIR, unexpanded" yes "$(has 'under $TMPDIR; put' "$(cat "$FAKE_DIR/prompt.2")")"
+# AUDIT-2026-11-08 F2: the proof is the suite; a fix pass runs it once, at the end.
+check "step 9: the proof, not a second full suite" yes "$(lacks "then the full test suite" "$(cat "$FAKE_DIR/prompt.2")")"
+check "step 9: the proof is the host's suite" yes "$(has "The proof is the suite the host" "$(cat "$FAKE_DIR/prompt.2")")"
+check "resume: the oracle while fixing, the proof once at the end" yes "$(has "run the goal's proof
+once, at the end, before claiming DONE" "$(cat "$FAKE_DIR/prompt.1")")"
 
 echo "== 8f. a resumed Haiku pass that declines falls back with the full prompt =="
 reset "$DECLINED" "$DONE"

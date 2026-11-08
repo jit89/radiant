@@ -51,13 +51,16 @@ cw_prune() {
   return 0
 }
 
-# cw_keep_awake — hold off idle sleep for as long as this shell runs: a walk or
-# a goal can take an hour, and an idle-asleep Mac pauses it (FUTURE-WORK item
-# 23: the rbtree walk of 2026-10-22 lost 24 min). Idle sleep only (-i), so a
-# closed lid still sleeps; -w ends the assertion when this process exits.
+# cw_keep_awake — hold off sleep for as long as this shell runs: a walk or a
+# goal can take an hour, and an asleep Mac pauses it (FUTURE-WORK item 23: the
+# rbtree walk of 2026-10-22 lost 24 min). -i stops idle sleep from a full wake;
+# -s (honoured on AC) also stops the maintenance sleep out of a dark wake, which
+# -i alone does not: the Paladin walk of 2026-11-08 ran ~3.6 h of 7 h asleep, in ~5 min
+# slices of dark wake, under a -i assertion (prompt-audit AUDIT-2026-11-08, F1).
+# A closed lid still sleeps; -w ends the assertion when this process exits.
 # CW_KEEP_AWAKE=0 turns it off. Started from a subshell, so it is not a job
 # of the caller: a bare `wait` or a `jobs` count (run-all.sh) never sees it.
 cw_keep_awake() {
   [[ "${CW_KEEP_AWAKE:-1}" != 0 && -x /usr/bin/caffeinate ]] || return 0
-  (/usr/bin/caffeinate -i -w "$$" </dev/null >/dev/null 2>&1 &)
+  (/usr/bin/caffeinate -i -s -w "$$" </dev/null >/dev/null 2>&1 &)
 }

@@ -401,6 +401,22 @@ def _under(p: str, d: str) -> bool:
     return p == d or p.startswith(d.rstrip("/") + "/")
 
 
+SANDBOX_SKIP_SAFE = re.compile(r"^[A-Za-z0-9_:./-]+$")
+
+
+def sandbox_skips_errors(value) -> list[str]:
+    """implementer_sandbox_skips: tests only the implementer's sandbox cannot
+    run (prompt-audit AUDIT-2026-11-08, F3). The handoff names them; the host's
+    proof still runs every one."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not value:
+        return ["implementer_sandbox_skips: must be a non-empty one-line list, "
+                "e.g. implementer_sandbox_skips: [test-binary::test_name]"]
+    return [f"implementer_sandbox_skips: {e!r} has a character outside [A-Za-z0-9_:./-]"
+            for e in value if not isinstance(e, str) or not SANDBOX_SKIP_SAFE.match(e)]
+
+
 def tool_path_errors(value, root: str | None = None) -> list[str]:
     """ROOT: the target repo (GOALS.md's folder). A tool folder inside it is
     one the implementer can write, and it runs first in every proof."""
@@ -457,6 +473,7 @@ def validate(data: dict, root: str | None = None) -> list[str]:
     if net is not None and net not in ("loopback", "true"):
         errors.append("proof_network: must be loopback or true (leave it out for none)")
     errors.extend(tool_path_errors(data.get("tool_path"), root))
+    errors.extend(sandbox_skips_errors(data.get("implementer_sandbox_skips")))
     ids = [g.get("id") for g in data["goals"]]
     if len(ids) != len(set(ids)):
         errors.append("duplicate goal ids")
@@ -691,6 +708,7 @@ def cmd_meta(data, **_):
                 "worktree_setup": data.get("worktree_setup"),
                 "proof_network": data.get("proof_network") or "none",
                 "tool_path": data.get("tool_path"),
+                "implementer_sandbox_skips": data.get("implementer_sandbox_skips"),
             },
             indent=2,
         )

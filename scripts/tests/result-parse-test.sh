@@ -337,8 +337,8 @@ check "implemented record: basis and the primary's thread and cost" "yes" \
   "$(has 'MODEL=claude-haiku-5-5 FALLBACK=(deepseek -> haiku (balance)) COST_USD=0.31 COST_BASIS=thread FROM=deepseek:u9 FROM_COST_USD=0.0042 FROM_COST_BASIS=thread' "$journal")"
 
 # AWAKE_PROBE: which ancestor (run-goals.sh or run-goal.sh) holds a
-# `caffeinate -i -w <its pid>` while this stub runs (FUTURE-WORK item 23).
-AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 && "$p" != "$AWAKE_TOP" ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
+# `caffeinate -i -s -w <its pid>` while this stub runs (FUTURE-WORK item 23).
+AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 && "$p" != "$AWAKE_TOP" ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -s -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
 # The walk stops at this test: run-all.sh above it holds an assertion too.
 export AWAKE_OUT="$TMP/awake" AWAKE_TOP=$$
 rm -f "$AWAKE_OUT"

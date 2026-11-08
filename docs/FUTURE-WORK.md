@@ -835,6 +835,17 @@ DeepSeek and resumes after the flip would treat its `deepseek:` thread as the
 primary (one switch back possible). Outside the plan: the `/walk-status` cost
 (`events.py`) ignores `fallback_from`, so it undercounts a goal that fell back.
 
+Addendum 2026-11-08 (prompt-audit `AUDIT-2026-11-08.md`, F1): `-i` was not
+enough. The Paladin Amendment 2 walk stopped at 05:39 IST, its assertion died,
+and the Mac idle-slept within 5 s (`pmset` `sleep 1`, on AC). From then on it
+woke only in ~5 min DarkWake slices, and a PreventUserIdleSystemSleep assertion
+does not stop a maintenance sleep out of dark wake. So the rerun's `-i`
+assertions held nothing: ~3.6 h of a 7¼ h walk were asleep, and every 15–17 min
+implementer "Request timed out"/"computer was asleep" stall fell in a sleep
+window. `cw_keep_awake` and `grok-review.sh` now hold `caffeinate -i -s`
+(PreventSystemSleep, honoured on AC); `orch-commit-test.sh` checks the
+assertion's type in `pmset -g assertions`.
+
 ## 24. Serial walks check the journal against HEAD, not the goal's base (2026-10-22)
 
 Found by Opus reviewing the item 22 prompt rule (EVIDENCE step 10). In a

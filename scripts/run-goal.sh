@@ -146,6 +146,7 @@ PROOF_NET=none
 # Set from BASE_SHA's GOALS.md once it is frozen; never taken from the caller's
 # environment.
 GOAL_TOOL_PATH=""
+GOAL_SANDBOX_SKIPS=""
 PROOF_TOOL_PATH=""
 GOAL_PATH_ENV=()
 PSB_NOTE=""
@@ -1319,6 +1320,13 @@ chmod 400 "$PLAN_FROZEN"
 # host's git/python3/shasum keep the host PATH. Empty means no change at all:
 # an empty PATH component would be `.`, the checkout.
 GOAL_TOOL_PATH="$("$GOALS_PY" "$RUN_DIR/goals-base.md" meta | python3 -c 'import json,sys; print(":".join(json.load(sys.stdin).get("tool_path") or []))')"
+# implementer_sandbox_skips (prompt-audit AUDIT-2026-11-08, F3): from BASE_SHA's
+# GOALS.md, like tool_path. Named in every handoff; the host's proof runs them.
+GOAL_SANDBOX_SKIPS="$("$GOALS_PY" "$RUN_DIR/goals-base.md" meta | python3 -c 'import json,sys; print(", ".join("`%s`" % s for s in (json.load(sys.stdin).get("implementer_sandbox_skips") or [])))')"
+sandbox_skips_line() {
+  [[ -z "$GOAL_SANDBOX_SKIPS" ]] ||
+    echo "- Tests your sandbox cannot run (GOALS.md \`implementer_sandbox_skips\`; the host's proof runs them): $GOAL_SANDBOX_SKIPS. Run the proof with exactly these skipped, name them once in the END record, and do not investigate them."
+}
 PROOF_TOOL_PATH="$GOAL_TOOL_PATH"
 GOAL_PATH_ENV=()
 [[ -z "$GOAL_TOOL_PATH" ]] || GOAL_PATH_ENV=("PATH=$GOAL_TOOL_PATH:$PATH")
@@ -1400,6 +1408,7 @@ while :; do
         echo "- Proof: \`$PROOF\`"
         [[ -z "$GOAL_TOOL_PATH" ]] ||
           echo "- Tool path (first on PATH for you, the proof and the reviewer): \`$GOAL_TOOL_PATH\`"
+        sandbox_skips_line
         if proof_has_lint_step "$PROOF"; then
           echo "- Run the proof's lint and format steps yourself before reporting DONE; they are part of the proof."
         fi
@@ -1625,6 +1634,7 @@ while :; do
         echo
         echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\`, tests/acceptance/ or tests/e2e/."
         echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
+        sandbox_skips_line
         echo
         echo "The host ran the goal's proof after your last pass, in this working tree but"
         echo "outside your sandbox, and it failed. Make it pass without changing a contract"
@@ -1830,6 +1840,7 @@ EOF
         echo
         echo "Oracle is READ-ONLY. Do not edit \`$ORACLE\`, tests/acceptance/ or tests/e2e/."
         echo "BASE_SHA remains \`$BASE_SHA\`. Do not redo passing tests."
+        sandbox_skips_line
         echo
         echo "## Findings"
         cat "$FINDINGS"

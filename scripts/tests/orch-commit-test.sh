@@ -81,8 +81,8 @@ check "user file still staged after walk" "source.py" \
   "$(git diff --cached --name-only)"
 
 # AWAKE_PROBE: which ancestor (run-goals.sh or run-goal.sh) holds a
-# `caffeinate -i -w <its pid>` while this stub runs (FUTURE-WORK item 23).
-AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 && "$p" != "$AWAKE_TOP" ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; echo "$p" >"$AWAKE_OUT.pid"; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
+# `caffeinate -i -s -w <its pid>` while this stub runs (FUTURE-WORK item 23).
+AWAKE_PROBE='p=$$; found=none; for _ in 1 2 3 4 5 6 7 8; do p="$(ps -o ppid= -p "$p" | tr -d " ")"; [[ -n "$p" && "$p" != 1 && "$p" != "$AWAKE_TOP" ]] || break; if pgrep -f "^/usr/bin/caffeinate -i -s -w $p\$" >/dev/null; then found="$(ps -o command= -p "$p" | grep -oE "run-goals?\.sh" | head -n1)"; echo "$p" >"$AWAKE_OUT.pid"; pgrep -f "^/usr/bin/caffeinate -i -s -w $p\$" | head -n1 >"$AWAKE_OUT.cpid"; pmset -g assertions >"$AWAKE_OUT.pmset" 2>/dev/null || true; break; fi; done; echo "$found" >>"$AWAKE_OUT"'
 # The walk stops at this test: run-all.sh above it holds an assertion too.
 export AWAKE_OUT="$TMP/awake" AWAKE_TOP=$$
 for setting in on off; do
@@ -93,9 +93,14 @@ echo "STOP_FILE: /dev/null"; exit 1'
   if [[ "$setting" == on ]]; then
     "$HOUSE/scripts/run-goals.sh" >/dev/null 2>&1 || true
     check "the walker keeps the host awake while a goal runs" "run-goals.sh" "$(cat "$AWAKE_OUT" 2>/dev/null)"
+    # -s as well as -i: a PreventSystemSleep assertion also holds a Mac that is
+    # already in dark wake (AUDIT-2026-11-08 F1). pmset lists it by the helper's pid.
+    cpid="$(cat "$AWAKE_OUT.cpid" 2>/dev/null)"
+    check "the assertion also prevents system sleep (dark wake)" yes \
+      "$(grep -qE "pid ${cpid:-none}\(caffeinate\).*PreventSystemSleep" "$AWAKE_OUT.pmset" 2>/dev/null && echo yes || echo no)"
     wpid="$(cat "$AWAKE_OUT.pid" 2>/dev/null)"
     gone=no
-    for _ in $(seq 40); do pgrep -f "^/usr/bin/caffeinate -i -w ${wpid:-none}\$" >/dev/null || { gone=yes; break; }; sleep 0.25; done
+    for _ in $(seq 40); do pgrep -f "^/usr/bin/caffeinate -i -s -w ${wpid:-none}\$" >/dev/null || { gone=yes; break; }; sleep 0.25; done
     check "the assertion ends with the walk" yes "$gone"
   else
     CW_KEEP_AWAKE=0 "$HOUSE/scripts/run-goals.sh" >/dev/null 2>&1 || true

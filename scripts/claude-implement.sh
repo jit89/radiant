@@ -30,6 +30,8 @@
 #                               deepseek-flash peak prices 0.30 / 0.006 / 1.20
 #   DEEPSEEK_ANTHROPIC_BASE_URL default https://api.deepseek.com/anthropic
 #   IMPLEMENTER_ALLOWED_DOMAINS comma list the sandbox may reach (default none)
+#   IMPLEMENTER_BASH_MAX_MS     the longest one Bash call may run (default 1800000,
+#                               30 min; Claude Code's own cap is 10 min)
 #   IMPLEMENTER_MAX_BUDGET_USD  passed as --max-budget-usd when set, Haiku only
 #   IMPLEMENTER_DRY_RUN=1       print the command, call nothing
 #   CW_OUT_DIR                  write raw output, .err and report there and
@@ -378,6 +380,10 @@ run_pass() {
   while IFS= read -r u; do unsets+=("$u"); done < <(env_unsets)
   make_pass_tmp
   envs+=("CLAUDE_CODE_TMPDIR=$PASS_TMP")
+  # One Bash call may run a whole proof: Claude Code's 10-minute cap made
+  # implementers background long proofs and poll them, or cut them into
+  # segments (prompt-audit AUDIT-2026-11-08, F4).
+  envs+=("BASH_MAX_TIMEOUT_MS=${IMPLEMENTER_BASH_MAX_MS:-1800000}")
   mkdir -p "$KEYS_DIR"
   case "$provider" in
     haiku)
@@ -730,8 +736,8 @@ You are the IMPLEMENTATION agent. You implement one goal; planning and review be
    tried, your hypotheses and the exact question for the Architect in the journal and the
    return handoff, leave the tests honestly red, and finish. A bounced blocker is a
    success; a gamed test is a failure.
-9. Run the goal's PROOF command, then the full test suite if one exists, and report the
-   real result.
+9. Run the goal's PROOF command and report its real result. The proof is the suite the host
+   runs after you: run more only when it leaves code you changed untested, and say what.
 10. RESUMABILITY: keep a return handoff at ${RETURN_DOC}. Write it early and update it
     after each commit with Status (done / in-progress / remaining + last commit sha).
 11. When finished, finalize ${RETURN_DOC} (changes, decisions, deviations, test summary,
@@ -787,7 +793,8 @@ Keep the return handoff at ${RETURN_DOC}. The rules from your first message stil
 Append a new START record for this pass and an END record when you stop, in the same
 heading shape, naming the goal id, each heading's time from date -u as you write it. Never
 change a record already written, yours included: correct one by appending a new record.
-Run the goal's proof before claiming DONE. \$TMPDIR is new for this pass: scratch files
+While fixing, run the oracle and the tests of the code you touched; run the goal's proof
+once, at the end, before claiming DONE. \$TMPDIR is new for this pass: scratch files
 from an earlier pass are gone.
 End your reply with one line IMPLEMENTER_STATUS: DONE, BLOCKED or DECLINED (after
 DECLINED add \" — \" and one line saying why), nothing after it."

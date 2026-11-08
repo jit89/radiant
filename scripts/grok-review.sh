@@ -40,7 +40,7 @@
 #                         (default 120) means the host slept; a call in flight
 #                         may never return, so the round is void: exit 125.
 #                         0 turns the check off.
-#                         The round runs under `caffeinate -i` where it exists.
+#                         The round runs under `caffeinate -i -s` where it exists.
 #   GROK_REVIEW_OUT       override the verdict file path
 #   CW_OUT_DIR            write raw, .err and verdict here and delete none of
 #                         them (the caller owns the folder); unset, they go to
@@ -192,7 +192,7 @@ run_grok() {
   # gap, and no idle sleep while it runs.
   local timeout="${GROK_REVIEW_TIMEOUT:-3600}"
   local run=(python3 "$HERE/lib/run-timeout.py" --wall "${GROK_REVIEW_SLEEP_GAP:-120}" "$timeout")
-  [[ -x /usr/bin/caffeinate ]] && run+=(/usr/bin/caffeinate -i)
+  [[ -x /usr/bin/caffeinate ]] && run+=(/usr/bin/caffeinate -i -s)
   set +e
   "${run[@]}" "${cmd[@]}" >"$raw" 2>"${raw}.err"
   rc=$?

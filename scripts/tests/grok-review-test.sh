@@ -326,7 +326,7 @@ check "timeout: stopped near the cap" yes "$([[ $((SECONDS - start)) -lt 15 ]] &
 check "timeout: grok's child is gone" yes "$(child_gone)"
 helper=yes
 for _ in $(seq 25); do
-  pgrep -f "^/usr/bin/caffeinate -i $TMP/grok" >/dev/null || { helper=gone; break; }
+  pgrep -f "^/usr/bin/caffeinate -i -s $TMP/grok" >/dev/null || { helper=gone; break; }
   sleep 0.2
 done
 check "timeout: caffeinate's helper is gone" gone "$helper"
@@ -347,7 +347,7 @@ if [[ -x /usr/bin/caffeinate ]]; then
   # path, so the helper is found by its arguments and the assertion by its pid.
   awake=no
   for _ in $(seq 50); do
-    helper="$(pgrep -f "^/usr/bin/caffeinate -i $TMP/grok" | head -n1 || true)"
+    helper="$(pgrep -f "^/usr/bin/caffeinate -i -s $TMP/grok" | head -n1 || true)"
     # To a file first: under pipefail, grep -q quitting early fails the pipe.
     pmset -g assertions >"$TMP/pmset" 2>/dev/null || true
     if [[ -n "$helper" ]] && grep -q "pid $helper(caffeinate).*PreventUserIdleSystemSleep" "$TMP/pmset"; then
